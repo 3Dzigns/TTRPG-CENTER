@@ -1,0 +1,75 @@
+{
+  "ok": false,
+  "issues": [
+    {
+      "id": "CR-001",
+      "severity": "high",
+      "title": "Potential Race Condition in Ingestion Command",
+      "details": "The ingestion command does not handle concurrent executions properly, which may lead to race conditions when multiple ingestion jobs are run simultaneously. Suggested fix: Implement locking mechanisms or use a job queue to manage concurrent executions. File: .claude/commands/ingest.md:3-5.",
+      "files": [
+        ".claude/commands/ingest.md:3-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-002",
+      "severity": "medium",
+      "title": "Missing Input Validation in Promote Artifacts Command",
+      "details": "The promote artifacts command lacks validation for the `--build` input, which could lead to attempts to promote non-existent builds. Suggested fix: Add checks to ensure the specified build exists before proceeding. File: .claude/commands/prompt.md:2-4.",
+      "files": [
+        ".claude/commands/prompt.md:2-4"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-003",
+      "severity": "medium",
+      "title": "Inadequate Error Handling in Ingestion Command",
+      "details": "The ingestion command does not provide sufficient error handling for failed uploads or processing errors, which could lead to silent failures. Suggested fix: Enhance error handling to log errors and provide actionable feedback. File: .claude/commands/ingest.md:4-5.",
+      "files": [
+        ".claude/commands/ingest.md:4-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-004",
+      "severity": "low",
+      "title": "Inconsistent Commit Message Format",
+      "details": "The commit message format is not consistently enforced across commands, which may lead to confusion. Suggested fix: Standardize commit message format across all commands as per the guidelines. File: .claude/commands/handle-user-request.md:4-5.",
+      "files": [
+        ".claude/commands/handle-user-request.md:4-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-005",
+      "severity": "medium",
+      "title": "Lack of Tests for New Logic in Ingestion Command",
+      "details": "The ingestion command lacks unit and integration tests for new logic introduced in the latest changes. Suggested fix: Implement unit tests for each phase of the ingestion process and integration tests for the overall pipeline. File: .claude/commands/ingest.md.",
+      "files": [
+        ".claude/commands/ingest.md"
+      ],
+      "requirements": [
+        "TEST-003"
+      ]
+    }
+  ],
+  "summary": "The overall code quality shows several areas for improvement, particularly in error handling, input validation, and testing coverage. Addressing these issues will enhance the safety, security, and performance of the ingestion pipeline and related commands.",
+  "go_no_go": "NO-GO",
+  "metadata": {
+    "sha": "08a388af46e00222cd9935717f3b6484ad410b6a",
+    "provider": "openai"
+  }
+}
