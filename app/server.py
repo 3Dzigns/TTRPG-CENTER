@@ -343,9 +343,20 @@ class Handler(BaseHTTPRequestHandler):
             </div>
             
             <div class="card">
-                <h3>Bug Bundles</h3>
-                <p>Review thumbs-down feedback</p>
-                <button onclick="window.location.href='/admin/bugs'">View Bugs</button>
+                <h3>Bug Management</h3>
+                <p>View and manage all bug reports with filtering</p>
+                <div id="bug-summary" style="margin: 10px 0; font-size: 12px; color: #aaa;">Loading...</div>
+                <div style="margin-top: 15px;">
+                    <label for="bug-filter" style="color: #00ffff; font-size: 12px;">Filter:</label>
+                    <select id="bug-filter" onchange="filterBugs()" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
+                        <option value="all">All Bugs</option>
+                        <option value="open">Open</option>
+                        <option value="closed">Closed</option>
+                    </select>
+                    <button onclick="refreshBugs()" style="background: #0088ff; margin-left: 10px;">Refresh</button>
+                    <button onclick="window.location.href='/admin/bugs'" style="margin-left: 5px;">Detailed View</button>
+                </div>
+                <div id="bug-preview" style="margin-top: 15px; max-height: 200px; overflow-y: auto; font-size: 11px;"></div>
             </div>
             
             <div class="card">
@@ -372,28 +383,52 @@ class Handler(BaseHTTPRequestHandler):
     
     <script>
         function refreshStatus() {{
+            const healthDiv = document.getElementById('health-status');
+            if (!healthDiv) {{
+                console.error('Could not find health-status element');
+                return;
+            }}
+            
+            healthDiv.innerHTML = '<div class="status-pending">Checking system status...</div>';
+            
             fetch('/status')
-                .then(r => r.json())
+                .then(r => {{
+                    if (!r.ok) {{
+                        throw new Error('Status request failed: ' + r.status);
+                    }}
+                    return r.json();
+                }})
                 .then(data => {{
-                    const healthDiv = document.getElementById('health-status');
+                    console.log('Status data received:', data);
                     let html = '';
                     
-                    Object.entries(data.health_checks).forEach(([service, status]) => {{
-                        const statusClass = status.includes('connected') ? 'status-ok' : 'status-error';
-                        html += '<div class="health-check"><span>' + service + ':</span><span class="' + statusClass + '">' + status + '</span></div>';
-                    }});
+                    if (data.health_checks) {{
+                        Object.entries(data.health_checks).forEach(([service, status]) => {{
+                            const statusClass = status.includes('connected') ? 'status-ok' : 'status-error';
+                            html += '<div class="health-check"><span>' + service + ':</span><span class="' + statusClass + '">' + status + '</span></div>';
+                        }});
+                    }} else {{
+                        html += '<div class="status-error">No health check data available</div>';
+                    }}
                     
                     if (data.ngrok_public_url) {{
                         html += '<div class="health-check"><span>Public URL:</span><span><a href="' + data.ngrok_public_url + '" target="_blank">' + data.ngrok_public_url + '</a></span></div>';
                     }}
                     
                     healthDiv.innerHTML = html;
+                }})
+                .catch(error => {{
+                    console.error('Status refresh error:', error);
+                    healthDiv.innerHTML = '<div class="status-error">Status update failed: ' + error.message + '<br><button onclick="refreshStatus()">Retry</button></div>';
                 }});
         }}
         
         // Auto-refresh status every 30 seconds
         refreshStatus();
         setInterval(refreshStatus, 30000);
+        
+        // Load bug management data on page load
+        refreshBugs();
         
         function runDevValidation() {{
             const resultsDiv = document.getElementById('validation-results');
@@ -444,11 +479,22 @@ class Handler(BaseHTTPRequestHandler):
         
         function showCollectionInfo() {{
             const infoDiv = document.getElementById('database-info');
+            if (!infoDiv) {{
+                console.error('Could not find database-info element');
+                return;
+            }}
+            
             infoDiv.innerHTML = '<div class="status-pending">Loading database information...</div>';
             
             fetch('/api/database/collections')
-                .then(r => r.json())
+                .then(r => {{
+                    if (!r.ok) {{
+                        throw new Error('Collections request failed: ' + r.status);
+                    }}
+                    return r.json();
+                }})
                 .then(data => {{
+                    console.log('Collections data received:', data);
                     let html = '<div class="database-info">';
                     
                     // Current environment info
@@ -724,6 +770,77 @@ class Handler(BaseHTTPRequestHandler):
                 }});
             }}
         }});
+        
+        // Bug management functions
+        let currentBugFilter = 'all';
+        
+        function refreshBugs() {{
+            const summaryDiv = document.getElementById('bug-summary');
+            const previewDiv = document.getElementById('bug-preview');
+            
+            if (!summaryDiv || !previewDiv) {{
+                console.error('Bug management elements not found');
+                return;
+            }}
+            
+            summaryDiv.innerHTML = 'Loading bug summary...';
+            previewDiv.innerHTML = 'Loading bugs...';
+            
+            fetch('/api/bugs?filter=' + currentBugFilter)
+                .then(r => {{
+                    if (!r.ok) {{
+                        throw new Error('Bugs request failed: ' + r.status);
+                    }}
+                    return r.json();
+                }})
+                .then(data => {{
+                    console.log('Bug data received:', data);
+                    
+                    // Update summary
+                    const open = data.summary?.open || 0;
+                    const closed = data.summary?.closed || 0;
+                    const total = data.total || 0;
+                    summaryDiv.innerHTML = `Total: ${{total}} | Open: ${{open}} | Closed: ${{closed}}`;
+                    
+                    // Update preview
+                    let previewHtml = '';
+                    if (data.bugs && data.bugs.length > 0) {{
+                        const displayCount = Math.min(data.bugs.length, 5);
+                        previewHtml = `<strong>Recent ${{currentBugFilter}} bugs (${{displayCount}} of ${{data.bugs.length}}):</strong><br>`;
+                        
+                        data.bugs.slice(0, displayCount).forEach(bug => {{
+                            const statusIcon = bug.status === 'closed' ? '✅' : '🔴';
+                            const severityColor = bug.severity === 'high' ? '#ff4444' : 
+                                                bug.severity === 'medium' ? '#ffaa00' : '#aaa';
+                            const title = bug.title || bug.bug_id || 'Unknown';
+                            
+                            previewHtml += `<div style="margin: 5px 0; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 3px;">`;
+                            previewHtml += `${{statusIcon}} <span style="color: ${{severityColor}};">${{title.substring(0, 40)}}...</span>`;
+                            previewHtml += `<span style="float: right; color: #666; font-size: 10px;">${{bug.category || 'general'}}</span>`;
+                            previewHtml += `</div>`;
+                        }});
+                        
+                        if (data.bugs.length > displayCount) {{
+                            previewHtml += `<div style="color: #666; font-size: 10px; margin-top: 5px; text-align: center;">... and ${{data.bugs.length - displayCount}} more</div>`;
+                        }}
+                    }} else {{
+                        previewHtml = `<span style="color: #aaa;">No ${{currentBugFilter}} bugs found</span>`;
+                    }}
+                    
+                    previewDiv.innerHTML = previewHtml;
+                }})
+                .catch(err => {{
+                    console.error('Bug refresh failed:', err);
+                    summaryDiv.innerHTML = '<span style="color: #ff4444;">Failed to load bug summary</span>';
+                    previewDiv.innerHTML = '<span style="color: #ff4444;">Failed to load bugs: ' + err.message + '</span>';
+                }});
+        }}
+        
+        function filterBugs() {{
+            const filter = document.getElementById('bug-filter').value;
+            currentBugFilter = filter;
+            refreshBugs();
+        }}
     </script>
     
     <div class="build-id-box" id="build-id-box">Loading...</div>
@@ -1739,31 +1856,88 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": str(e)})
     
     def _handle_bugs_request(self):
-        """Handle bug bundles requests"""
+        """Handle bug bundles requests with filtering support"""
         try:
+            # Parse query parameters
+            url_parts = urlparse(self.path)
+            query_params = parse_qs(url_parts.query)
+            filter_type = query_params.get('filter', ['all'])[0]
+            
             bugs_dir = Path("bugs")
             if not bugs_dir.exists():
-                self._send(200, {"bugs": [], "total": 0})
+                self._send(200, {
+                    "bugs": [], 
+                    "total": 0,
+                    "summary": {"open": 0, "closed": 0}
+                })
                 return
             
             bug_files = list(bugs_dir.glob("*.json"))
-            bugs = []
+            all_bugs = []
             
-            for bug_file in bug_files[-20:]:  # Last 20 bugs
+            # Load all bug files
+            for bug_file in bug_files:
                 try:
                     with open(bug_file, 'r', encoding='utf-8') as f:
                         bug_data = json.load(f)
-                        bugs.append({
+                        
+                        # Determine status - if not specified, assume "open"
+                        status = bug_data.get("status", "open")
+                        
+                        # Convert timestamp to seconds if it's a string
+                        created = bug_data.get("timestamp", 0)
+                        if isinstance(created, str):
+                            from datetime import datetime
+                            try:
+                                dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                                created = dt.timestamp()
+                            except:
+                                created = 0
+                        
+                        bug_info = {
                             "bug_id": bug_data.get("bug_id", ""),
-                            "query": bug_data.get("query", "")[:100] + "...",
-                            "user_feedback": bug_data.get("user_feedback", "")[:100] + "...",
-                            "created": bug_data.get("timestamp", 0),
-                            "severity": bug_data.get("severity", "unknown")
-                        })
-                except Exception:
+                            "title": bug_data.get("title", ""),
+                            "query": bug_data.get("query", bug_data.get("user_report", ""))[:100] + "..." if bug_data.get("query") or bug_data.get("user_report") else "",
+                            "user_feedback": bug_data.get("user_feedback", bug_data.get("description", ""))[:100] + "..." if bug_data.get("user_feedback") or bug_data.get("description") else "",
+                            "created": created,
+                            "severity": bug_data.get("severity", "unknown"),
+                            "category": bug_data.get("category", "general"),
+                            "status": status,
+                            "environment": bug_data.get("environment", "unknown")
+                        }
+                        all_bugs.append(bug_info)
+                except Exception as e:
+                    logger.warning(f"Failed to parse bug file {bug_file}: {e}")
                     continue
             
-            self._send(200, {"bugs": bugs, "total": len(bug_files)})
+            # Sort by creation time (newest first)
+            all_bugs.sort(key=lambda x: x["created"], reverse=True)
+            
+            # Filter bugs based on requested filter
+            if filter_type == "open":
+                filtered_bugs = [b for b in all_bugs if b["status"] == "open"]
+            elif filter_type == "closed":
+                filtered_bugs = [b for b in all_bugs if b["status"] == "closed"]
+            else:  # "all"
+                filtered_bugs = all_bugs
+            
+            # Calculate summary
+            open_count = sum(1 for b in all_bugs if b["status"] == "open")
+            closed_count = sum(1 for b in all_bugs if b["status"] == "closed")
+            
+            # Return limited results (last 20 for the detailed view)
+            result_bugs = filtered_bugs[:20] if filter_type != "all" else filtered_bugs[:20]
+            
+            self._send(200, {
+                "bugs": result_bugs,
+                "total": len(bug_files),
+                "filtered_total": len(filtered_bugs),
+                "summary": {
+                    "open": open_count,
+                    "closed": closed_count
+                },
+                "filter": filter_type
+            })
         except Exception as e:
             logger.error(f"Bugs request failed: {e}")
             self._send(500, {"error": str(e)})
@@ -2267,43 +2441,144 @@ class Handler(BaseHTTPRequestHandler):
         </div>
         
         <div class="content-card">
-            <h3>Negative Feedback Reports</h3>
-            <p>Bug reports and issues generated from negative user feedback.</p>
+            <h3>Bug Management System</h3>
+            <p>Comprehensive view of all bug reports with advanced filtering and status management.</p>
+            
+            <div style="margin: 15px 0; display: flex; gap: 10px; align-items: center;">
+                <label for="bug-filter-detailed" style="color: #00ffff; font-size: 14px;">Filter:</label>
+                <select id="bug-filter-detailed" onchange="filterBugsDetailed()" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; border-radius: 4px;">
+                    <option value="all">All Bugs</option>
+                    <option value="open">Open Only</option>
+                    <option value="closed">Closed Only</option>
+                </select>
+                <button onclick="refreshBugsDetailed()" style="background: #0088ff;">Refresh</button>
+                <button onclick="exportBugReport()" style="background: #ff6600;">Export Report</button>
+            </div>
+            
             <div id="bug-stats" style="margin: 10px 0; font-size: 14px;"></div>
             <div id="bug-list">Loading bug reports...</div>
         </div>
         
         <script>
-            function loadBugs() {{
-                fetch('/api/bugs')
+            let currentDetailedFilter = 'all';
+            
+            function loadBugsDetailed(filter = 'all') {{
+                const statsDiv = document.getElementById('bug-stats');
+                const listDiv = document.getElementById('bug-list');
+                
+                if (!statsDiv || !listDiv) {{
+                    console.error('Bug page elements not found');
+                    return;
+                }}
+                
+                statsDiv.innerHTML = 'Loading bug statistics...';
+                listDiv.innerHTML = 'Loading bug reports...';
+                
+                fetch('/api/bugs?filter=' + filter)
                     .then(response => response.json())
                     .then(data => {{
-                        document.getElementById('bug-stats').innerHTML = 
-                            `<strong>Total Bug Reports:</strong> ${{data.total}} | <strong>Showing:</strong> ${{data.bugs.length}} recent`;
+                        console.log('Detailed bug data received:', data);
                         
+                        // Update statistics
+                        const total = data.total || 0;
+                        const filtered = data.filtered_total || 0;
+                        const open = data.summary?.open || 0;
+                        const closed = data.summary?.closed || 0;
+                        
+                        statsDiv.innerHTML = `<strong>Total Reports:</strong> ${{total}} | <strong>Open:</strong> ${{open}} | <strong>Closed:</strong> ${{closed}} | <strong>Showing:</strong> ${{filtered}} ${{filter}} bugs`;
+                        
+                        // Update bug list
                         let content = '';
-                        data.bugs.forEach(bug => {{
-                            const date = new Date(bug.created * 1000).toLocaleString();
-                            const severityColor = bug.severity === 'high' ? '#ff4444' : bug.severity === 'medium' ? '#ffaa00' : '#aaa';
-                            
-                            content += `<div style="margin: 10px 0; padding: 10px; background: rgba(255,68,68,0.05); border-left: 3px solid #ff4444;">`;
-                            content += `<strong style="color: #ff4444;">${{bug.bug_id}}</strong>`;
-                            content += `<span style="float: right; color: ${{severityColor}}; font-size: 12px;">${{bug.severity}}</span>`;
-                            content += `<br><span style="color: #00ffff; font-size: 13px;">Query: ${{bug.query}}</span>`;
-                            content += `<br><span style="color: #ffaa00; font-size: 12px;">Feedback: ${{bug.user_feedback}}</span>`;
-                            content += `<br><span style="color: #aaa; font-size: 11px;">Created: ${{date}}</span>`;
-                            content += `</div>`;
-                        }});
+                        if (data.bugs && data.bugs.length > 0) {{
+                            data.bugs.forEach(bug => {{
+                                const date = new Date(bug.created * 1000).toLocaleString();
+                                const severityColor = bug.severity === 'high' ? '#ff4444' : 
+                                                    bug.severity === 'medium' ? '#ffaa00' : '#aaa';
+                                const statusColor = bug.status === 'closed' ? '#00ff00' : '#ff6600';
+                                const statusIcon = bug.status === 'closed' ? '✅' : '🔴';
+                                
+                                content += `<div style="margin: 15px 0; padding: 15px; background: rgba(0,0,0,0.3); border-left: 4px solid ${{severityColor}}; border-radius: 4px;">`;
+                                content += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">`;
+                                content += `<strong style="color: #ff6600; font-size: 14px;">${{bug.title || bug.bug_id}}</strong>`;
+                                content += `<div style="display: flex; gap: 10px; align-items: center;">`;
+                                content += `<span style="color: ${{statusColor}}; font-size: 12px;">${{statusIcon}} ${{bug.status.toUpperCase()}}</span>`;
+                                content += `<span style="color: ${{severityColor}}; font-size: 11px; text-transform: uppercase; font-weight: bold;">${{bug.severity}}</span>`;
+                                content += `</div></div>`;
+                                
+                                if (bug.query) {{
+                                    content += `<div style="margin: 8px 0;"><strong style="color: #00ffff; font-size: 12px;">Query:</strong> <span style="color: #aaa; font-size: 12px;">${{bug.query}}</span></div>`;
+                                }}
+                                if (bug.user_feedback) {{
+                                    content += `<div style="margin: 8px 0;"><strong style="color: #ffaa00; font-size: 12px;">Feedback:</strong> <span style="color: #aaa; font-size: 12px;">${{bug.user_feedback}}</span></div>`;
+                                }}
+                                
+                                content += `<div style="margin: 8px 0; display: flex; gap: 20px; font-size: 11px; color: #666;">`;
+                                content += `<span>📅 ${{date}}</span>`;
+                                content += `<span>🏷️ ${{bug.category}}</span>`;
+                                content += `<span>🖥️ ${{bug.environment}}</span>`;
+                                content += `</div>`;
+                                
+                                // Add action buttons
+                                content += `<div style="margin-top: 10px; display: flex; gap: 10px;">`;
+                                if (bug.status === 'open') {{
+                                    content += `<button onclick="closeBug('${{bug.bug_id}}')" style="background: #00ff00; color: #000; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Mark Closed</button>`;
+                                }} else {{
+                                    content += `<button onclick="reopenBug('${{bug.bug_id}}')" style="background: #ff6600; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Reopen</button>`;
+                                }}
+                                content += `<button onclick="viewBugDetails('${{bug.bug_id}}')" style="background: #0088ff; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">View Details</button>`;
+                                content += `</div></div>`;
+                            }});
+                        }} else {{
+                            content = `<p style="color: #aaa; text-align: center; padding: 20px;">No ${{filter}} bug reports found.</p>`;
+                        }}
                         
-                        document.getElementById('bug-list').innerHTML = content || '<p style="color: #aaa;">No bug reports found.</p>';
+                        listDiv.innerHTML = content;
                     }})
                     .catch(error => {{
-                        document.getElementById('bug-list').innerHTML = '<p style="color: #ff4444;">Error loading bugs: ' + error.message + '</p>';
+                        console.error('Bug loading failed:', error);
+                        statsDiv.innerHTML = '<span style="color: #ff4444;">Failed to load bug statistics</span>';
+                        listDiv.innerHTML = '<p style="color: #ff4444;">Error loading bug reports: ' + error.message + '</p>';
                     }});
             }}
             
+            function refreshBugsDetailed() {{
+                loadBugsDetailed(currentDetailedFilter);
+            }}
+            
+            function filterBugsDetailed() {{
+                const filter = document.getElementById('bug-filter-detailed').value;
+                currentDetailedFilter = filter;
+                loadBugsDetailed(filter);
+            }}
+            
+            function closeBug(bugId) {{
+                if (confirm('Mark this bug as closed?')) {{
+                    // This would update the bug status - for now just show confirmation
+                    alert('Bug ' + bugId + ' marked as closed (functionality to be implemented)');
+                    refreshBugsDetailed();
+                }}
+            }}
+            
+            function reopenBug(bugId) {{
+                if (confirm('Reopen this bug?')) {{
+                    // This would update the bug status - for now just show confirmation
+                    alert('Bug ' + bugId + ' reopened (functionality to be implemented)');
+                    refreshBugsDetailed();
+                }}
+            }}
+            
+            function viewBugDetails(bugId) {{
+                // This would show detailed bug information - for now just show bug ID
+                alert('Viewing details for ' + bugId + ' (detailed view to be implemented)');
+            }}
+            
+            function exportBugReport() {{
+                // This would export bug data - for now just show confirmation
+                alert('Bug report export functionality to be implemented');
+            }}
+            
             // Load bugs on page load
-            loadBugs();
+            loadBugsDetailed();
         </script>
     </div>
 </body>
