@@ -1,0 +1,99 @@
+{
+  "bug_id": "bugid_20250826-182610-system-status-loading",
+  "timestamp": "2025-08-26T18:26:10Z",
+  "environment": "test",
+  "build_id": "2025-08-25_20-29-13_build-2936",
+  "severity": "medium",
+  "category": "ui_responsiveness",
+  "status": "closed",
+  "title": "System Status stuck on loading",
+  "description": "The System Status section in the admin dashboard remains stuck on 'Loading...' indefinitely and does not display health check information.",
+  "user_report": "System Status stuck on loading",
+  "source": "user_report",
+  "technical_analysis": {
+    "root_cause_potential": [
+      "JavaScript error preventing status refresh completion",
+      "API endpoint /status not responding or returning invalid data",
+      "DOM element targeting issue after recent UI changes",
+      "Promise rejection not properly handled in refreshStatus() function",
+      "Network timeout or connectivity issue to backend"
+    ],
+    "affected_components": [
+      "System Status display section in admin dashboard",
+      "refreshStatus() JavaScript function",
+      "/status API endpoint",
+      "Health check display logic"
+    ],
+    "backend_status": "Unknown - needs investigation",
+    "evidence": {
+      "symptom": "Loading state persists indefinitely",
+      "ui_element": "health-status div shows 'Loading...'",
+      "auto_refresh": "30-second interval may be failing"
+    }
+  },
+  "reproduction_steps": [
+    "1. Navigate to http://localhost:8181/admin",
+    "2. Observe System Status section in admin dashboard",
+    "3. Note that it shows 'Loading...' and never updates",
+    "4. Wait for auto-refresh (30 seconds) - issue persists",
+    "5. Click 'Refresh Status' button to test manual refresh"
+  ],
+  "expected_behavior": "System Status should display health checks for astra_vector, astra_graph, openai with connected/error status indicators",
+  "actual_behavior": "System Status section remains stuck showing 'Loading...' text indefinitely",
+  "potential_causes": [
+    {
+      "cause": "JavaScript error in refreshStatus() function",
+      "likelihood": "High",
+      "investigation": "Check browser console for JavaScript errors and network requests"
+    },
+    {
+      "cause": "/status API endpoint failure or timeout",
+      "likelihood": "High", 
+      "investigation": "Test /status endpoint directly via browser or curl"
+    },
+    {
+      "cause": "DOM element targeting failure",
+      "likelihood": "Medium",
+      "investigation": "Verify 'health-status' element exists and is accessible"
+    },
+    {
+      "cause": "Promise rejection or async handling issue",
+      "likelihood": "Medium",
+      "investigation": "Review recent changes to refreshStatus() function"
+    }
+  ],
+  "debugging_steps": [
+    "1. Open browser developer tools and check console for errors",
+    "2. Monitor Network tab during status refresh attempts",
+    "3. Test /status endpoint directly: GET http://localhost:8181/status",
+    "4. Verify DOM element with id='health-status' exists",
+    "5. Add console.log debugging to refreshStatus() function",
+    "6. Check server logs for /status request processing"
+  ],
+  "immediate_fixes": [
+    {
+      "action": "Test /status API endpoint functionality",
+      "rationale": "Determine if backend is responding correctly"
+    },
+    {
+      "action": "Add error handling and console logging to refreshStatus()",
+      "rationale": "Identify where the JavaScript execution is failing"
+    },
+    {
+      "action": "Verify DOM element targeting is working correctly",
+      "rationale": "Ensure UI elements are accessible for updates"
+    },
+    {
+      "action": "Add user feedback for loading states and errors",
+      "rationale": "Provide better user experience during failures"
+    }
+  ],
+  "impact_assessment": {
+    "user_impact": "Medium - Admin dashboard appears broken, affects monitoring capabilities",
+    "functionality_impact": "Medium - System health monitoring not available to administrators", 
+    "urgency": "Medium - Affects admin usability and system monitoring"
+  },
+  "related_requirements": [
+    "ADM-003"
+  ]
+}

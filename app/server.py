@@ -286,6 +286,7 @@ class Handler(BaseHTTPRequestHandler):
         .health-check {{ display: flex; justify-content: space-between; margin: 10px 0; }}
         .status-ok {{ color: #00ff00; }}
         .status-error {{ color: #ff4444; }}
+        .status-pending {{ color: #ffaa00; }}
         button {{ 
             background: #00ffff; 
             color: #000; 
@@ -391,10 +392,21 @@ class Handler(BaseHTTPRequestHandler):
             
             healthDiv.innerHTML = '<div class="status-pending">Checking system status...</div>';
             
-            fetch('/status')
+            // Add timeout to fetch request
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            fetch('/status', {{ 
+                signal: controller.signal,
+                headers: {{
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache'
+                }}
+            }})
                 .then(r => {{
+                    clearTimeout(timeoutId);
                     if (!r.ok) {{
-                        throw new Error('Status request failed: ' + r.status);
+                        throw new Error('Status request failed: HTTP ' + r.status + ' ' + r.statusText);
                     }}
                     return r.json();
                 }})
@@ -402,24 +414,49 @@ class Handler(BaseHTTPRequestHandler):
                     console.log('Status data received:', data);
                     let html = '';
                     
-                    if (data.health_checks) {{
+                    if (data && data.health_checks) {{
                         Object.entries(data.health_checks).forEach(([service, status]) => {{
-                            const statusClass = status.includes('connected') ? 'status-ok' : 'status-error';
-                            html += '<div class="health-check"><span>' + service + ':</span><span class="' + statusClass + '">' + status + '</span></div>';
+                            const statusClass = status && status.includes('connected') ? 'status-ok' : 'status-error';
+                            html += '<div class="health-check"><span>' + service + ':</span><span class="' + statusClass + '">' + (status || 'unknown') + '</span></div>';
                         }});
+                        
+                        // Add build info if available
+                        if (data.build_id) {{
+                            html += '<div class="health-check"><span>Build:</span><span style="color: #aaa; font-size: 11px;">' + data.build_id + '</span></div>';
+                        }}
                     }} else {{
-                        html += '<div class="status-error">No health check data available</div>';
+                        console.warn('Invalid status data structure:', data);
+                        html += '<div class="status-error">Invalid status data received</div>';
                     }}
                     
-                    if (data.ngrok_public_url) {{
+                    if (data && data.ngrok_public_url) {{
                         html += '<div class="health-check"><span>Public URL:</span><span><a href="' + data.ngrok_public_url + '" target="_blank">' + data.ngrok_public_url + '</a></span></div>';
                     }}
                     
-                    healthDiv.innerHTML = html;
+                    if (html) {{
+                        healthDiv.innerHTML = html;
+                        console.log('Status display updated successfully');
+                    }} else {{
+                        healthDiv.innerHTML = '<div class="status-error">No valid status data to display</div>';
+                        console.warn('No valid status HTML generated');
+                    }}
                 }})
                 .catch(error => {{
+                    clearTimeout(timeoutId);
                     console.error('Status refresh error:', error);
-                    healthDiv.innerHTML = '<div class="status-error">Status update failed: ' + error.message + '<br><button onclick="refreshStatus()">Retry</button></div>';
+                    
+                    let errorMessage = 'Status update failed: ';
+                    if (error.name === 'AbortError') {{
+                        errorMessage += 'Request timed out (10s)';
+                    }} else if (error.message.includes('Failed to fetch')) {{
+                        errorMessage += 'Network connection failed';
+                    }} else if (error.message.includes('HTTP')) {{
+                        errorMessage += error.message;
+                    }} else {{
+                        errorMessage += error.message || 'Unknown error';
+                    }}
+                    
+                    healthDiv.innerHTML = '<div class="status-error">' + errorMessage + '<br><button onclick="refreshStatus()" style="margin-top: 5px; font-size: 12px; padding: 5px 10px;">Retry</button></div>';
                 }});
         }}
         
