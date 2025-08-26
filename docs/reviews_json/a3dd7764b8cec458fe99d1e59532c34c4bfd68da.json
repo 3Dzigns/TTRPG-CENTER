@@ -1,0 +1,75 @@
+{
+  "ok": false,
+  "issues": [
+    {
+      "id": "CR-001",
+      "severity": "high",
+      "title": "Potential Race Condition in Ingestion Command",
+      "details": "The ingestion command does not handle concurrent executions properly, which may lead to race conditions when multiple ingestion jobs are run simultaneously. Suggested fix: Implement locking mechanisms or use a job queue to manage concurrent executions. File: .claude/commands/ingest.md:3-5.",
+      "files": [
+        ".claude/commands/ingest.md:3-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-002",
+      "severity": "medium",
+      "title": "Missing Input Validation in Promote Command",
+      "details": "The promote command lacks validation for the `--build` input, which could lead to attempts to promote non-existent builds. Suggested fix: Add checks to ensure the specified build exists before proceeding. File: .claude/commands/prompt.md:2-3.",
+      "files": [
+        ".claude/commands/prompt.md:2-3"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-003",
+      "severity": "medium",
+      "title": "Inconsistent Error Handling in Ingestion Command",
+      "details": "The ingestion command emits actionable messages on errors but does not stop processing other inputs, which may lead to incomplete or corrupted data. Suggested fix: Ensure that critical errors halt the process. File: .claude/commands/ingest.md:4.",
+      "files": [
+        ".claude/commands/ingest.md:4"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-004",
+      "severity": "low",
+      "title": "Lack of Unit Tests for New Logic",
+      "details": "The commands lack unit tests for new logic introduced in the ingestion and promote commands. Suggested fix: Implement unit tests to cover edge cases and ensure functionality. File: .claude/commands/ingest.md, .claude/commands/prompt.md.",
+      "files": [
+        ".claude/commands/ingest.md",
+        ".claude/commands/prompt.md"
+      ],
+      "requirements": [
+        "TEST-003"
+      ]
+    },
+    {
+      "id": "CR-005",
+      "severity": "medium",
+      "title": "Inadequate Documentation for Commands",
+      "details": "Some commands lack detailed documentation on expected inputs and outputs, which may lead to misuse. Suggested fix: Enhance documentation to include examples and detailed descriptions. Files: .claude/commands/*.md.",
+      "files": [
+        ".claude/commands/*.md"
+      ],
+      "requirements": [
+        "ADM-002"
+      ]
+    }
+  ],
+  "summary": "The overall code quality shows several areas for improvement, particularly in handling concurrency, input validation, error management, and testing. Documentation also needs enhancement to align with project standards.",
+  "go_no_go": "NO-GO",
+  "metadata": {
+    "sha": "a3dd7764b8cec458fe99d1e59532c34c4bfd68da",
+    "provider": "openai"
+  }
+}
