@@ -1,0 +1,61 @@
+{
+  "ok": false,
+  "issues": [
+    {
+      "id": "CR-001",
+      "severity": "high",
+      "title": "Potential Race Condition in Ingestion Command",
+      "details": "The ingestion command does not handle concurrent executions properly, which may lead to race conditions when multiple ingestion jobs are run simultaneously. Suggested fix: Implement locking mechanisms or use a job queue to manage concurrent executions. File: .claude/commands/ingest.md:3-5.",
+      "files": [
+        ".claude/commands/ingest.md:3-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-002",
+      "severity": "medium",
+      "title": "Lack of Input Validation in Promote Artifacts Command",
+      "details": "The promote artifacts command does not validate the input parameters thoroughly, which could lead to unexpected behavior or security issues. Suggested fix: Add validation checks for `--from`, `--to`, and `--build` parameters. File: .claude/commands/prompt.md:1-5.",
+      "files": [
+        ".claude/commands/prompt.md:1-5"
+      ],
+      "requirements": [
+        "ARCH-001",
+        "RAG-001"
+      ]
+    },
+    {
+      "id": "CR-003",
+      "severity": "medium",
+      "title": "Missing Tests for New Logic in Ingestion Command",
+      "details": "The ingestion command lacks unit and integration tests for the new logic introduced in the latest commit. Suggested fix: Implement unit tests for each phase of the ingestion process and integration tests for the overall pipeline. File: .claude/commands/ingest.md:1-5.",
+      "files": [
+        ".claude/commands/ingest.md:1-5"
+      ],
+      "requirements": [
+        "TEST-003"
+      ]
+    },
+    {
+      "id": "CR-004",
+      "severity": "low",
+      "title": "Inconsistent Code Style",
+      "details": "The code style across various command files is inconsistent, which affects readability. Suggested fix: Adopt a consistent style guide and run a linter to enforce it. Files: Multiple files.",
+      "files": [
+        ".claude/commands/*.md"
+      ],
+      "requirements": [
+        "ADM-002"
+      ]
+    }
+  ],
+  "summary": "The overall code quality shows several areas for improvement, particularly in handling concurrency, input validation, and testing. There are also style inconsistencies that need to be addressed to enhance readability and maintainability.",
+  "go_no_go": "NO-GO",
+  "metadata": {
+    "sha": "ada07edc8b94e6c65d4a5f29f608e99c20276038",
+    "provider": "openai"
+  }
+}
