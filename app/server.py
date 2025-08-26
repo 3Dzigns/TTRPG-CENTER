@@ -364,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                 <h3>Database Management</h3>
                 <p>Environment-specific AstraDB collection management</p>
                 <button onclick="showCollectionInfo()">Show Collections</button>
-                {f'<button onclick="cleanupEnvironmentData()" style="background: #ff4444; margin-left: 10px;">Cleanup {cfg["runtime"]["env"].upper()} Data</button>' if cfg['runtime']['env'] != 'prod' else ''}
+                {f'<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="cleanupSelectedCollection()" style="background: #ff4444; margin-left: 10px;">Cleanup Selected</button><button onclick="cleanupEnvironmentData()" style="background: #ff6666; margin-left: 5px;">Cleanup All {cfg["runtime"]["env"].upper()}</button></div>' if cfg['runtime']['env'] != 'prod' else ''}
                 <div id="database-info" style="margin-top: 10px;"></div>
             </div>
         </div>
@@ -517,6 +517,84 @@ class Handler(BaseHTTPRequestHandler):
                 infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + err.message + '</div>';
             }});
         }}
+        
+        // Populate collection selector dropdown
+        function populateCollectionSelector() {{
+            const selector = document.getElementById('cleanup-collection-select');
+            if (!selector) return;
+            
+            fetch('/api/database/collections')
+                .then(r => r.json())
+                .then(data => {{
+                    selector.innerHTML = '<option value="">-- Select Collection --</option>';
+                    if (data.all_collections && data.all_collections.length > 0) {{
+                        data.all_collections.forEach(collection => {{
+                            const option = document.createElement('option');
+                            option.value = collection;
+                            option.textContent = collection;
+                            if (collection === data.current_environment?.collection_name) {{
+                                option.textContent += ' (current env)';
+                            }}
+                            selector.appendChild(option);
+                        }});
+                    }}
+                }})
+                .catch(err => {{
+                    selector.innerHTML = '<option value="">Error loading collections</option>';
+                }});
+        }}
+        
+        // Cleanup selected collection
+        function cleanupSelectedCollection() {{
+            const selector = document.getElementById('cleanup-collection-select');
+            const selectedCollection = selector?.value;
+            
+            if (!selectedCollection) {{
+                alert('Please select a collection to cleanup');
+                return;
+            }}
+            
+            // Get collection info first
+            fetch('/api/database/collections')
+                .then(r => r.json())
+                .then(data => {{
+                    const collectionInfo = data.all_collections ? 'Found' : 'Unknown';
+                    const confirmMessage = `Are you sure you want to cleanup collection: ${{selectedCollection}}?\\n\\nThis will delete ALL documents in this collection.\\n\\nThis action cannot be undone.`;
+                    
+                    if (confirm(confirmMessage)) {{
+                        const infoDiv = document.getElementById('database-info');
+                        infoDiv.innerHTML = '<div class="status-pending">Cleaning up collection: ' + selectedCollection + '...</div>';
+                        
+                        fetch('/api/database/cleanup-collection', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{ 
+                                confirm: true,
+                                collection: selectedCollection
+                            }})
+                        }})
+                        .then(r => r.json())
+                        .then(data => {{
+                            if (data.cleanup_result) {{
+                                const result = data.cleanup_result;
+                                infoDiv.innerHTML = '<div class="status-ok">Collection cleanup completed: ' + result.deleted + ' documents deleted from ' + selectedCollection + '</div>';
+                                // Refresh collection info
+                                setTimeout(showCollectionInfo, 2000);
+                            }} else {{
+                                infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + (data.error || 'Unknown error') + '</div>';
+                            }}
+                        }})
+                        .catch(err => {{
+                            infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + err.message + '</div>';
+                        }});
+                    }}
+                }});
+        }}
+        
+        // Auto-populate collection selector on page load
+        setTimeout(() => {{
+            populateCollectionSelector();
+        }}, 1000);
     </script>
     
     <div class="build-id-box" id="build-id-box">Loading...</div>
@@ -573,8 +651,6 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_requirements_stats()
         elif path == "/api/database/collections":
             self._handle_database_collections()
-        elif path == "/api/database/cleanup":
-            self._handle_database_cleanup()
         elif path == "/user":
             # Basic user UI
             user_html = f"""
@@ -1015,6 +1091,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_tests_request()
         elif path == "/api/bugs":
             self._handle_bugs_request()
+        elif path == "/api/database/cleanup":
+            self._handle_database_cleanup()
+        elif path == "/api/database/cleanup-collection":
+            self._handle_database_cleanup_collection()
         else:
             self._send(404, {"error": "endpoint not found"})
     
@@ -2379,6 +2459,71 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Database cleanup error: {str(e)}")
             self._send(500, {"error": f"Cleanup failed: {str(e)}"})
+    
+    def _handle_database_cleanup_collection(self):
+        """Handle selective collection cleanup requests"""
+        if self.command != 'POST':
+            self._send(405, {"error": "POST method required"})
+            return
+            
+        try:
+            # Parse request body for confirmation and collection name
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                import json
+                data = json.loads(post_data)
+                confirm = data.get('confirm', False)
+                collection_name = data.get('collection', '')
+            else:
+                confirm = False
+                collection_name = ''
+            
+            if not confirm:
+                self._send(400, {"error": "Cleanup requires explicit confirmation"})
+                return
+                
+            if not collection_name:
+                self._send(400, {"error": "Collection name is required"})
+                return
+            
+            # Get current environment - still enforce env restrictions
+            env = os.getenv("APP_ENV", "dev").lower()
+            if env == "prod":
+                self._send(403, {"error": "Production cleanup not allowed via API"})
+                return
+            
+            # Perform selective collection cleanup
+            try:
+                # Get database reference
+                database = vector_store.database
+                target_collection = database.get_collection(collection_name)
+                
+                # Delete all documents in the specified collection
+                result = target_collection.delete_many({})
+                deleted_count = result.deleted_count
+                
+                logger.info(f"Cleaned up {deleted_count} documents from collection {collection_name}")
+                
+                cleanup_result = {
+                    "deleted": deleted_count,
+                    "collection": collection_name,
+                    "environment": env
+                }
+                
+                self._send(200, {
+                    "cleanup_result": cleanup_result,
+                    "environment": env,
+                    "timestamp": time.time()
+                })
+                
+            except Exception as e:
+                logger.error(f"Collection cleanup error for {collection_name}: {str(e)}")
+                self._send(500, {"error": f"Collection cleanup failed: {str(e)}"})
+            
+        except Exception as e:
+            logger.error(f"Database collection cleanup error: {str(e)}")
+            self._send(500, {"error": f"Collection cleanup failed: {str(e)}"})
 
 def main():
     port = cfg["runtime"]["port"]

@@ -1,0 +1,86 @@
+{
+  "bug_id": "bugid_20250826-124715-cleanup-404",
+  "timestamp": "2025-08-26T12:47:15Z",
+  "environment": "test",
+  "build_id": "2025-08-25_20-29-13_build-2936",
+  "severity": "high",
+  "category": "api_routing_error",
+  "title": "Cleanup TEST Data button returns 404 error",
+  "description": "The 'Cleanup TEST Data' button in the admin interface fails with a 404 error when clicked. Additionally, the cleanup functionality lacks collection/chunk selection granularity.",
+  "user_report": "Admin clicking the Cleanup TEST Data returns an error box. Also it does not give a method to select the collection and/or chunk to focus the clean up.",
+  "technical_analysis": {
+    "root_cause": "HTTP method mismatch - endpoint defined in do_GET but called via POST",
+    "affected_components": [
+      "Admin UI cleanup button",
+      "API routing in server.py",
+      "Database cleanup functionality"
+    ],
+    "error_details": {
+      "endpoint": "/api/database/cleanup",
+      "expected_method": "POST",
+      "actual_method_handler": "GET",
+      "http_status": 404,
+      "log_evidence": [
+        "127.0.0.1 - - [26/Aug/2025 12:45:11] \"POST /api/database/cleanup HTTP/1.1\" 404 -",
+        "127.0.0.1 - - [26/Aug/2025 12:47:02] \"POST /api/database/cleanup HTTP/1.1\" 404 -"
+      ]
+    }
+  },
+  "reproduction_steps": [
+    "1. Navigate to http://localhost:8181/admin",
+    "2. Scroll to 'Database Management' section",
+    "3. Click 'Cleanup TEST Data' button",
+    "4. Observe error box appears instead of cleanup confirmation"
+  ],
+  "expected_behavior": "Cleanup should execute successfully and display confirmation with cleanup statistics",
+  "actual_behavior": "Error box appears, no cleanup occurs, 404 logged in server",
+  "code_locations": {
+    "frontend_call": {
+      "file": "app/server.py",
+      "line": 493,
+      "code": "fetch('/api/database/cleanup', { method: 'POST', ..."
+    },
+    "backend_route": {
+      "file": "app/server.py", 
+      "line": 576,
+      "code": "elif path == \"/api/database/cleanup\": # in do_GET method"
+    },
+    "missing_route": {
+      "file": "app/server.py",
+      "line": 1018,
+      "note": "POST routes end with 'else: 404' - cleanup route missing"
+    }
+  },
+  "immediate_fix": {
+    "action": "Move /api/database/cleanup route from do_GET to do_POST method",
+    "rationale": "Frontend expects POST method for data-modifying operations",
+    "files_to_modify": ["app/server.py"]
+  },
+  "enhancement_request": {
+    "title": "Add collection/chunk selection granularity to cleanup",
+    "description": "Current cleanup is all-or-nothing for entire environment. Need UI to select specific collections or chunk ranges.",
+    "suggested_features": [
+      "Collection dropdown selector",
+      "Chunk count preview before cleanup", 
+      "Selective cleanup by source_id or date range",
+      "Confirmation dialog with impact summary"
+    ]
+  },
+  "testing_verification": {
+    "test_cases": [
+      "POST request to /api/database/cleanup should return 200",
+      "Cleanup should work in test/dev environments",
+      "Production cleanup should remain blocked",
+      "UI should show success message after cleanup"
+    ]
+  },
+  "impact_assessment": {
+    "user_impact": "High - critical admin functionality is broken",
+    "data_risk": "Medium - cleanup is currently non-functional (safer but blocks testing)",
+    "development_blocker": "Yes - prevents database maintenance during testing"
+  },
+  "related_requirements": [
+    "ADM-004: Admin UI must provide database management tools",
+    "ENV-002: Environment isolation must be maintained during cleanup"
+  ]
+}
