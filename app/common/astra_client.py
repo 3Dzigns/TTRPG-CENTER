@@ -29,15 +29,17 @@ class AstraVectorStore:
             # Get or create environment-specific collection
             env = os.getenv("APP_ENV", "dev").lower()
             collection_name = f"ttrpg_chunks_{env}"
-            try:
+            
+            # First, check if collection exists in database
+            existing_collections = self.database.list_collection_names()
+            
+            if collection_name in existing_collections:
                 self.collection = self.database.get_collection(collection_name)
-            except Exception:
-                # Create collection if it doesn't exist
-                self.collection = self.database.create_collection(
-                    collection_name,
-                    dimension=1536,  # OpenAI embedding dimension
-                    metric="cosine"
-                )
+                logger.info(f"Found existing collection: {collection_name}")
+            else:
+                # Create collection if it doesn't exist  
+                self.collection = self.database.create_collection(collection_name)
+                logger.info(f"Created new collection: {collection_name}")
             
             logger.info(f"AstraDB vector store initialized successfully (collection: {collection_name})")
             

@@ -296,6 +296,18 @@ class Handler(BaseHTTPRequestHandler):
             margin: 5px;
         }}
         button:hover {{ background: #44ffff; }}
+        .build-id-box {{
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00ffff;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 1000;
+        }}
     </style>
 </head>
 <body>
@@ -364,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
                 .then(r => r.json())
                 .then(data => {{
                     const healthDiv = document.getElementById('health-status');
-                    let html = '<div class="health-check"><span>Build ID:</span><span>' + data.build_id + '</span></div>';
+                    let html = '';
                     
                     Object.entries(data.health_checks).forEach(([service, status]) => {{
                         const statusClass = status.includes('connected') ? 'status-ok' : 'status-error';
@@ -505,6 +517,28 @@ class Handler(BaseHTTPRequestHandler):
                 infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + err.message + '</div>';
             }});
         }}
+    </script>
+    
+    <div class="build-id-box" id="build-id-box">Loading...</div>
+    
+    <script>
+        // Update build ID box
+        function updateBuildId() {{
+            fetch('/status')
+                .then(r => r.json())
+                .then(data => {{
+                    const buildIdBox = document.getElementById('build-id-box');
+                    buildIdBox.textContent = data.build_id;
+                }})
+                .catch(() => {{
+                    const buildIdBox = document.getElementById('build-id-box');
+                    buildIdBox.textContent = 'build unknown';
+                }});
+        }}
+        
+        // Update build ID on page load and with status refresh
+        updateBuildId();
+        setInterval(updateBuildId, 30000);
     </script>
 </body>
 </html>
