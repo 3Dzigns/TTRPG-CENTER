@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "issues": [],
+  "summary": "No issues found; the codebase is stable with no changes made.",
+  "go_no_go": "GO",
+  "metadata": {
+    "sha": "26f48ad952c25ddbe4e757d5fe073c1824e7d8e1",
+    "provider": "openai"
+  }
+}
