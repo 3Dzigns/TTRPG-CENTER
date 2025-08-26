@@ -1,0 +1,75 @@
+{
+  "ok": false,
+  "issues": [
+    {
+      "id": "CR-001",
+      "severity": "high",
+      "title": "Potential Race Condition in Ingestion Command",
+      "details": "The ingestion command does not handle concurrent executions properly, which may lead to race conditions when multiple ingestion jobs are run simultaneously. Suggested fix: Implement locking mechanisms or use a job queue to manage concurrent executions. File: .claude/commands/ingest.md:3-5.",
+      "files": [
+        ".claude/commands/ingest.md:3-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-002",
+      "severity": "medium",
+      "title": "Missing Input Validation in Promote Command",
+      "details": "The promote command lacks validation for the `--build` input, which could lead to attempts to promote non-existent builds. Suggested fix: Add checks to ensure the specified build exists before proceeding. File: .claude/commands/prompt.md:4-5.",
+      "files": [
+        ".claude/commands/prompt.md:4-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-003",
+      "severity": "medium",
+      "title": "Inconsistent Error Handling in Ingestion Command",
+      "details": "The ingestion command emits actionable messages on errors but does not stop processing other inputs, which may lead to incomplete or inconsistent states. Suggested fix: Ensure that critical errors halt the process or provide a clear rollback mechanism. File: .claude/commands/ingest.md:4.",
+      "files": [
+        ".claude/commands/ingest.md:4"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-004",
+      "severity": "low",
+      "title": "Lack of Unit Tests for New Logic",
+      "details": "The new logic in the ingestion and promote commands lacks unit tests, which is against the testing policy. Suggested fix: Implement unit tests for all new logic to ensure coverage. File: .claude/commands/ingest.md, .claude/commands/prompt.md.",
+      "files": [
+        ".claude/commands/ingest.md",
+        ".claude/commands/prompt.md"
+      ],
+      "requirements": [
+        "TEST-003"
+      ]
+    },
+    {
+      "id": "CR-005",
+      "severity": "low",
+      "title": "Documentation Lacks Clarity on Environment Isolation",
+      "details": "The documentation does not clearly state the importance of environment isolation during ingestion and promotion processes. Suggested fix: Update documentation to emphasize the need for environment isolation to prevent data bleed. File: .claude/commands/prompt.md.",
+      "files": [
+        ".claude/commands/prompt.md"
+      ],
+      "requirements": [
+        "ADM-002"
+      ]
+    }
+  ],
+  "summary": "The overall code quality shows several areas for improvement, particularly in handling race conditions, input validation, and error management. Additionally, there is a lack of unit tests for new logic and insufficient documentation regarding environment isolation.",
+  "go_no_go": "NO-GO",
+  "metadata": {
+    "sha": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
+    "provider": "openai"
+  }
+}
