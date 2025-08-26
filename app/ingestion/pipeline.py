@@ -1,10 +1,14 @@
 import logging
 import time
 import json
+import fcntl
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
 import uuid
+from contextlib import contextmanager
+from enum import Enum
 
 from .pdf_parser import PDFParser
 from .dictionary import get_dictionary
@@ -12,6 +16,56 @@ from app.common.embeddings import get_embedding_service
 from app.common.astra_client import get_vector_store
 
 logger = logging.getLogger(__name__)
+
+class ErrorSeverity(Enum):
+    """Classification of ingestion errors"""
+    CRITICAL = "critical"  # Halt all processing, rollback required
+    RECOVERABLE = "recoverable"  # Log and continue with other files
+    WARNING = "warning"  # Log but continue processing
+
+class IngestionError(Exception):
+    """Custom exception for ingestion pipeline errors"""
+    def __init__(self, message: str, severity: ErrorSeverity = ErrorSeverity.CRITICAL, rollback_needed: bool = True):
+        self.message = message
+        self.severity = severity
+        self.rollback_needed = rollback_needed
+        super().__init__(message)
+
+@contextmanager
+def ingestion_lock(env: str = "dev"):
+    """Context manager for ingestion concurrency control"""
+    lock_dir = Path("./locks")
+    lock_dir.mkdir(exist_ok=True)
+    lock_file = lock_dir / f"ingestion_{env}.lock"
+    
+    try:
+        with open(lock_file, 'w') as f:
+            if os.name == 'nt':  # Windows
+                # Use file locking on Windows
+                import msvcrt
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    logger.info(f"Acquired ingestion lock for environment: {env}")
+                    yield f
+                finally:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            else:  # Unix-like systems
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    logger.info(f"Acquired ingestion lock for environment: {env}")
+                    yield f
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except (IOError, OSError) as e:
+        logger.error(f"Could not acquire ingestion lock for {env}: {e}")
+        raise RuntimeError(f"Another ingestion process is running for environment {env}")
+    finally:
+        # Clean up lock file
+        try:
+            if lock_file.exists():
+                lock_file.unlink()
+        except:
+            pass  # Best effort cleanup
 
 class IngestionPipeline:
     """Three-pass ingestion pipeline for TTRPG materials"""
@@ -238,33 +292,128 @@ class IngestionPipeline:
     
     def bulk_ingest(self, 
                    file_list: List[Dict[str, Any]],
+                   env: str = "dev",
                    progress_callback: Optional[callable] = None) -> List[Dict[str, Any]]:
-        """Ingest multiple files with progress tracking"""
+        """Ingest multiple files with concurrency control and error handling"""
         results = []
         total_files = len(file_list)
+        successful_ingestions = []
         
-        for i, file_info in enumerate(file_list):
-            file_path = file_info["path"]
-            metadata = file_info["metadata"]
-            
-            logger.info(f"Processing file {i+1}/{total_files}: {Path(file_path).name}")
-            
-            # Create per-file progress callback
-            def file_progress_callback(progress_data):
-                progress_data["file_index"] = i
-                progress_data["total_files"] = total_files
-                progress_data["overall_progress"] = ((i + progress_data["progress"]/100.0) / total_files) * 100
-                if progress_callback:
-                    progress_callback(progress_data)
-            
-            # Ingest file
-            result = self.ingest_file(file_path, metadata, file_progress_callback)
-            results.append(result)
-            
-            # Brief pause between files
-            time.sleep(0.1)
+        try:
+            # Acquire ingestion lock for the environment
+            with ingestion_lock(env):
+                logger.info(f"Starting bulk ingestion of {total_files} files for environment: {env}")
+                
+                for i, file_info in enumerate(file_list):
+                    file_path = file_info["path"]
+                    metadata = file_info["metadata"]
+                    
+                    logger.info(f"Processing file {i+1}/{total_files}: {Path(file_path).name}")
+                    
+                    # Create per-file progress callback
+                    def file_progress_callback(progress_data):
+                        progress_data["file_index"] = i
+                        progress_data["total_files"] = total_files
+                        progress_data["overall_progress"] = ((i + progress_data["progress"]/100.0) / total_files) * 100
+                        if progress_callback:
+                            progress_callback(progress_data)
+                    
+                    try:
+                        # Ingest file
+                        result = self.ingest_file(file_path, metadata, file_progress_callback)
+                        results.append(result)
+                        
+                        # Track successful ingestions for potential rollback
+                        if result.get("status") == "completed":
+                            successful_ingestions.append(result.get("source_id"))
+                        elif result.get("status") == "failed":
+                            # Check if this is a critical error that should halt processing
+                            error_msg = result.get("error", "Unknown error")
+                            if "critical" in error_msg.lower() or "database" in error_msg.lower():
+                                raise IngestionError(
+                                    f"Critical error in file {file_path}: {error_msg}",
+                                    ErrorSeverity.CRITICAL,
+                                    rollback_needed=True
+                                )
+                            else:
+                                # Log recoverable error and continue
+                                logger.warning(f"Recoverable error in file {file_path}: {error_msg}")
+                        
+                        # Brief pause between files
+                        time.sleep(0.1)
+                        
+                    except IngestionError as e:
+                        if e.severity == ErrorSeverity.CRITICAL:
+                            logger.error(f"Critical ingestion error: {e.message}")
+                            if e.rollback_needed and successful_ingestions:
+                                logger.info(f"Rolling back {len(successful_ingestions)} successful ingestions")
+                                self._rollback_ingestions(successful_ingestions)
+                            # Add error result and halt processing
+                            results.append({
+                                "status": "failed",
+                                "error": e.message,
+                                "severity": e.severity.value,
+                                "file_path": file_path
+                            })
+                            break
+                        else:
+                            # Log recoverable error and continue
+                            logger.warning(f"Recoverable ingestion error: {e.message}")
+                            results.append({
+                                "status": "failed",
+                                "error": e.message,
+                                "severity": e.severity.value,
+                                "file_path": file_path
+                            })
+                    
+                    except Exception as e:
+                        # Unexpected error - treat as recoverable by default
+                        logger.error(f"Unexpected error processing {file_path}: {e}")
+                        results.append({
+                            "status": "failed",
+                            "error": str(e),
+                            "severity": ErrorSeverity.RECOVERABLE.value,
+                            "file_path": file_path
+                        })
+                
+                logger.info(f"Bulk ingestion completed. Processed: {len(results)}, Successful: {len(successful_ingestions)}")
+                return results
+                
+        except RuntimeError as e:
+            # Lock acquisition failed
+            logger.error(f"Bulk ingestion failed: {e}")
+            return [{
+                "status": "failed",
+                "error": str(e),
+                "severity": ErrorSeverity.CRITICAL.value
+            }]
+    
+    def _rollback_ingestions(self, source_ids: List[str]) -> Dict[str, Any]:
+        """Rollback multiple ingested sources for error recovery"""
+        rollback_results = []
         
-        return results
+        for source_id in source_ids:
+            try:
+                result = self.remove_source(source_id)
+                rollback_results.append(result)
+                if result.get("status") != "removed":
+                    logger.warning(f"Failed to rollback source {source_id}: {result.get('error')}")
+            except Exception as e:
+                logger.error(f"Error during rollback of source {source_id}: {e}")
+                rollback_results.append({
+                    "source_id": source_id,
+                    "status": "rollback_failed",
+                    "error": str(e)
+                })
+        
+        successful_rollbacks = sum(1 for r in rollback_results if r.get("status") == "removed")
+        logger.info(f"Rollback completed: {successful_rollbacks}/{len(source_ids)} sources removed")
+        
+        return {
+            "rollback_attempted": len(source_ids),
+            "rollback_successful": successful_rollbacks,
+            "results": rollback_results
+        }
     
     def remove_source(self, source_id: str) -> Dict[str, Any]:
         """Remove all chunks and references for a source"""

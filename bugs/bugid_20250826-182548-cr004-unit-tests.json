@@ -1,0 +1,57 @@
+{
+  "bug_id": "bugid_20250826-182548-cr004-unit-tests",
+  "timestamp": "2025-08-26T18:25:48Z",
+  "environment": "dev",
+  "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
+  "severity": "low",
+  "category": "testing",
+  "status": "closed",
+  "title": "Lack of Unit Tests for New Logic",
+  "description": "The new logic in the ingestion and promote commands lacks unit tests, which is against the testing policy.",
+  "review_id": "CR-004",
+  "source": "code_review",
+  "technical_analysis": {
+    "root_cause_potential": [
+      "New command logic implemented without corresponding test coverage",
+      "Testing policy not followed during development",
+      "Missing test cases for critical command functionality",
+      "No automated testing for command validation logic"
+    ],
+    "affected_components": [
+      ".claude/commands/ingest.md",
+      ".claude/commands/prompt.md",
+      "Command testing infrastructure",
+      "Automated test suite"
+    ],
+    "requirements_impact": ["TEST-003"],
+    "suggested_solution": "Implement unit tests for all new logic to ensure coverage"
+  },
+  "reproduction_steps": [
+    "1. Review current test coverage for ingestion command",
+    "2. Review current test coverage for promote command", 
+    "3. Identify gaps in test coverage for new functionality",
+    "4. Run test suite and verify coverage reports"
+  ],
+  "expected_behavior": "All new command logic should have comprehensive unit test coverage per testing policy",
+  "actual_behavior": "New ingestion and promotion command logic lacks unit tests",
+  "immediate_fixes": [
+    {
+      "action": "Create unit tests for ingestion command logic",
+      "rationale": "Ensure ingestion functionality is properly tested"
+    },
+    {
+      "action": "Create unit tests for promote command logic", 
+      "rationale": "Ensure promotion functionality is properly tested"
+    },
+    {
+      "action": "Add tests to CI/CD pipeline for command validation",
+      "rationale": "Prevent future deployments without proper test coverage"
+    }
+  ],
+  "impact_assessment": {
+    "user_impact": "Low - No direct user impact, but affects code quality",
+    "functionality_impact": "Low - Affects maintainability and reliability",
+    "urgency": "Low - Should be addressed in next development cycle"
+  },
+  "related_requirements": ["TEST-003"]
+}
