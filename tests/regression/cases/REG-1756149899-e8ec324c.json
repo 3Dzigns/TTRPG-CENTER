@@ -1,0 +1,29 @@
+{
+  "case_id": "REG-1756149899-e8ec324c",
+  "query": "Help me create a character in Pathfinder 2E",
+  "context": {
+    "system": "Generic",
+    "memory_mode": "session-only",
+    "user_session": "unknown"
+  },
+  "model": "openai:gpt-4o-mini",
+  "parameters": {
+    "temperature": 0.3
+  },
+  "expected": {
+    "answer_kind": "informational"
+  },
+  "baseline_response": {
+    "text": "workflow started successfully",
+    "sources": [],
+    "query_type": "workflow"
+  },
+  "origin": {
+    "env": "test",
+    "user": "anonymous",
+    "timestamp": 1756149899.1085324,
+    "source": "thumbs_up_feedback"
+  },
+  "status": "active",
+  "execution_trace": []
+}

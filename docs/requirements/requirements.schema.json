@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TTRPG Center Requirements",
+  "type": "object",
+  "required": ["id", "version", "created_at", "sections"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for this requirements document"
+    },
+    "version": {
+      "type": "string",
+      "description": "Version string (e.g., '1.0', '2.1')"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this document was created"
+    },
+    "supersedes": {
+      "type": "string",
+      "description": "ID of previous requirements document that this replaces"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author or team responsible for this document"
+    },
+    "sections": {
+      "type": "array",
+      "description": "Main requirements sections",
+      "items": {
+        "type": "object",
+        "required": ["section_id", "title", "requirements"],
+        "properties": {
+          "section_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["req_id", "description", "priority"],
+              "properties": {
+                "req_id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": ["critical", "high", "medium", "low"]
+                },
+                "acceptance_criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "superseded_by": {
+                  "type": "string",
+                  "description": "Feature request ID that replaces this requirement"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["active", "superseded", "completed"],
+                  "default": "active"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

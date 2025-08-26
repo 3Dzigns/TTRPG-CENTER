@@ -1,0 +1,81 @@
+{
+  "workflow_id": "level_up_pathfinder_2e",
+  "name": "Level Advancement - Pathfinder 2E",
+  "description": "Level up an existing character in Pathfinder 2E",
+  "system": "Pathfinder 2E",
+  "edition": "",
+  "start_node": "level_check",
+  "nodes": {
+    "level_check": {
+      "node_id": "level_check",
+      "node_type": "input",
+      "title": "Current Level Check",
+      "prompt": "What is your character's current level? I'll help you advance to the next level.",
+      "required_inputs": [],
+      "expected_outputs": [
+        "current_level",
+        "target_level"
+      ],
+      "validation_rules": {
+        "current_level": {
+          "type": "integer",
+          "min": 1,
+          "max": 19
+        }
+      },
+      "rag_query_template": "",
+      "metadata": {}
+    },
+    "level_benefits": {
+      "node_id": "level_benefits",
+      "node_type": "rag_lookup",
+      "title": "Level Advancement Benefits",
+      "prompt": "Let me look up what you gain at level {target_level} in Pathfinder 2E:",
+      "required_inputs": [
+        "target_level"
+      ],
+      "expected_outputs": [
+        "level_benefits"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "Pathfinder 2E level {target_level} advancement benefits",
+      "metadata": {
+        "lookup_step": true
+      }
+    },
+    "apply_changes": {
+      "node_id": "apply_changes",
+      "node_type": "completion",
+      "title": "Apply Level Changes",
+      "prompt": "Based on your level advancement, here are the changes to apply:\n\n**New Benefits:** {{level_benefits}}\n\nI'll help you:\n1. Increase hit points\n2. Update saving throws and skills\n3. Select new feats (if applicable)\n4. Choose new spells (if applicable)\n5. Update any class features\n\nLet's go through each change step by step.",
+      "required_inputs": [
+        "level_benefits"
+      ],
+      "expected_outputs": [
+        "updated_character"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "",
+      "metadata": {
+        "completion_step": true
+      }
+    }
+  },
+  "edges": [
+    {
+      "edge_id": "check_to_benefits",
+      "from_node": "level_check",
+      "to_node": "level_benefits",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "benefits_to_apply",
+      "from_node": "level_benefits",
+      "to_node": "apply_changes",
+      "condition": "success",
+      "condition_data": {}
+    }
+  ],
+  "metadata": {}
+}

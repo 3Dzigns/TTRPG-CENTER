@@ -1,0 +1,10 @@
+{
+    "created_at":  "2025-08-25T20:29:14",
+    "env_support":  [
+                        "dev",
+                        "test",
+                        "prod"
+                    ],
+    "build_id":  "2025-08-25_20-29-13_build-2936",
+    "source_hash":  "sha256:541e83c6d60584958bccccf15a7fe4f6549f3781b14850ba5edca5b1c2301827"
+}

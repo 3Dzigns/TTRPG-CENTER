@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Feature Request",
+  "type": "object",
+  "required": ["request_id", "title", "author", "submitted_at", "description", "impact", "status"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Unique identifier for this feature request"
+    },
+    "title": {
+      "type": "string",
+      "description": "Brief title describing the feature"
+    },
+    "author": {
+      "type": "string",
+      "description": "Person or team submitting this request"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when request was submitted"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description of the requested feature"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of criteria that must be met for this feature to be considered complete"
+    },
+    "impact": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Estimated impact/importance of this feature"
+    },
+    "supersedes": {
+      "type": "string",
+      "description": "Requirement ID that this feature request would replace"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "approved", "rejected", "superseded", "implemented"],
+      "description": "Current status of this feature request"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Person who approved this feature request"
+    },
+    "approved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when request was approved"
+    },
+    "rejected_reason": {
+      "type": "string",
+      "description": "Reason for rejection if status is 'rejected'"
+    },
+    "implementation_notes": {
+      "type": "string",
+      "description": "Technical notes about implementation"
+    },
+    "testing_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Additional testing requirements specific to this feature"
+    }
+  }
+}

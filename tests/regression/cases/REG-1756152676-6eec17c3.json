@@ -1,0 +1,29 @@
+{
+  "case_id": "REG-1756152676-6eec17c3",
+  "query": "What are the core classes in Pathfinder 2E?",
+  "context": {
+    "system": "Generic",
+    "memory_mode": "session-only",
+    "user_session": "unknown"
+  },
+  "model": "openai",
+  "parameters": {
+    "temperature": 0.3
+  },
+  "expected": {
+    "answer_kind": "list"
+  },
+  "baseline_response": {
+    "text": "Test response",
+    "sources": [],
+    "query_type": "rag_lookup"
+  },
+  "origin": {
+    "env": "test",
+    "user": "anonymous",
+    "timestamp": 1756152676.8462245,
+    "source": "thumbs_up_feedback"
+  },
+  "status": "active",
+  "execution_trace": []
+}

@@ -1,0 +1,288 @@
+{
+  "id": "ttrpg-center-mvp-2025-08-25",
+  "version": "1.0",
+  "created_at": "2025-08-25T09:00:00-05:00",
+  "author": "TTRPG Center Team",
+  "sections": [
+    {
+      "section_id": "architecture",
+      "title": "Architecture & Environment Management",
+      "description": "Multi-environment setup with immutable builds and promotion workflow",
+      "requirements": [
+        {
+          "req_id": "ARCH-001",
+          "description": "Support DEV, TEST, and PROD environments with distinct ports (8000, 8181, 8282)",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "DEV runs on port 8000",
+            "TEST runs on port 8181 with UAT features",
+            "PROD runs on port 8282 with ngrok exposure"
+          ]
+        },
+        {
+          "req_id": "ARCH-002", 
+          "description": "Immutable build system with timestamped artifacts",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Builds stored in /builds/<timestamp>_build-#### format",
+            "Build manifests include source hash and metadata",
+            "Promotion system using pointer files"
+          ]
+        },
+        {
+          "req_id": "ARCH-003",
+          "description": "PowerShell automation scripts for build/promote/rollback operations",
+          "priority": "high",
+          "acceptance_criteria": [
+            "build.ps1 creates immutable build artifacts",
+            "promote.ps1 moves builds between environments",
+            "rollback.ps1 reverts to previous build"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "data_rag",
+      "title": "Data Model & RAG Implementation", 
+      "description": "Hybrid RAG system with AstraDB integration and multi-pass ingestion",
+      "requirements": [
+        {
+          "req_id": "RAG-001",
+          "description": "Multi-pass ingestion pipeline (Parse → Enrich → Graph Compile)",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Pass A: Parse PDF to chunks with primary metadata",
+            "Pass B: Dictionary normalization and secondary metadata",
+            "Pass C: Graph workflow compilation and updates"
+          ]
+        },
+        {
+          "req_id": "RAG-002",
+          "description": "Metadata preservation with page-accurate references",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Chunk metadata includes page, section, source identifiers", 
+            "Page numbering matches original print versions",
+            "Table/diagram chunks are self-contained"
+          ]
+        },
+        {
+          "req_id": "RAG-003",
+          "description": "Dynamic dictionary system for cross-system normalization",
+          "priority": "high",
+          "acceptance_criteria": [
+            "Admin-editable dictionary interface",
+            "Organic growth from ingested content",
+            "Cross-system term mapping (e.g., D&D vs Pathfinder)"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "workflows",
+      "title": "Graph Workflows",
+      "description": "Multi-step task orchestration using graph-based workflows",
+      "requirements": [
+        {
+          "req_id": "WF-001", 
+          "description": "Graph workflow engine with node/edge execution",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Workflows stored as graphs with nodes and transitions",
+            "Node metadata includes prompts and dictionary references",
+            "Deterministic execution with state tracking"
+          ]
+        },
+        {
+          "req_id": "WF-002",
+          "description": "Character Creation workflow implementation",
+          "priority": "high", 
+          "acceptance_criteria": [
+            "Multi-step character creation flow",
+            "System-specific validation rules",
+            "Integration with RAG for legal options"
+          ]
+        },
+        {
+          "req_id": "WF-003",
+          "description": "Intelligent routing between RAG and workflow modes",
+          "priority": "high",
+          "acceptance_criteria": [
+            "Query classification for routing decisions",
+            "Fallback to OpenAI training data when appropriate",
+            "Clear labeling of response sources"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "admin_ui",
+      "title": "Admin User Interface",
+      "description": "Administrative interface for system management and monitoring",
+      "requirements": [
+        {
+          "req_id": "ADM-001",
+          "description": "System Status dashboard with health checks",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Environment and build ID display",
+            "Health checks for Astra Vector, Astra Graph, OpenAI",
+            "ngrok public URL display for PROD environment"
+          ]
+        },
+        {
+          "req_id": "ADM-002",
+          "description": "Ingestion Console with progress tracking",
+          "priority": "high",
+          "acceptance_criteria": [
+            "Single file and bulk upload capabilities",
+            "Real-time progress for each ingestion pass",
+            "Live tail of processing status"
+          ]
+        },
+        {
+          "req_id": "ADM-003",
+          "description": "Dictionary management interface", 
+          "priority": "medium",
+          "acceptance_criteria": [
+            "View current dictionary entries",
+            "Add/remove/edit dictionary terms",
+            "Configure enrichment thresholds"
+          ]
+        },
+        {
+          "req_id": "ADM-004",
+          "description": "Regression test and bug bundle management",
+          "priority": "high",
+          "acceptance_criteria": [
+            "List and view regression test cases",
+            "Invalidate/remove test cases",
+            "View and download bug bundles from thumbs-down feedback"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "user_ui", 
+      "title": "User Interface",
+      "description": "End-user interface for querying the TTRPG system",
+      "requirements": [
+        {
+          "req_id": "UI-001",
+          "description": "Query interface with performance metrics",
+          "priority": "critical", 
+          "acceptance_criteria": [
+            "Text input field with submit functionality",
+            "Real-time timer display in milliseconds",
+            "Token usage counter",
+            "Model identification badge"
+          ]
+        },
+        {
+          "req_id": "UI-002",
+          "description": "LCARS/Star Wars retro terminal visual design",
+          "priority": "medium",
+          "acceptance_criteria": [
+            "Background art integration from provided image",
+            "LCARS-inspired accent grids and typography",
+            "Retro terminal aesthetic with appropriate color palette"
+          ]
+        },
+        {
+          "req_id": "UI-003",
+          "description": "Response area with multimodal support",
+          "priority": "high",
+          "acceptance_criteria": [
+            "Text response display",
+            "Image display capability (future)",
+            "Source provenance toggle when available"
+          ]
+        },
+        {
+          "req_id": "UI-004",
+          "description": "Memory mode selection",
+          "priority": "medium",
+          "acceptance_criteria": [
+            "Session-only memory mode",
+            "User-wide memory mode", 
+            "Party-wide placeholder for future implementation"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "testing",
+      "title": "Testing & Quality Assurance",
+      "description": "Automated testing and feedback systems",
+      "requirements": [
+        {
+          "req_id": "TEST-001",
+          "description": "UAT feedback system with automatic regression creation",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Thumbs-up creates regression test case automatically",
+            "Test cases include query, context, expected outcomes",
+            "Snapshots stored for comparison"
+          ]
+        },
+        {
+          "req_id": "TEST-002", 
+          "description": "Bug bundle generation from negative feedback",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Thumbs-down creates comprehensive bug bundle",
+            "Bundle includes query, trace, metadata, user feedback",
+            "Token usage and performance metrics captured"
+          ]
+        },
+        {
+          "req_id": "TEST-003",
+          "description": "DEV environment testing gates",
+          "priority": "high",
+          "acceptance_criteria": [
+            "All initial requirements must pass",
+            "All approved feature requests must pass", 
+            "Superseded requirements ignored only after approval"
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "requirements_mgmt",
+      "title": "Requirements Management",
+      "description": "Immutable requirements and feature request handling",
+      "requirements": [
+        {
+          "req_id": "REQ-001",
+          "description": "Immutable requirements storage system",
+          "priority": "critical",
+          "acceptance_criteria": [
+            "Requirements stored as timestamped JSON files",
+            "Never edit existing requirement documents in place",
+            "Superseding creates new versioned documents"
+          ]
+        },
+        {
+          "req_id": "REQ-002",
+          "description": "Feature request approval workflow",
+          "priority": "high", 
+          "acceptance_criteria": [
+            "Feature requests stored with approval status",
+            "Superseding requests require explicit approval",
+            "Decision trail logged for audit purposes"
+          ]
+        },
+        {
+          "req_id": "REQ-003",
+          "description": "JSON schema validation for requirements and requests",
+          "priority": "medium",
+          "acceptance_criteria": [
+            "requirements.schema.json validates requirement documents",
+            "feature_request.schema.json validates feature requests",
+            "Schema enforcement in admin interface"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Read(/C:\\Users\\anzak\\Downloads/**)",
+      "Bash(copy:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(curl:*)",
+      "Bash(tasklist:*)",
+      "Bash(Start-Sleep -Seconds 10)",
+      "Bash(grep:*)",
+      "Bash(taskkill:*)",
+      "Bash(SET PYTHONPATH=.)",
+      "Bash(SET APP_ENV=dev)",
+      "Bash(SET PORT=8000)",
+      "Bash(PYTHONPATH=. APP_ENV=dev PORT=8000 python app/server.py)",
+      "Bash(export PYTHONPATH=.)",
+      "Bash(source:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\Users\\anzak\\Downloads"
+    ]
+  }
+}

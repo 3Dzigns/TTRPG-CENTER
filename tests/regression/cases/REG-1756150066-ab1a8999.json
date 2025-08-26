@@ -1,0 +1,33 @@
+{
+  "case_id": "REG-1756150066-ab1a8999",
+  "query": "What is a saving throw in D&D?",
+  "context": {
+    "system": "Generic",
+    "memory_mode": "session-only",
+    "user_session": "unknown"
+  },
+  "model": "openai:gpt-4o-mini",
+  "parameters": {
+    "temperature": 0.3
+  },
+  "expected": {
+    "answer_kind": "informational",
+    "contains": [
+      "saving",
+      "throw"
+    ]
+  },
+  "baseline_response": {
+    "text": "In Dungeons & Dragons (D&D), a saving throw is a game mechanic used to determine whether a character can resist or avoid certain effects, typically those caused by spells, traps, poisons, or other hazards. When a character is subjected to an effect that requires a saving throw, they roll a twenty-sided die (d20) and add their relevant ability modifier and any other bonuses or penalties that apply.\n\nThere are three main types of saving throws in D&D 5th Edition:\n\n1. **Strength Saving Throws**: Used to resist effects that would physically restrain or move a character, such as being pushed or knocked prone.\n\n2. **Dexterity Saving Throws**: Used to avoid effects that require quick reflexes, such as dodging a fireball or avoiding a trap.\n\n3. **Constitution Saving Throws**: Used to resist effects that would harm a character's health, such as poison or disease.\n\n4. **Intelligence Saving Throws**: Used against effects that involve mental manipulation or illusions.\n\n5. **Wisdom Saving Throws**: Used to resist effects that involve fear or charm.\n\n6. **Charisma Saving Throws**: Used against effects that involve magical influence or possession.\n\nThe difficulty of the saving throw is determined by the effect's source, typically referred to as the \"spell save DC\" for spells. If the result of the d20 roll plus modifiers meets or exceeds the DC, the character succeeds on the saving throw and typically suffers reduced effects or none at all. If they fail, they may suffer the full effects of the attack or spell.\n\nSaving throws are an important aspect of gameplay, as they add an element of chance and strategy, allowing characters to potentially overcome dangerous situations. Always check the specific rules in the relevant source books for any variations or additional mechanics!\n\n*Note: This response is based on general TTRPG knowledge. Please verify with official source materials.*",
+    "sources": [],
+    "query_type": "unknown"
+  },
+  "origin": {
+    "env": "test",
+    "user": "anonymous",
+    "timestamp": 1756150066.1965077,
+    "source": "thumbs_up_feedback"
+  },
+  "status": "active",
+  "execution_trace": []
+}

@@ -1,0 +1,71 @@
+{
+  "terms": {
+    "ability_score": {
+      "canonical": "Ability Score",
+      "description": "Core character attributes (STR, DEX, CON, etc.)",
+      "systems": [
+        "D&D",
+        "Pathfinder",
+        "Generic"
+      ],
+      "category": "character_mechanics"
+    },
+    "armor_class": {
+      "canonical": "Armor Class",
+      "description": "Defensive rating against attacks",
+      "systems": [
+        "D&D",
+        "Pathfinder"
+      ],
+      "category": "combat"
+    },
+    "hit_points": {
+      "canonical": "Hit Points",
+      "description": "Character health/damage capacity",
+      "systems": [
+        "D&D",
+        "Pathfinder",
+        "Generic"
+      ],
+      "category": "character_mechanics"
+    },
+    "saving_throw": {
+      "canonical": "Saving Throw",
+      "description": "Dice roll to resist effects",
+      "systems": [
+        "D&D",
+        "Pathfinder"
+      ],
+      "category": "mechanics"
+    },
+    "skill_check": {
+      "canonical": "Skill Check",
+      "description": "Dice roll using character skills",
+      "systems": [
+        "D&D",
+        "Pathfinder",
+        "Generic"
+      ],
+      "category": "mechanics"
+    }
+  },
+  "aliases": {
+    "AC": "armor_class",
+    "HP": "hit_points",
+    "health": "hit_points",
+    "defense": "armor_class",
+    "stat": "ability_score",
+    "attribute": "ability_score",
+    "save": "saving_throw"
+  },
+  "categories": {
+    "character_mechanics": "Core character rules and attributes",
+    "combat": "Combat rules and mechanics",
+    "mechanics": "General game mechanics",
+    "equipment": "Weapons, armor, and gear",
+    "spells": "Magic and spell systems",
+    "feats": "Special abilities and talents"
+  },
+  "version": "1.0",
+  "last_updated": "2025-08-25"
+}

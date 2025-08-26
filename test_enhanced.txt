@@ -1,0 +1,1 @@
+Enhanced TTRPG document for testing the new ingestion progress tracking system. This should show real-time progress updates.

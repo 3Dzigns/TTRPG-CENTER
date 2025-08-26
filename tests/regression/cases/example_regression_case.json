@@ -1,0 +1,26 @@
+{
+  "case_id": "REG-001-example",
+  "query": "List all feats I can take at level 1 in Pathfinder 2E",
+  "context": {
+    "system": "Pathfinder 2E", 
+    "edition": "CRB",
+    "memory_mode": "session-only"
+  },
+  "model": "openai:gpt-4o-mini",
+  "parameters": {
+    "temperature": 0.2
+  },
+  "expected": {
+    "answer_kind": "list",
+    "contains": ["Ancestry Feats", "Class Feats", "General Feats"],
+    "forbidden": ["Epic Feats", "Illithid"],
+    "min_items": 3
+  },
+  "origin": {
+    "env": "test",
+    "user": "uat_reviewer", 
+    "ts": "2025-08-25T10:40:02-05:00",
+    "source": "thumbs_up_feedback"
+  },
+  "status": "active"
+}

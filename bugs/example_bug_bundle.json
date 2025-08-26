@@ -1,0 +1,76 @@
+{
+  "bug_id": "bugid_20250825-104223",
+  "env": "prod",
+  "ts": "2025-08-25T10:42:23-05:00",
+  "query": "How much does a longsword cost in Pathfinder 2E?",
+  "user_feedback": "Price is wrong; system mixed 5E and PF2e pricing",
+  "agent_trace": [
+    {
+      "step": "route",
+      "system_prompt": "Classify query type and select appropriate processing path",
+      "inputs": {
+        "query": "How much does a longsword cost in Pathfinder 2E?"
+      },
+      "outputs": {
+        "route": "rules_lookup",
+        "confidence": 0.95
+      }
+    },
+    {
+      "step": "retrieval", 
+      "vector_store": "AstraDB",
+      "k": 6,
+      "latency_ms": 134,
+      "chunks": [
+        {
+          "id": "c_pf2_weapons_001",
+          "page": 280,
+          "meta": {
+            "book": "Core Rulebook",
+            "section": "Weapons",
+            "system": "PF2e"
+          },
+          "score": 0.82,
+          "text": "Longsword: 1 gp, 1 Bulk"
+        },
+        {
+          "id": "c_dnd5_weapons_002", 
+          "page": 149,
+          "meta": {
+            "book": "Player's Handbook",
+            "section": "Equipment", 
+            "system": "D&D 5E"
+          },
+          "score": 0.79,
+          "text": "Longsword: 15 gp, 3 lb"
+        }
+      ]
+    },
+    {
+      "step": "synthesis",
+      "model": "openai:gpt-4o-mini",
+      "prompt": "Based on the retrieved information, answer the user's question about longsword cost in Pathfinder 2E...",
+      "tokens_in": 892,
+      "tokens_out": 210,
+      "response": "A longsword costs 15 gp in Pathfinder 2E."
+    }
+  ],
+  "final_answer": "A longsword costs 15 gp in Pathfinder 2E.",
+  "ground_truth_hint": "Correct PF2e longsword cost is 1 gp, not 15 gp (which is D&D 5E pricing)",
+  "token_usage": {
+    "prompt": 950,
+    "completion": 235, 
+    "total": 1185
+  },
+  "latency_ms": 980,
+  "system": {
+    "app_build": "2025-08-25_12-30-12_build-0003",
+    "source_hash": "sha256:a1b2c3d4e5f6..."
+  },
+  "attachments": [],
+  "analysis": {
+    "issue_type": "cross_system_contamination",
+    "severity": "high",
+    "suggested_fix": "Improve system filtering in retrieval step"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "request_id": "FR-2025-08-25-001",
+  "title": "Add voice input support for queries",
+  "author": "Product Team",
+  "submitted_at": "2025-08-25T11:30:00-05:00",
+  "description": "Allow users to submit queries using voice input instead of only text input. This would improve accessibility and user experience, especially for users with mobility constraints or those who prefer voice interaction.",
+  "acceptance_criteria": [
+    "Voice input button in user interface",
+    "Speech-to-text conversion with high accuracy", 
+    "Support for common browsers and devices",
+    "Fallback to text input if voice fails",
+    "Visual feedback during voice recording"
+  ],
+  "impact": "medium",
+  "supersedes": null,
+  "status": "proposed",
+  "approved_by": null,
+  "approved_at": null,
+  "rejected_reason": null,
+  "implementation_notes": "Consider using Web Speech API for browser compatibility. May need to evaluate third-party services for better accuracy.",
+  "testing_requirements": [
+    "Cross-browser voice input testing",
+    "Accuracy testing with various accents",
+    "Performance testing with different audio qualities"
+  ]
+}
