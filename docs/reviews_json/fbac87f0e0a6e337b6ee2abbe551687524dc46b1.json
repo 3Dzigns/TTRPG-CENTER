@@ -1,0 +1,72 @@
+{
+  "ok": false,
+  "issues": [
+    {
+      "id": "CR-001",
+      "severity": "high",
+      "title": "Potential Race Condition in Ingestion Pipeline",
+      "details": "The ingestion pipeline does not handle concurrent writes to AstraDB properly, which could lead to data corruption. Suggested fix: Implement locking or use transactions to ensure atomicity. File: .claude/commands/ingest.md:3-5.",
+      "files": [
+        ".claude/commands/ingest.md:3-5"
+      ],
+      "requirements": [
+        "RAG-001",
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-002",
+      "severity": "medium",
+      "title": "Missing Input Validation for Environment Variables",
+      "details": "The commands do not validate the `--env` input, which could lead to unexpected behavior if an invalid value is provided. Suggested fix: Add validation logic to ensure only 'dev', 'test', or 'prod' are accepted. File: .claude/commands/prompt.md:2.",
+      "files": [
+        ".claude/commands/prompt.md:2"
+      ],
+      "requirements": [
+        "RAG-001"
+      ]
+    },
+    {
+      "id": "CR-003",
+      "severity": "medium",
+      "title": "Lack of Tests for New Logic",
+      "details": "The new ingestion and promotion commands lack comprehensive unit and integration tests, which is against the testing policy. Suggested fix: Implement tests covering all new functionalities. File: .claude/commands/write-tests.md:2-4.",
+      "files": [
+        ".claude/commands/write-tests.md:2-4"
+      ],
+      "requirements": [
+        "TEST-003"
+      ]
+    },
+    {
+      "id": "CR-004",
+      "severity": "low",
+      "title": "Inconsistent Logging Practices",
+      "details": "Logging is not consistently applied across commands, making it difficult to trace execution flow. Suggested fix: Standardize logging practices across all commands. File: .claude/commands/trace-status.md:1.",
+      "files": [
+        ".claude/commands/trace-status.md:1"
+      ],
+      "requirements": [
+        "ADM-002"
+      ]
+    },
+    {
+      "id": "CR-005",
+      "severity": "medium",
+      "title": "Hardcoded Secrets in Configuration",
+      "details": "There are instances of hardcoded secrets in the configuration files, which violates security best practices. Suggested fix: Ensure all sensitive information is sourced from environment variables. File: .claude/memory/coding-standards.md:10.",
+      "files": [
+        ".claude/memory/coding-standards.md:10"
+      ],
+      "requirements": [
+        "RAG-001"
+      ]
+    }
+  ],
+  "summary": "The overall code quality shows several critical issues related to race conditions, input validation, and testing coverage. Security practices are not fully adhered to, particularly regarding hardcoded secrets. Immediate attention is required to align with project policies and requirements.",
+  "go_no_go": "NO-GO",
+  "metadata": {
+    "sha": "fbac87f0e0a6e337b6ee2abbe551687524dc46b1",
+    "provider": "openai"
+  }
+}
