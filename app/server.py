@@ -364,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                 <h3>Database Management</h3>
                 <p>Environment-specific AstraDB collection management</p>
                 <button onclick="showCollectionInfo()">Show Collections</button>
-                {f'<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="cleanupSelectedCollection()" style="background: #ff4444; margin-left: 10px;">Cleanup Selected</button><button onclick="cleanupEnvironmentData()" style="background: #ff6666; margin-left: 5px;">Cleanup All {cfg["runtime"]["env"].upper()}</button></div>' if cfg['runtime']['env'] != 'prod' else ''}
+                {f'<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="cleanupSelectedCollection()" style="background: #ff4444; margin-left: 10px;">Cleanup Selected</button><button onclick="cleanupEnvironmentData()" style="background: #ff6666; margin-left: 5px;">Cleanup All {cfg["runtime"]["env"].upper()}</button></div><div style="margin-top: 20px; border-top: 1px solid #00ffff; padding-top: 15px;"><h4 style="color: #00ffff; margin: 0 0 10px 0;">Chunk-Level Cleanup</h4><input type="text" id="chunk-search-input" placeholder="Search chunks by text or metadata..." style="width: 300px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><button onclick="searchChunks()" style="background: #0088ff; margin-right: 10px;">Search Chunks</button><select id="chunk-collection-select" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><option value="">All Collections</option></select><div id="chunk-search-results" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div></div>' if cfg['runtime']['env'] != 'prod' else ''}
                 <div id="database-info" style="margin-top: 10px;"></div>
             </div>
         </div>
@@ -502,7 +502,14 @@ class Handler(BaseHTTPRequestHandler):
                     let html = '<div class="cleanup-result">';
                     html += '<strong>Cleanup Complete:</strong><br>';
                     html += 'Environment: <span style="color: #ff6600;">' + data.environment.toUpperCase() + '</span><br>';
-                    html += 'Documents Deleted: <span style="color: #ff4444;">' + result.deleted + '</span><br>';
+                    
+                    // Handle AstraDB returning -1 for empty collections
+                    if (result.deleted === -1) {{
+                        html += 'Status: <span style="color: #00ff00;">Collection already empty</span><br>';
+                    }} else {{
+                        html += 'Documents Deleted: <span style="color: #ff4444;">' + result.deleted + '</span><br>';
+                    }}
+                    
                     html += '<span style="color: #00ff00;">✅ Environment cleaned successfully</span>';
                     html += '</div>';
                     infoDiv.innerHTML = html;
@@ -577,7 +584,13 @@ class Handler(BaseHTTPRequestHandler):
                         .then(data => {{
                             if (data.cleanup_result) {{
                                 const result = data.cleanup_result;
-                                infoDiv.innerHTML = '<div class="status-ok">Collection cleanup completed: ' + result.deleted + ' documents deleted from ' + selectedCollection + '</div>';
+                                let message = 'Collection cleanup completed: ';
+                                if (result.deleted === -1) {{
+                                    message += 'collection already empty (' + selectedCollection + ')';
+                                }} else {{
+                                    message += result.deleted + ' documents deleted from ' + selectedCollection;
+                                }}
+                                infoDiv.innerHTML = '<div class="status-ok">' + message + '</div>';
                                 // Refresh collection info
                                 setTimeout(showCollectionInfo, 2000);
                             }} else {{
@@ -591,10 +604,126 @@ class Handler(BaseHTTPRequestHandler):
                 }});
         }}
         
-        // Auto-populate collection selector on page load
+        // Auto-populate collection selectors on page load
         setTimeout(() => {{
             populateCollectionSelector();
+            populateChunkCollectionSelector();
         }}, 1000);
+        
+        // Populate chunk collection selector
+        function populateChunkCollectionSelector() {{
+            const selector = document.getElementById('chunk-collection-select');
+            if (!selector) return;
+            
+            fetch('/api/database/collections')
+                .then(r => r.json())
+                .then(data => {{
+                    selector.innerHTML = '<option value="">All Collections</option>';
+                    if (data.all_collections && data.all_collections.length > 0) {{
+                        data.all_collections.forEach(collection => {{
+                            const option = document.createElement('option');
+                            option.value = collection;
+                            option.textContent = collection;
+                            selector.appendChild(option);
+                        }});
+                    }}
+                }})
+                .catch(err => {{
+                    console.error('Error loading collections for chunk search:', err);
+                }});
+        }}
+        
+        // Search chunks
+        function searchChunks() {{
+            const searchInput = document.getElementById('chunk-search-input');
+            const collectionSelect = document.getElementById('chunk-collection-select');
+            const resultsDiv = document.getElementById('chunk-search-results');
+            
+            const searchText = searchInput?.value?.trim() || '';
+            const collection = collectionSelect?.value || '';
+            
+            if (!searchText && !collection) {{
+                alert('Please enter search text or select a collection');
+                return;
+            }}
+            
+            resultsDiv.innerHTML = '<div class="status-pending">Searching chunks...</div>';
+            
+            const params = new URLSearchParams();
+            if (searchText) params.append('text', searchText);
+            if (collection) params.append('collection', collection);
+            params.append('limit', '20');
+            
+            fetch('/api/database/search-chunks?' + params.toString())
+                .then(r => r.json())
+                .then(data => {{
+                    if (data.chunks && data.chunks.length > 0) {{
+                        let html = '<div class="chunk-results">';
+                        html += '<h5 style="color: #00ff00;">Found ' + data.chunks.length + ' chunks:</h5>';
+                        
+                        data.chunks.forEach((chunk, index) => {{
+                            html += '<div class="chunk-item" style="border: 1px solid #444; margin: 5px 0; padding: 10px; background: rgba(0,0,0,0.3);">';
+                            html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
+                            html += '<div><strong>ID:</strong> ' + chunk.id.substring(0, 12) + '...</div>';
+                            html += '<button onclick="deleteChunk(\'' + chunk.id + '\', \'' + chunk.collection + '\')" style="background: #ff4444; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer;">Delete</button>';
+                            html += '</div>';
+                            html += '<div><strong>Collection:</strong> ' + (chunk.collection || 'unknown') + '</div>';
+                            html += '<div><strong>Source:</strong> ' + (chunk.source_id || 'unknown') + ' (Page: ' + (chunk.page || 'N/A') + ')</div>';
+                            html += '<div><strong>Text:</strong> ' + (chunk.text.length > 200 ? chunk.text.substring(0, 200) + '...' : chunk.text) + '</div>';
+                            html += '</div>';
+                        }});
+                        
+                        html += '</div>';
+                        resultsDiv.innerHTML = html;
+                    }} else {{
+                        resultsDiv.innerHTML = '<div class="status-ok">No chunks found matching your search criteria.</div>';
+                    }}
+                }})
+                .catch(err => {{
+                    resultsDiv.innerHTML = '<div class="status-error">Search failed: ' + err.message + '</div>';
+                }});
+        }}
+        
+        // Delete individual chunk
+        function deleteChunk(chunkId, collection) {{
+            if (!confirm('Are you sure you want to delete this chunk?\\n\\nChunk ID: ' + chunkId + '\\nCollection: ' + collection + '\\n\\nThis action cannot be undone.')) {{
+                return;
+            }}
+            
+            fetch('/api/database/delete-chunk', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ 
+                    chunk_id: chunkId,
+                    collection: collection,
+                    confirm: true
+                }})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.success) {{
+                    alert('Chunk deleted successfully');
+                    searchChunks(); // Refresh search results
+                }} else {{
+                    alert('Delete failed: ' + (data.error || 'Unknown error'));
+                }}
+            }})
+            .catch(err => {{
+                alert('Delete failed: ' + err.message);
+            }});
+        }}
+        
+        // Enable search on Enter key
+        document.addEventListener('DOMContentLoaded', function() {{
+            const searchInput = document.getElementById('chunk-search-input');
+            if (searchInput) {{
+                searchInput.addEventListener('keypress', function(e) {{
+                    if (e.key === 'Enter') {{
+                        searchChunks();
+                    }}
+                }});
+            }}
+        }});
     </script>
     
     <div class="build-id-box" id="build-id-box">Loading...</div>
@@ -651,6 +780,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_requirements_stats()
         elif path == "/api/database/collections":
             self._handle_database_collections()
+        elif path.startswith("/api/database/search-chunks"):
+            self._handle_chunk_search()
         elif path == "/user":
             # Basic user UI
             user_html = f"""
@@ -1095,6 +1226,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_database_cleanup()
         elif path == "/api/database/cleanup-collection":
             self._handle_database_cleanup_collection()
+        elif path == "/api/database/delete-chunk":
+            self._handle_chunk_delete()
         else:
             self._send(404, {"error": "endpoint not found"})
     
@@ -2524,6 +2657,172 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Database collection cleanup error: {str(e)}")
             self._send(500, {"error": f"Collection cleanup failed: {str(e)}"})
+    
+    def _handle_chunk_search(self):
+        """Handle chunk search requests"""
+        if self.command != 'GET':
+            self._send(405, {"error": "GET method required"})
+            return
+            
+        try:
+            from urllib.parse import urlparse, parse_qs
+            
+            # Parse query parameters
+            url_parts = urlparse(self.path)
+            params = parse_qs(url_parts.query)
+            
+            search_text = params.get('text', [''])[0].strip()
+            collection = params.get('collection', [''])[0].strip()
+            limit = int(params.get('limit', ['10'])[0])
+            
+            # Get current environment - still enforce env restrictions
+            env = os.getenv("APP_ENV", "dev").lower()
+            if env == "prod":
+                self._send(403, {"error": "Production chunk search not allowed"})
+                return
+            
+            # Perform chunk search
+            chunks = []
+            
+            if collection:
+                # Search specific collection
+                try:
+                    database = vector_store.database
+                    target_collection = database.get_collection(collection)
+                    
+                    # Build search query
+                    query = {}
+                    if search_text:
+                        # Simple text search in the text field
+                        query = {"text": {"$regex": search_text, "$options": "i"}}
+                    
+                    # Execute search
+                    results = target_collection.find(query, limit=limit)
+                    
+                    for doc in results:
+                        chunks.append({
+                            "id": doc.get("_id", ""),
+                            "text": doc.get("text", ""),
+                            "page": doc.get("page", "N/A"),
+                            "source_id": doc.get("source_id", "unknown"),
+                            "section": doc.get("section", ""),
+                            "collection": collection
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"Collection search error for {collection}: {str(e)}")
+                    # Continue with empty results
+            else:
+                # Search all collections if no specific collection specified
+                try:
+                    database = vector_store.database
+                    collections = database.list_collection_names()
+                    
+                    search_count = 0
+                    for coll_name in collections[:5]:  # Limit to first 5 collections
+                        if search_count >= limit:
+                            break
+                            
+                        try:
+                            coll = database.get_collection(coll_name)
+                            query = {}
+                            if search_text:
+                                query = {"text": {"$regex": search_text, "$options": "i"}}
+                            
+                            results = coll.find(query, limit=max(1, (limit - search_count)))
+                            
+                            for doc in results:
+                                if search_count >= limit:
+                                    break
+                                chunks.append({
+                                    "id": doc.get("_id", ""),
+                                    "text": doc.get("text", ""),
+                                    "page": doc.get("page", "N/A"),
+                                    "source_id": doc.get("source_id", "unknown"),
+                                    "section": doc.get("section", ""),
+                                    "collection": coll_name
+                                })
+                                search_count += 1
+                        except Exception as e:
+                            # Skip collections that cause errors
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"Multi-collection search error: {str(e)}")
+            
+            self._send(200, {
+                "chunks": chunks,
+                "count": len(chunks),
+                "search_text": search_text,
+                "collection": collection,
+                "environment": env
+            })
+            
+        except Exception as e:
+            logger.error(f"Chunk search error: {str(e)}")
+            self._send(500, {"error": f"Chunk search failed: {str(e)}"})
+    
+    def _handle_chunk_delete(self):
+        """Handle individual chunk deletion requests"""
+        if self.command != 'POST':
+            self._send(405, {"error": "POST method required"})
+            return
+            
+        try:
+            # Parse request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                import json
+                data = json.loads(post_data)
+                chunk_id = data.get('chunk_id', '')
+                collection = data.get('collection', '')
+                confirm = data.get('confirm', False)
+            else:
+                chunk_id = ''
+                collection = ''
+                confirm = False
+            
+            if not confirm:
+                self._send(400, {"error": "Deletion requires explicit confirmation"})
+                return
+                
+            if not chunk_id or not collection:
+                self._send(400, {"error": "Chunk ID and collection name are required"})
+                return
+            
+            # Get current environment - still enforce env restrictions
+            env = os.getenv("APP_ENV", "dev").lower()
+            if env == "prod":
+                self._send(403, {"error": "Production chunk deletion not allowed via API"})
+                return
+            
+            # Perform chunk deletion
+            try:
+                database = vector_store.database
+                target_collection = database.get_collection(collection)
+                
+                # Delete specific chunk by ID
+                result = target_collection.delete_one({"_id": chunk_id})
+                deleted_count = result.deleted_count
+                
+                logger.info(f"Deleted {deleted_count} chunk (ID: {chunk_id}) from collection {collection}")
+                
+                self._send(200, {
+                    "success": True,
+                    "deleted_count": deleted_count,
+                    "chunk_id": chunk_id,
+                    "collection": collection,
+                    "environment": env
+                })
+                
+            except Exception as e:
+                logger.error(f"Chunk deletion error for {chunk_id}: {str(e)}")
+                self._send(500, {"error": f"Chunk deletion failed: {str(e)}"})
+            
+        except Exception as e:
+            logger.error(f"Chunk delete request error: {str(e)}")
+            self._send(500, {"error": f"Chunk delete failed: {str(e)}"})
 
 def main():
     port = cfg["runtime"]["port"]

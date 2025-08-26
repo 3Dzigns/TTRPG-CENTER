@@ -1,0 +1,89 @@
+{
+  "bug_id": "bugid_20250826-125758-cleanup-all-ui",
+  "timestamp": "2025-08-26T12:57:58Z",
+  "environment": "test",
+  "build_id": "2025-08-25_20-29-13_build-2936",
+  "severity": "medium",
+  "category": "ui_feedback_issue",
+  "title": "Cleanup ALL TEST button appears to do nothing - confusing UI feedback",
+  "description": "The 'Cleanup ALL TEST' button technically works (API returns 200) but provides confusing UI feedback showing '-1 documents deleted' instead of clear success message. Additionally, no chunk/entry level cleanup options exist.",
+  "user_report": "Cleanup ALL TEST button does not seem to do anything. Selecting a collection and cleaning it up does work. However there is no option to find and clean single chunks/entries.",
+  "technical_analysis": {
+    "root_cause_primary": "AstraDB delete_many() returns -1 for empty collections instead of 0, causing confusing UI display",
+    "root_cause_secondary": "No chunk/entry level cleanup functionality implemented", 
+    "affected_components": [
+      "Cleanup ALL TEST button UI feedback",
+      "AstraDB delete_many response handling", 
+      "Missing chunk-level cleanup functionality"
+    ],
+    "error_details": {
+      "api_response": "HTTP 200 - cleanup technically works",
+      "deleted_count": "-1 (from AstraDB when collection is empty)",
+      "ui_display": "Shows 'Documents Deleted: -1' which looks like an error",
+      "log_evidence": [
+        "2025-08-26 12:52:54,082 - app.common.astra_client - INFO - Cleaned up -1 chunks from test environment",
+        "2025-08-26 12:57:43,742 - app.common.astra_client - INFO - Cleaned up -1 chunks from test environment"
+      ]
+    }
+  },
+  "reproduction_steps": [
+    "1. Navigate to http://localhost:8181/admin",
+    "2. Scroll to 'Database Management' section", 
+    "3. Click 'Cleanup All TEST' button",
+    "4. Observe confusing feedback: 'Documents Deleted: -1'",
+    "5. Note: API actually works but UI feedback is misleading"
+  ],
+  "expected_behavior": "Clear success message indicating cleanup completed, even for empty collections. Should show '0 documents deleted' or 'Collection already empty - cleanup completed'",
+  "actual_behavior": "Shows 'Documents Deleted: -1' which appears to be an error when it's actually successful cleanup of empty collection",
+  "code_locations": {
+    "ui_feedback": {
+      "file": "app/server.py",
+      "line": 505,
+      "code": "'Documents Deleted: <span style=\"color: #ff4444;\">' + result.deleted + '</span><br>';"
+    },
+    "backend_response": {
+      "file": "app/common/astra_client.py",
+      "line": 176,
+      "code": "deleted_count = result.deleted_count"
+    }
+  },
+  "immediate_fixes": [
+    {
+      "action": "Handle -1 response from AstraDB in UI feedback",
+      "rationale": "Convert -1 to meaningful user message",
+      "implementation": "Check if result.deleted === -1 and show 'Collection already empty' message"
+    },
+    {
+      "action": "Implement chunk/entry level cleanup functionality",
+      "rationale": "User specifically requested this missing feature",
+      "implementation": "Add search and selective delete for individual chunks"
+    }
+  ],
+  "enhancement_request": {
+    "title": "Add chunk/entry level cleanup granularity",
+    "description": "Users need ability to find and cleanup individual chunks/entries, not just entire collections",
+    "suggested_features": [
+      "Chunk search by text content or metadata",
+      "Individual chunk deletion with preview",
+      "Bulk chunk selection with filters (date range, source_id, etc)",
+      "Chunk count and preview before deletion"
+    ]
+  },
+  "testing_verification": {
+    "test_cases": [
+      "Cleanup empty collection should show clear success message",
+      "Cleanup collection with data should show actual count",
+      "Chunk search should return relevant results",
+      "Individual chunk deletion should work with confirmation"
+    ]
+  },
+  "impact_assessment": {
+    "user_impact": "Medium - functionality works but confusing UX",
+    "data_risk": "Low - cleanup works correctly despite UI confusion",
+    "missing_feature_impact": "High - no granular cleanup capability"
+  },
+  "related_requirements": [
+    "ADM-005: Admin UI should provide clear feedback for all operations",
+    "ADM-006: Database management must support granular operations"
+  ]
+}
