@@ -1,110 +1,37 @@
-name: Main CI (AI Review + Tests)
+name: AI Code Review
 
 on:
   push:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/review_status.md'
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/review_status.md'
-
-permissions:
-  contents: write
-  pull-requests: write
 
 jobs:
   ai-review:
-    name: OpenAI Peer Review
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
 
-      - name: Install deps
-        run: pip install --disable-pip-version-check requests
+    - name: Install dependencies
+      run: pip install requests
 
-      - name: Build context pack
-        run: python scripts/ci/make_context_pack.py
+    - name: Run AI review
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        mkdir -p reviews
+        python scripts/ci/ai_review.py > reviews/ai-review-report.md
 
-      - name: Read review mode
-        id: mode
-        run: |
-          MODE=diff
-          if [ -f ".ci/review_mode.txt" ]; then
-            MODE=$(cat .ci/review_mode.txt | tr -d '[:space:]')
-          fi
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
-
-      - name: Generate PR diff (only if mode=diff)
-        if: steps.mode.outputs.mode == 'diff'
-        id: diff
-        run: |
-          git fetch origin ${{ github.base_ref || 'main' }} --depth=1 || true
-          git diff --unified=0 origin/${{ github.base_ref || 'main' }}...HEAD > pr.diff || true
-          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
-
-      - name: Run AI code review (OpenAI)
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GIT_COMMIT_SHA: ${{ github.sha }}
-        run: |
-          python scripts/ci/ai_review.py \
-            --mode ${{ steps.mode.outputs.mode }} \
-            --diff ${{ steps.diff.outputs.DIFF_PATH || 'pr.diff' }} \
-            --context artifacts/ci/context.jsonl \
-            --out_json artifacts/ci/ai-review.json \
-            --out_md artifacts/review/ci/review.md
-
-      - name: Upload review artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-review
-          path: |
-            artifacts/ci/ai-review.json
-            artifacts/review/ci/review.md
-
-      - name: Write Status Page (docs/review_status.md)
-        run: |
-          python - << 'PY'
-          import json, pathlib, time
-          p = pathlib.Path("artifacts/ci/ai-review.json")
-          data = json.loads(p.read_text())
-          ok = data.get("ok", False)
-          high = [i for i in data.get("issues", []) if i.get("severity")=="high"]
-          sha = data.get("metadata", {}).get("sha","")
-          ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-          md = []
-          md.append(f"# Review Status")
-          md.append(f"**SHA:** `{sha}`  ")
-          md.append(f"**STATUS:** {'OK' if ok and not high else 'FAIL'}  ")
-          md.append(f"**HIGH_ISSUES:** {len(high)}  ")
-          md.append(f"**UPDATED:** {ts}")
-          md.append("")
-          md.append("## Summary")
-          md.append(data.get("summary",""))
-          md.append("")
-          md.append("## Provider")
-          md.append(data.get("metadata",{}).get("provider","openai"))
-          md.append("")
-          md.append("## Notes")
-          md.append("This file is auto-updated by CI. Claude must read this file before proceeding.")
-          pathlib.Path("docs").mkdir(exist_ok=True)
-          pathlib.Path("docs/review_status.md").write_text("\n".join(md), encoding="utf-8")
-          PY
-
-      - name: Commit Status Page
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/review_status.md
-          git commit -m "chore(ci): update review status [skip ci]" || echo "No changes to commit"
-          git push
+    - name: Commit review back to repo
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add reviews/ai-review-report.md
+        git commit -m "chore: add AI review report [skip ci]" || echo "No changes to commit"
+        git push origin HEAD:main
