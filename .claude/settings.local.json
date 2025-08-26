@@ -17,7 +17,10 @@
       "Bash(SET PORT=8000)",
       "Bash(PYTHONPATH=. APP_ENV=dev PORT=8000 python app/server.py)",
       "Bash(export PYTHONPATH=.)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(git pull:*)",
+      "Bash(touch:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": [],
