@@ -1,0 +1,13 @@
+name: Bug
+description: Track a defect from AI review or testing
+labels: ["type:bug"]
+body:
+  - type: input
+    id: bug_id
+    attributes: { label: Bug ID (optional), placeholder: CR-123 }
+  - type: input
+    id: sha
+    attributes: { label: Commit SHA, placeholder: abcdef... }
+  - type: textarea
+    id: details
+    attributes: { label: Details, placeholder: What happened, where, fix idea? }
