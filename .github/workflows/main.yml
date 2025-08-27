@@ -3,16 +3,16 @@ name: AI Code Review (OpenAI, Diff-Only)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: ["**"]
+    # omit branches filter to avoid YAML/pathspec edge cases
 
 permissions:
   contents: read
   pull-requests: write
 
 env:
-  OPENAI_MODEL: gpt-4o-mini         # change if you prefer a different model
-  MAX_BYTES_PER_CHUNK: 120000       # chunk size for diff splits
-  FAIL_ON_SEVERITY: none            # none | high | critical
+  OPENAI_MODEL: gpt-4o-mini
+  MAX_BYTES_PER_CHUNK: 120000
+  FAIL_ON_SEVERITY: none   # none | high | critical
 
 jobs:
   review:
@@ -23,29 +23,69 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Show PR SHAs (debug)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BASE: ${{ github.event.pull_request.base.sha }}"
+          echo "HEAD: ${{ github.event.pull_request.head.sha }}"
+
       - name: Compute code diff (exclude .md)
         id: diff
         shell: bash
         run: |
           set -euo pipefail
+
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          echo "Base: $BASE_SHA"
-          echo "Head: $HEAD_SHA"
 
-          # Unified diff with minimal context; exclude markdown files
-          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" ":(exclude)*.md" > diff.patch || true
+          echo "::group::Changed files (raw)"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true
+          echo "::endgroup::"
+
+          # Build a list of changed non-markdown files first (safer than pathspec-only)
+          mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
+
+          if [ "${#CODE_FILES[@]}" -eq 0 ]; then
+            echo "No non-Markdown changes found."
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::group::Code files to review"
+          printf '%s\n' "${CODE_FILES[@]}"
+          echo "::endgroup::"
+
+          # Now produce a patch including only those code files
+          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- "${CODE_FILES[@]}" > diff.patch || true
 
           if [ ! -s diff.patch ]; then
-            echo "No code diff to review."
+            echo "Diff patch is empty after filtering; nothing to review."
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
+            echo "::group::Diff (first 200 lines)"
+            head -n 200 diff.patch
+            echo "::endgroup::"
           fi
 
       - name: Stop if no diff
         if: steps.diff.outputs.has_diff == 'false'
         run: echo "Nothing to review."
+
+      - name: Ensure OPENAI_API_KEY is present
+        if: steps.diff.outputs.has_diff == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::OPENAI_API_KEY secret is missing. Add it in repo/org secrets."
+            exit 1
+          else
+            echo "OPENAI_API_KEY detected."
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Prepare prompt (printf; no heredoc)
         if: steps.diff.outputs.has_diff == 'true'
@@ -81,6 +121,7 @@ jobs:
 "" \
 "Remember: this is a developer code review of code changes only. Markdown files are context, not review targets." \
 > .github/ai/prompt.txt
+          echo "Prompt written to .github/ai/prompt.txt"
 
       - name: Chunk diff file (no heredoc)
         if: steps.diff.outputs.has_diff == 'true'
@@ -88,15 +129,25 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .github/ai
-          CHUNK_COUNT=0
-          # Split by bytes; files will be .github/ai/chunk_000, chunk_001, ...
+          # Clean prior chunks if re-run
+          rm -f .github/ai/chunk_*.patch || true
           split -b "${MAX_BYTES_PER_CHUNK}" -d -a 3 diff.patch .github/ai/chunk_ || true
+
           shopt -s nullglob
+          COUNT=0
           for f in .github/ai/chunk_*; do
             mv "$f" "${f}.patch"
-            CHUNK_COUNT=$((CHUNK_COUNT+1))
+            COUNT=$((COUNT+1))
           done
-          echo "Created $CHUNK_COUNT chunk(s)."
+          if [ "$COUNT" -eq 0 ]; then
+            # Fallback: single chunk equals whole diff
+            cp diff.patch .github/ai/chunk_000.patch
+            COUNT=1
+          fi
+          echo "Chunks created: $COUNT"
+          echo "::group::Chunk list"
+          ls -la .github/ai/chunk_*.patch
+          echo "::endgroup::"
 
       - name: Run OpenAI review and aggregate
         if: steps.diff.outputs.has_diff == 'true'
@@ -109,14 +160,22 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
+            function abort(msg) {
+              core.setFailed(msg);
+              throw new Error(msg);
+            }
+
+            if (!process.env.OPENAI_API_KEY) {
+              abort('Missing OPENAI_API_KEY.');
+            }
+
             const basePrompt = fs.readFileSync('.github/ai/prompt.txt','utf8');
             const chunkFiles = fs.readdirSync('.github/ai')
               .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
               .sort();
 
-            if (!process.env.OPENAI_API_KEY) {
-              core.setFailed('Missing OPENAI_API_KEY secret.');
-              return;
+            if (chunkFiles.length === 0) {
+              abort('No diff chunks found to send to OpenAI.');
             }
 
             async function askOpenAI(content) {
@@ -135,27 +194,38 @@ jobs:
                   ]
                 })
               });
+              const txt = await r.text();
               if (!r.ok) {
-                const txt = await r.text();
-                throw new Error(`OpenAI error: ${r.status} ${txt}`);
+                abort(`OpenAI error ${r.status}: ${txt}`);
               }
-              const json = await r.json();
-              return json.choices?.[0]?.message?.content || '';
+              try {
+                const json = JSON.parse(txt);
+                return json.choices?.[0]?.message?.content || '';
+              } catch (e) {
+                abort(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`);
+              }
             }
 
             let aggregate = [];
-            if (chunkFiles.length === 0) {
-              aggregate.push('No code changes to review after filtering.');
-            } else {
-              for (const f of chunkFiles) {
-                const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
-                const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
-                const out = await askOpenAI(prompt);
-                aggregate.push(`### Review for ${f}\n${out}`);
-              }
+            for (const f of chunkFiles) {
+              const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
+              const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
+              core.info(`Sending ${f} to OpenAI (${diff.length} bytes)`);
+              const out = await askOpenAI(prompt);
+              aggregate.push(`### Review for ${f}\n${out}`);
             }
             const full = aggregate.join("\n\n---\n\n");
             fs.writeFileSync('.github/ai/review.md', full);
+            core.info('Wrote .github/ai/review.md');
+
+      - name: Print review excerpt (debug)
+        if: steps.diff.outputs.has_diff == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Review (first 100 lines)"
+          head -n 100 .github/ai/review.md || true
+          echo "::endgroup::"
 
       - name: Post PR review comment
         if: steps.diff.outputs.has_diff == 'true'
@@ -163,14 +233,22 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('.github/ai/review.md','utf8');
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              event: 'COMMENT',
-              body
-            });
+            if (!fs.existsSync('.github/ai/review.md')) {
+              core.setFailed('review.md missing; cannot post comment.');
+            } else {
+              const body = fs.readFileSync('.github/ai/review.md','utf8');
+              if (!body.trim()) {
+                core.setFailed('review.md is empty; refusing to post an empty comment.');
+              } else {
+                await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.pull_request.number,
+                  event: 'COMMENT',
+                  body
+                });
+              }
+            }
 
       - name: Optionally fail on HIGH/CRITICAL findings
         if: steps.diff.outputs.has_diff == 'true' && env.FAIL_ON_SEVERITY != 'none'
@@ -179,7 +257,7 @@ jobs:
           set -euo pipefail
           if grep -Eiq "Severity:\s*(CRITICAL|HIGH)" .github/ai/review.md; then
             if [ "${FAIL_ON_SEVERITY}" != "none" ]; then
-              echo "HIGH/CRITICAL findings present. Failing check per policy."
+              echo "::error::HIGH/CRITICAL findings present. Failing check per policy."
               exit 2
             fi
           fi
