@@ -41,7 +41,6 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true
           echo "::endgroup::"
 
-          # Non-markdown files only
           mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
 
           if [ "${#CODE_FILES[@]}" -eq 0 ]; then
@@ -83,42 +82,6 @@ jobs:
           fi
           echo "OPENAI_API_KEY found."
 
-      - name: Prepare prompt (simple printf)
-        if: steps.diff.outputs.has_diff == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .github/ai
-          {
-            echo "You are a senior software engineer performing a peer review of a pull request."
-            echo
-            echo "STRICT SCOPE"
-            echo "- Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context)."
-            echo "- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only."
-            echo "- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes."
-            echo "- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them."
-            echo "- Do NOT summarize the whole repo; focus only on code changes."
-            echo
-            echo "OUTPUT FORMAT"
-            echo "1. Summary: 2-5 bullet points."
-            echo "2. Findings: Numbered list. Each finding MUST include:"
-            echo "   - File path and line(s) from the code diff"
-            echo "   - Issue description or improvement opportunity"
-            echo "   - Concrete suggestion with a sample code or patch snippet showing a possible resolution"
-            echo "   - Severity: LOW | MEDIUM | HIGH | CRITICAL"
-            echo "3. Tests: Explicitly call out missing or to-be-updated tests for the new code."
-            echo "4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation."
-            echo "5. GO/NO-GO: Decide based only on the code diff."
-            echo
-            echo "TONE"
-            echo "- Be concise, technical, and actionable."
-            echo "- Always include at least one possible resolution (sample code, config change, or patch) for each issue."
-            echo "- If context outside the diff is needed, state clearly: Assumption: ..."
-            echo
-            echo "Remember: this is a developer code review of code changes only. Markdown files are context, not review targets."
-          } > .github/ai/prompt.txt
-          echo "Prompt written."
-
       - name: Chunk diff file
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
@@ -134,12 +97,10 @@ jobs:
             mv "$f" "${f}.patch"
             COUNT=$((COUNT+1))
           done
-
           if [ "$COUNT" -eq 0 ]; then
             cp diff.patch .github/ai/chunk_000.patch
             COUNT=1
           fi
-
           echo "Chunks created: $COUNT"
           echo "::group::Chunk list"
           ls -la .github/ai/chunk_*.patch
@@ -156,18 +117,43 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            function fail(msg) {
-              core.setFailed(msg);
-              throw new Error(msg);
-            }
+            function fail(msg) { core.setFailed(msg); throw new Error(msg); }
 
             if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY.');
 
-            const basePrompt = fs.readFileSync('.github/ai/prompt.txt','utf8');
+            // Keep prompt inline to avoid YAML/shell quoting issues. ASCII only.
+            const basePrompt = `
+You are a senior software engineer performing a peer review of a pull request.
+
+STRICT SCOPE
+- Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context).
+- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only.
+- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes.
+- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them.
+- Do NOT summarize the whole repo; focus only on code changes.
+
+OUTPUT FORMAT
+1. Summary: 2-5 bullet points.
+2. Findings: Numbered list. Each finding MUST include:
+   - File path and line(s) from the code diff
+   - Issue description or improvement opportunity
+   - Concrete suggestion with a sample code or patch snippet showing a possible resolution
+   - Severity: LOW | MEDIUM | HIGH | CRITICAL
+3. Tests: Explicitly call out missing or to-be-updated tests for the new code.
+4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation.
+5. GO/NO-GO: Decide based only on the code diff.
+
+TONE
+- Be concise, technical, and actionable.
+- Always include at least one possible resolution (sample code, config change, or patch) for each issue.
+- If context outside the diff is needed, state clearly: Assumption: ...
+
+Remember: this is a developer code review of code changes only. Markdown files are context, not review targets.
+`.trim();
+
             const chunkFiles = fs.readdirSync('.github/ai')
               .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
               .sort();
-
             if (chunkFiles.length === 0) fail('No diff chunks found.');
 
             async function askOpenAI(content) {
@@ -186,14 +172,9 @@ jobs:
                   ]
                 })
               });
-
               const txt = await r.text();
               if (!r.ok) fail(`OpenAI error ${r.status}: ${txt}`);
-
-              let json;
-              try { json = JSON.parse(txt); }
-              catch (e) { fail(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`); }
-
+              let json; try { json = JSON.parse(txt); } catch (e) { fail(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`); }
               const out = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
               return out || '';
             }
