@@ -29,8 +29,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: |
-          pip install --disable-pip-version-check requests
+        run: pip install --disable-pip-version-check requests
 
       - name: Validate OPENAI_API_KEY
         env:
@@ -44,12 +43,10 @@ jobs:
       - name: Build context pack (code + required docs for peer review)
         run: |
           mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
-          # optional base context from your script
           python scripts/ci/make_context_pack.py --out artifacts/ci/context.jsonl || true
 
-          # Build extra context via pure Python (avoids heredoc/inline bash pitfalls)
           python - << 'PY'
-import json, os, sys, pathlib
+import json, pathlib
 root = pathlib.Path('.')
 out = pathlib.Path('artifacts/ci/context.jsonl')
 extra = []
@@ -86,7 +83,6 @@ for dname in ('bugs','features','feedback'):
         for f in d.rglob('*'):
             add_file(f)
 
-# append to or create context.jsonl
 mode = 'a' if out.exists() and out.stat().st_size > 0 else 'w'
 with out.open(mode, encoding='utf-8') as fp:
     for rec in extra:
