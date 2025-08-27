@@ -41,7 +41,9 @@
       "Bash(PYTHONPATH=. python -m pytest tests/test_bug_tracker.py -v)",
       "Bash(PYTHONPATH=. python -m pytest tests/test_build_validator.py tests/test_bug_tracker.py -v)",
       "Bash(PYTHONPATH=. python -m pytest tests/test_bug_tracker.py tests/test_build_validator.py -v)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(dir:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": [],

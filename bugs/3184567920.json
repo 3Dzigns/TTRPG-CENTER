@@ -1,0 +1,76 @@
+{
+  "bug_id": "3184567920",
+  "timestamp": "2025-08-27T15:00:00Z",
+  "environment": "dev",
+  "build_id": "85628acfe9c3579962a4fcef392d2edbc41adc48",
+  "severity": "medium",
+  "category": "testing",
+  "status": "removed",
+  "resolution": "Bug removed - targets .claude/commands/*.md files which cannot be edited per system restrictions",
+  "resolution_timestamp": "2025-08-27T15:05:00Z",
+  "title": "Missing Tests for New Logic in Ingestion Command",
+  "description": "The ingestion command lacks unit and integration tests to ensure its functionality and reliability.",
+  "review_id": "CR-003",
+  "source": "peer_review",
+  "peer_review_history": [
+    {
+      "review_sha": "85628acfe9c3579962a4fcef392d2edbc41adc48",
+      "severity": "medium",
+      "found_date": "2025-08-27T15:00:00Z",
+      "provider": "openai"
+    }
+  ],
+  "admin_controls": {
+    "can_modify_status": false,
+    "can_put_on_hold": false,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "technical_analysis": {
+    "root_cause_potential": [
+      "Incomplete test coverage for ingestion command",
+      "Missing unit tests for individual phases",
+      "Lack of integration tests for end-to-end functionality",
+      "Insufficient test automation for critical paths"
+    ],
+    "affected_components": [
+      ".claude/commands/ingest.md",
+      "Test suite coverage",
+      "CI/CD pipeline validation",
+      "Quality assurance processes"
+    ],
+    "requirements_impact": [
+      "TEST-003"
+    ],
+    "suggested_solution": "Add comprehensive unit tests for each phase of the ingestion process and integration tests to validate end-to-end functionality"
+  },
+  "immediate_fixes": [
+    {
+      "action": "Create unit tests for each ingestion phase (upload, chunking, metadata extraction, embeddings, enrichment, verification)",
+      "rationale": "Ensure individual components work correctly in isolation"
+    },
+    {
+      "action": "Develop integration tests for complete ingestion workflows",
+      "rationale": "Validate end-to-end functionality and component interactions"
+    },
+    {
+      "action": "Add error handling and edge case testing",
+      "rationale": "Ensure robust behavior under failure conditions"
+    },
+    {
+      "action": "Implement test automation in CI/CD pipeline",
+      "rationale": "Prevent regressions and maintain code quality"
+    }
+  ],
+  "impact_assessment": {
+    "user_impact": "Medium - Potential undetected bugs in production",
+    "functionality_impact": "Medium - Reduced confidence in system reliability",
+    "urgency": "Medium - Should be addressed to maintain code quality standards"
+  },
+  "related_requirements": [
+    "TEST-003"
+  ],
+  "affected_files": [
+    ".claude/commands/ingest.md:1-5"
+  ]
+}
