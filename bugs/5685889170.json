@@ -1,0 +1,25 @@
+{
+  "timestamp": "2025-08-27T21:51:14Z",
+  "environment": "dev",
+  "build_id": "7233f9c",
+  "severity": "medium",
+  "category": "workflow_improvement",
+  "status": "open",
+  "title": "Ingestion progress shape too minimal for consumers",
+  "description": "Progress lacks env, status (running/queued/done/error), updated_at ISO time, logs_tail, and metrics. UI cannot distinguish states reliably.",
+  "source": "ai_review",
+  "files": [
+    "app/ingestion/pipeline.py:100-112"
+  ],
+  "requirements": [
+    "ING-003",
+    "ADM-001"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "5685889170"
+}

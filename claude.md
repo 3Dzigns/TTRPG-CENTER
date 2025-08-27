@@ -101,7 +101,7 @@ Create these under `.claude/commands/`:
 ## 14) Standard Workflow Automation
 **ALWAYS execute this workflow on EVERY user request before addressing the specific request:**
 
-1. **Git pull** to refresh from repository.
+1. **Pull Request removed**
 2. **Respond and acknowledge** the user request.
 3. **Parse new peer reviews and create bugs**  
    - New bug = create file with machine ID (`CR-###`) + user-friendly 10-digit ID.  
@@ -117,6 +117,7 @@ Create these under `.claude/commands/`:
 8. **Run automated tests in Dev** (localhost:8000) — unit, functional, regression, security.
 9. **Promote to Test env** and restart (localhost:8181).
 10. **Git commit and push all changes**.
+11. **run ai_review.py**
 
 ## 15) Features, Bugs, and Feedback
 - **IDs & Tracking**

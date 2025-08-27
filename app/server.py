@@ -1,8 +1,9 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import json, time, os, sys, uuid, logging, mimetypes
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from app.common.config import load_config
 from app.common.astra_client import get_vector_store
@@ -23,6 +24,19 @@ import shutil
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Security and performance configuration
+ADMIN_TOKEN = os.getenv("ADMIN_API_TOKEN", "")
+MAX_JSON_BYTES = int(os.getenv("MAX_JSON_BYTES", "1048576"))          # 1 MiB
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "52428800"))     # 50 MiB
+EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("SERVER_WORKERS", "4")))
+
+# Environment-specific collection allowlists
+ALLOWED_COLLECTIONS = {
+    "dev": {"ttrpg_chunks_dev", "ttrpg_chunks_test"},
+    "test": {"ttrpg_chunks_test"},  
+    "prod": {"ttrpg_chunks_prod"},
+}
 
 def secure_path_join(base_dir: str, user_path: str) -> Path:
     """
@@ -201,6 +215,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(html.encode("utf-8"))
+    
+    def _require_admin(self) -> bool:
+        """Require admin token for destructive operations"""
+        token = self.headers.get("X-Admin-Token", "")
+        if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+            self._send(401, {"error": "admin auth required", "hint": "Set X-Admin-Token header"})
+            return False
+        return True
+    
+    def _validate_collection(self, collection: str) -> bool:
+        """Validate collection name against environment allowlist"""
+        env = os.getenv("APP_ENV", "dev").lower()
+        allowed = ALLOWED_COLLECTIONS.get(env, set())
+        if collection not in allowed:
+            self._send(400, {"error": "invalid collection for environment", "allowed": list(allowed)})
+            return False
+        return True
     
     def _serve_static_file(self, path):
         """Serve static files from assets directory"""
@@ -1505,8 +1536,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # Parse request
             content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self._send(400, {"error": "no data provided"})
+            if content_length <= 0 or content_length > MAX_JSON_BYTES:
+                self._send(413, {"error": "payload too large", "max_bytes": MAX_JSON_BYTES})
                 return
             
             post_data = self.rfile.read(content_length)
@@ -1720,6 +1751,12 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_ingestion_upload(self):
         """Handle file upload for ingestion"""
         try:
+            # Check content length before processing
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > MAX_UPLOAD_BYTES:
+                self._send(413, {"error": "payload too large", "max_bytes": MAX_UPLOAD_BYTES})
+                return
+                
             content_type = self.headers.get('Content-Type', '')
             if not content_type.startswith('multipart/form-data'):
                 self._send(400, {"error": "multipart/form-data required"})
@@ -3257,6 +3294,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != 'POST':
             self._send(405, {"error": "POST method required"})
             return
+        
+        if not self._require_admin():
+            return
             
         try:
             # Parse request body for confirmation
@@ -3297,6 +3337,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != 'POST':
             self._send(405, {"error": "POST method required"})
             return
+        
+        if not self._require_admin():
+            return
             
         try:
             # Parse request body for confirmation and collection name
@@ -3317,6 +3360,10 @@ class Handler(BaseHTTPRequestHandler):
                 
             if not collection_name:
                 self._send(400, {"error": "Collection name is required"})
+                return
+            
+            # Validate collection name against allowlist
+            if not self._validate_collection(collection_name):
                 return
             
             # Get current environment - still enforce env restrictions
@@ -3466,6 +3513,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != 'POST':
             self._send(405, {"error": "POST method required"})
             return
+        
+        if not self._require_admin():
+            return
             
         try:
             # Parse request body
@@ -3488,6 +3538,10 @@ class Handler(BaseHTTPRequestHandler):
                 
             if not chunk_id or not collection:
                 self._send(400, {"error": "Chunk ID and collection name are required"})
+                return
+            
+            # Validate collection name against allowlist
+            if not self._validate_collection(collection):
                 return
             
             # Get current environment - still enforce env restrictions
@@ -3534,9 +3588,10 @@ def main():
     print(f"Health: http://localhost:{port}/health")
     
     try:
-        HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+        ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\\nShutting down TTRPG Center...")
+        EXECUTOR.shutdown(wait=True)
 
 if __name__ == "__main__":
     main()

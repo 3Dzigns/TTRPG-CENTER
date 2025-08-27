@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-08-27T21:51:14Z",
+  "environment": "dev",
+  "build_id": "7233f9c",
+  "severity": "medium",
+  "category": "performance",
+  "status": "closed",
+  "title": "Deprecated embedding model and brittle tokenizer",
+  "description": "text-embedding-ada-002 is deprecated. Tokenizer mapping by name is brittle and lacks retry logic.",
+  "source": "ai_review",
+  "files": [
+    "app/common/embeddings.py:12-22"
+  ],
+  "requirements": [
+    "RAG-001",
+    "PERF-002"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "5856203995",
+  "closed_by": "system_implementation",
+  "closed_at": 1756331683.7860894,
+  "closed_reason": "Upgraded to text-embedding-3-small model with retry logic and cl100k_base tokenizer"
+}

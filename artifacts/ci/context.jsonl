@@ -1,0 +1,46 @@
+{"type": "architecture", "id": "ARCH-001", "title": "Multi-Environment Architecture", "description": "DEV (8000), TEST (8181), PROD (8282) with environment-specific configs"}
+{"type": "architecture", "id": "ARCH-002", "title": "Hybrid RAG System", "description": "AstraDB vector store + OpenAI embeddings with 1536-dimensional vectors"}
+{"type": "architecture", "id": "ARCH-003", "title": "Graph Workflow Engine", "description": "Node-based execution with state management and step tracking"}
+{"type": "architecture", "id": "ARCH-004", "title": "Three-Pass Ingestion Pipeline", "description": "Parse → Enrich → Graph Compile with real-time progress tracking"}
+{"type": "architecture", "id": "ARCH-005", "title": "Immutable Build System", "description": "PowerShell automation with build IDs and release pointers"}
+{"type": "ui", "id": "UI-001", "title": "LCARS/Star Wars Design", "description": "Orbitron fonts, cyberpunk color scheme, animated borders"}
+{"type": "ui", "id": "UI-002", "title": "Background Art Integration", "description": "Custom TTRPG_Center_BG.png with layered gradients"}
+{"type": "ui", "id": "UI-003", "title": "Chat Interface", "description": "Real-time query processing with memory modes"}
+{"type": "ui", "id": "UI-004", "title": "Source Provenance Toggle", "description": "Collapsible source display with relevance scores"}
+{"type": "ui", "id": "UI-005", "title": "Multimodal Image Display", "description": "Automatic image detection and rendering in responses"}
+{"type": "ui", "id": "UI-006", "title": "Feedback System", "description": "Thumbs up/down with automatic quality assurance"}
+{"type": "ingestion", "id": "ING-001", "title": "File Upload Interface", "description": "Multi-file drag-drop with progress bars"}
+{"type": "ingestion", "id": "ING-002", "title": "Bulk Upload Processing", "description": "Batch processing with individual file tracking"}
+{"type": "ingestion", "id": "ING-003", "title": "Real-Time Progress Tracking", "description": "Three-phase progress with polling and live updates"}
+{"type": "ingestion", "id": "ING-004", "title": "Status Monitoring", "description": "Ingestion history with detailed status displays"}
+{"type": "ingestion", "id": "ING-005", "title": "PDF Processing", "description": "PyPDF2-based parsing with three-pass pipeline"}
+{"type": "admin", "id": "ADM-001", "title": "Admin Dashboard", "description": "Central hub with system status and navigation"}
+{"type": "admin", "id": "ADM-002", "title": "Database Management", "description": "Collection management, document browser, search interface"}
+{"type": "admin", "id": "ADM-003", "title": "System Controls", "description": "Environment management, build promotion, health monitoring"}
+{"type": "rag", "id": "RAG-001", "title": "Vector Search", "description": "AstraDB-powered semantic search with relevance scoring"}
+{"type": "rag", "id": "RAG-002", "title": "Dual AI Integration", "description": "OpenAI and Claude API integration with answer comparison"}
+{"type": "rag", "id": "RAG-003", "title": "Context Assembly", "description": "Multi-document context building with source tracking"}
+{"type": "rag", "id": "RAG-004", "title": "Memory Management", "description": "Session-based conversation memory with context limits"}
+{"type": "security", "id": "SEC-001", "title": "Environment Isolation", "description": "Complete separation of DEV/TEST/PROD data and configurations"}
+{"type": "security", "id": "SEC-002", "title": "API Key Management", "description": "Environment variable-based secret management"}
+{"type": "security", "id": "SEC-003", "title": "Input Validation", "description": "File type validation, size limits, path traversal protection"}
+{"type": "security", "id": "SEC-004", "title": "Cache Control", "description": "Browser cache-busting headers for sensitive data"}
+{"type": "testing", "id": "TEST-001", "title": "Unit Test Coverage", "description": "Comprehensive unit tests for core components"}
+{"type": "testing", "id": "TEST-002", "title": "Integration Testing", "description": "End-to-end testing of ingestion and RAG workflows"}
+{"type": "testing", "id": "TEST-003", "title": "Bug Tracking", "description": "Automated bug tracking system with severity escalation"}
+{"type": "testing", "id": "TEST-004", "title": "Build Validation", "description": "Build integrity validation and promotion system"}
+{"type": "performance", "id": "PERF-001", "title": "Chunking Strategy", "description": "Optimal chunk sizes (1000 chars) with 200-char overlap"}
+{"type": "performance", "id": "PERF-002", "title": "Embedding Caching", "description": "Vector embedding caching to reduce API calls"}
+{"type": "performance", "id": "PERF-003", "title": "Progress Streaming", "description": "Real-time progress updates without polling overhead"}
+{"type": "workflow", "id": "WF-001", "title": "Character Creation", "description": "Pathfinder 2E character creation workflow with validation"}
+{"type": "workflow", "id": "WF-002", "title": "Level Up Process", "description": "Automated level progression with feat selection"}
+{"type": "workflow", "id": "WF-003", "title": "Rule Lookup", "description": "Intelligent rule query routing with system detection"}
+{"type": "build", "id": "BUILD-001", "title": "PowerShell Automation", "description": "Windows PowerShell scripts for environment management"}
+{"type": "build", "id": "BUILD-002", "title": "Build Promotion", "description": "Automated promotion between DEV → TEST → PROD environments"}
+{"type": "build", "id": "BUILD-003", "title": "Version Management", "description": "Timestamped build IDs with release pointer management"}
+{"type": "config", "current_build": "2025-08-27_12-06-31_build-6674", "description": "Latest build identifier"}
+{"type": "config", "environments": ["dev:8000", "test:8181", "prod:8282"], "description": "Environment port assignments"}
+{"type": "config", "astradb_collections": ["ttrpg_chunks_dev", "ttrpg_chunks_test", "ttrpg_chunks_prod"], "description": "Database collections per environment"}
+{"type": "standards", "coding": "Python type hints, error handling, logging", "description": "Code quality standards"}
+{"type": "standards", "security": "No hardcoded secrets, environment isolation, input validation", "description": "Security requirements"}
+{"type": "standards", "documentation": "Comprehensive STATUS.md, API documentation, user guides", "description": "Documentation standards"}

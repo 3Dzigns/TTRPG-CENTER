@@ -1,0 +1,29 @@
+{
+  "timestamp": "2025-08-27T21:49:49Z",
+  "environment": "dev",
+  "build_id": "7233f9c",
+  "severity": "high",
+  "category": "security",
+  "status": "closed",
+  "title": "User-specified collection names for destructive ops",
+  "description": "Allowing arbitrary collection names increases blast radius - typos can wipe unintended collections.",
+  "source": "ai_review",
+  "files": [
+    "app/server.py:3477-3506",
+    "app/server.py:3310-3336"
+  ],
+  "requirements": [
+    "SEC-001",
+    "ADM-002"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "3630020708",
+  "closed_by": "system_implementation",
+  "closed_at": 1756331683.7820818,
+  "closed_reason": "Added collection name validation with environment-specific allowlists"
+}

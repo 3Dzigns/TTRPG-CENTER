@@ -12,8 +12,8 @@ class EmbeddingService:
     
     def __init__(self):
         self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "text-embedding-ada-002"
-        self.encoding = tiktoken.encoding_for_model("text-embedding-ada-002")
+        self.model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        self.encoding = tiktoken.get_encoding("cl100k_base")
         
     def get_embedding(self, text: str) -> List[float]:
         """Get embedding for a single text"""
@@ -29,12 +29,19 @@ class EmbeddingService:
                 text = self.encoding.decode(truncated_tokens)
                 logger.warning(f"Text truncated from {len(tokens)} to {len(truncated_tokens)} tokens")
             
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=text
-            )
-            
-            return response.data[0].embedding
+            # Retry logic for transient failures
+            for attempt in range(3):
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model,
+                        input=text
+                    )
+                    return response.data[0].embedding
+                except Exception as e:
+                    if attempt == 2:  # Last attempt
+                        raise
+                    logger.warning(f"Embedding attempt {attempt + 1} failed: {e}, retrying...")
+                    time.sleep(0.5 * (attempt + 1))
             
         except Exception as e:
             logger.error(f"Failed to get embedding: {e}")
@@ -71,12 +78,19 @@ class EmbeddingService:
                 
                 cleaned_texts.append(text)
             
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=cleaned_texts
-            )
-            
-            return [item.embedding for item in response.data]
+            # Retry logic for batch embeddings
+            for attempt in range(3):
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model,
+                        input=cleaned_texts
+                    )
+                    return [item.embedding for item in response.data]
+                except Exception as e:
+                    if attempt == 2:  # Last attempt
+                        raise
+                    logger.warning(f"Batch embedding attempt {attempt + 1} failed: {e}, retrying...")
+                    time.sleep(0.5 * (attempt + 1))
             
         except Exception as e:
             logger.error(f"Batch embedding failed: {e}")

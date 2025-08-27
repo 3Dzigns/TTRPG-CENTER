@@ -1,0 +1,29 @@
+{
+  "timestamp": "2025-08-27T21:49:49Z",
+  "environment": "dev",
+  "build_id": "7233f9c",
+  "severity": "high",
+  "category": "performance",
+  "status": "closed",
+  "title": "Single-threaded server with blocking ingestion",
+  "description": "HTTPServer is not multi-threaded; long-running ingestion blocks handling of other requests. Uploads and RAG queries will queue behind ingestion.",
+  "source": "ai_review",
+  "files": [
+    "app/server.py:3536-3538",
+    "app/server.py:1821-1853"
+  ],
+  "requirements": [
+    "PERF-003",
+    "ING-003"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "2792699693",
+  "closed_by": "system_implementation",
+  "closed_at": 1756331683.7780917,
+  "closed_reason": "Upgraded to ThreadingHTTPServer with background task executor for non-blocking ingestion"
+}

@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-08-27T21:49:49Z",
+  "environment": "dev",
+  "build_id": "7233f9c",
+  "severity": "critical",
+  "category": "security",
+  "status": "closed",
+  "title": "Admin endpoints without authentication",
+  "description": "Destructive admin operations (/api/database/cleanup, /api/database/cleanup-collection, /api/database/delete-chunk) are open to any caller with CORS * access. High risk of destructive misuse outside PROD.",
+  "source": "ai_review",
+  "files": [
+    "app/server.py:3255-3370",
+    "app/server.py:3464-3524"
+  ],
+  "requirements": [
+    "SEC-001",
+    "SEC-002",
+    "ADM-002"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "6084339765",
+  "closed_by": "system_implementation",
+  "closed_at": 1756331683.7720866,
+  "closed_reason": "Implemented admin authentication with X-Admin-Token header requirement"
+}
