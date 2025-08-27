@@ -10,9 +10,7 @@ on:
         required: true
         default: 'diff'
         type: choice
-        options:
-          - diff
-          - full
+        options: [diff, full]
       model:
         description: 'OpenAI model (e.g., gpt-4o-mini, gpt-4o)'
         required: false
@@ -26,103 +24,96 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
-    env:
-      OPENAI_MODEL: ${{ inputs.model || 'gpt-4o-mini' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Determine review mode
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            MODE="${{ inputs.review_mode }}"
-          else
-            MODE="diff"
-          fi
-          echo "MODE=$MODE" >> "$GITHUB_ENV"
-
-      - name: Compute diff or full patch (excluding .md)
-        id: diff
+      - name: Init env (mode/model/timestamp)
         shell: bash
         run: |
           set -euo pipefail
-
-          mkdir -p docs/reviews
-
+          # Mode: default to 'diff' for PRs; use input for manual runs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.review_mode }}"
+            MODEL="${{ inputs.model }}"
+          else
+            MODE="diff"
+            MODEL="gpt-4o-mini"
+          fi
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
           OUT="docs/reviews/${TS}.json"
-          echo "TIMESTAMP=$TS" >> "$GITHUB_ENV"
-          echo "OUTFILE=$OUT" >> "$GITHUB_ENV"
+          mkdir -p docs/reviews
+          echo "MODE=$MODE"        >> "$GITHUB_ENV"
+          echo "OPENAI_MODEL=$MODEL" >> "$GITHUB_ENV"
+          echo "TIMESTAMP=$TS"     >> "$GITHUB_ENV"
+          echo "OUTFILE=$OUT"      >> "$GITHUB_ENV"
 
+      - name: Compute patch (exclude *.md)
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
           if [ "$MODE" = "diff" ]; then
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               BASE_SHA="${{ github.event.pull_request.base.sha }}"
               HEAD_SHA="${{ github.sha }}"
             else
               DEFAULT_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
-              git fetch origin "$DEFAULT_BRANCH"
+              git fetch origin "$DEFAULT_BRANCH" --depth=1
               BASE_SHA="origin/$DEFAULT_BRANCH"
               HEAD_SHA="HEAD"
             fi
-            git diff --unified=3 "${BASE_SHA}"..."${HEAD_SHA}" -- . ":(exclude)**/*.md" > review.patch || true
+            git diff --unified=3 "${BASE_SHA}...${HEAD_SHA}" -- . ":(exclude)**/*.md" > review.patch || true
           else
             EMPTY_TREE="$(git hash-object -t tree /dev/null)"
             git diff --unified=3 "$EMPTY_TREE" HEAD -- . ":(exclude)**/*.md" > review.patch || true
           fi
 
           if [ ! -s review.patch ]; then
-            printf '{\n' > "$OUT"
-            printf '  "summary": ["No applicable code changes (non-.md) found."],\n' >> "$OUT"
-            printf '  "findings": [],\n' >> "$OUT"
-            printf '  "tests": [],\n' >> "$OUT"
-            printf '  "security_concurrency": [],\n' >> "$OUT"
-            printf '  "go_no_go": "GO"\n' >> "$OUT"
-            printf '}\n' >> "$OUT"
+            printf '{\n' > "${OUTFILE}"
+            printf '  "summary": ["No applicable code changes (non-.md) found."],\n' >> "${OUTFILE}"
+            printf '  "findings": [],\n' >> "${OUTFILE}"
+            printf '  "tests": [],\n' >> "${OUTFILE}"
+            printf '  "security_concurrency": [],\n' >> "${OUTFILE}"
+            printf '  "go_no_go": "GO"\n' >> "${OUTFILE}"
+            printf '}\n' >> "${OUTFILE}"
             echo "empty=1" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            echo "empty=0" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "empty=0" >> "$GITHUB_OUTPUT"
-
-      - name: Build review prompt
-        if: steps.diff.outputs.empty != '1'
-        id: prompt
+      - name: Build OpenAI request body (JSON-safe, no Python)
+        if: steps.patch.outputs.empty != '1'
         shell: bash
         run: |
           set -euo pipefail
+          # Read the patch and JSON-escape it as a raw string
+          PATCH_JSON=$(jq -Rs . < review.patch)
 
-          PATCH_JSON=$(python3 - <<'PY'
-import json, sys
-with open('review.patch','r',encoding='utf-8',errors='ignore') as f:
-    print(json.dumps(f.read()))
-PY
-)
-          cat > prompt.json <<'JSON'
-{
-  "role": "system",
-  "content": "You are a senior software engineer performing a peer review of a pull request.\n\nSTRICT SCOPE\n- Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context).\n- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only.\n- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes.\n- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them.\n- Do NOT summarize the whole repo; focus only on code changes.\n\nOUTPUT FORMAT\n1. Summary: 2-5 bullet points.\n2. Findings: Numbered list. Each finding MUST include:\n   - File path and line(s) from the code diff\n   - Issue description or improvement opportunity\n   - Concrete suggestion with a sample code or patch snippet showing a possible resolution\n   - Severity: LOW | MEDIUM | HIGH | CRITICAL\n3. Tests: Explicitly call out missing or to-be-updated tests for the new code.\n4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation.\n5. GO/NO-GO: Decide based only on the code diff.\n\nTONE\n- Be concise, technical, and actionable.\n- Always include at least one possible resolution (sample code, config change, or patch) for each issue.\n- If context outside the diff is needed, state clearly: Assumption: ...\n\nRemember: this is a developer code review of code changes only. Markdown files are context, not review targets."
-}
-JSON
+          # System prompt (exact text from your spec)
+          SYSTEM_PROMPT=$'You are a senior software engineer performing a peer review of a pull request.\n\nSTRICT SCOPE\n- Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context).\n- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only.\n- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes.\n- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them.\n- Do NOT summarize the whole repo; focus only on code changes.\n\nOUTPUT FORMAT\n1. Summary: 2-5 bullet points.\n2. Findings: Numbered list. Each finding MUST include:\n   - File path and line(s) from the code diff\n   - Issue description or improvement opportunity\n   - Concrete suggestion with a sample code or patch snippet showing a possible resolution\n   - Severity: LOW | MEDIUM | HIGH | CRITICAL\n3. Tests: Explicitly call out missing or to-be-updated tests for the new code.\n4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation.\n5. GO/NO-GO: Decide based only on the code diff.\n\nTONE\n- Be concise, technical, and actionable.\n- Always include at least one possible resolution (sample code, config change, or patch) for each issue.\n- If context outside the diff is needed, state clearly: Assumption: ...\n\nRemember: this is a developer code review of code changes only. Markdown files are context, not review targets.'
 
-          echo "{\"role\":\"user\",\"content\":\"DIFF START\\n\"}" > user1.json
-          echo "{\"role\":\"user\",\"content\":${PATCH_JSON}}" >> user1.json
-          echo "{\"role\":\"user\",\"content\":\"\\nDIFF END\\nReturn ONLY valid JSON with keys: summary, findings, tests, security_concurrency, go_no_go.\"}" >> user1.json
-
-          jq -s --arg model "${OPENAI_MODEL}" '{
-            "model": $model,
-            "temperature": 0,
-            "response_format": {"type":"json_object"},
-            "messages": .
-          }' prompt.json user1.json > body.json
+          # Compose messages array with jq (no heredoc Python)
+          jq -n \
+            --arg model   "${OPENAI_MODEL}" \
+            --arg system  "$SYSTEM_PROMPT" \
+            --arg patch   "$(printf 'DIFF START\n'; cat review.patch; printf '\nDIFF END\nReturn ONLY valid JSON with keys: summary, findings, tests, security_concurrency, go_no_go.\n')" \
+            '{
+              model: $model,
+              temperature: 0,
+              response_format: {type:"json_object"},
+              messages: [
+                {role:"system", content:$system},
+                {role:"user",   content:$patch}
+              ]
+            }' > body.json
 
       - name: Call OpenAI
-        if: steps.diff.outputs.empty != '1'
+        if: steps.patch.outputs.empty != '1'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -130,16 +121,16 @@ JSON
             -H "Authorization: Bearer ${OPENAI_API_KEY}" \
             -H "Content-Type: application/json" \
             -d @body.json \
-          | jq -r '.choices[0].message.content' > "${OUTFILE}"
+            | jq -r '.choices[0].message.content' > "${OUTFILE}"
 
       - name: Commit and push review artifact
         shell: bash
         run: |
           set -euo pipefail
           if [ -f "${OUTFILE}" ]; then
-            git config user.name "github-actions[bot]"
+            git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "${OUTFILE}"
-            git commit -m "AI review: ${TIMESTAMP}" || exit 0
+            git commit -m "AI review: ${TIMESTAMP} (${MODE})" || exit 0
             git push
           fi
