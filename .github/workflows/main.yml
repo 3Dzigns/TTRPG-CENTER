@@ -44,45 +44,55 @@ jobs:
       - name: Build context pack (code + required docs for peer review)
         run: |
           mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
+          # optional base context from your script
           python scripts/ci/make_context_pack.py --out artifacts/ci/context.jsonl || true
 
-          echo "" > artifacts/ci/extra_context.jsonl
-          add_to_context() {
-            f="$1"
-            if [ -f "$f" ] && [ $(stat -c%s "$f") -le 256000 ]; then
-              python - "$f" >> artifacts/ci/extra_context.jsonl <<'PY'
-import json, sys, pathlib
-p = sys.argv[1]
-try:
-    txt = pathlib.Path(p).read_text(encoding="utf-8", errors="replace")
-except Exception:
-    txt = ""
-print(json.dumps({"path": p, "content": txt}, ensure_ascii=False))
+          # Build extra context via pure Python (avoids heredoc/inline bash pitfalls)
+          python - << 'PY'
+import json, os, sys, pathlib
+root = pathlib.Path('.')
+out = pathlib.Path('artifacts/ci/context.jsonl')
+extra = []
+
+def add_file(p: pathlib.Path):
+    try:
+        if p.is_file() and p.stat().st_size <= 256000:
+            txt = p.read_text(encoding='utf-8', errors='replace')
+            extra.append({'path': str(p), 'content': txt})
+    except Exception:
+        pass
+
+# 1) .claude/**/*.md
+claude = root/'.claude'
+if claude.exists():
+    for f in claude.rglob('*.md'):
+        add_file(f)
+
+# 2) claude.md
+cm = root/'claude.md'
+if cm.exists():
+    add_file(cm)
+
+# 3) ./docs/requirements/**
+req = root/'docs'/'requirements'
+if req.exists():
+    for f in req.rglob('*'):
+        add_file(f)
+
+# 4) ./bugs ./features ./feedback
+for dname in ('bugs','features','feedback'):
+    d = root/dname
+    if d.exists():
+        for f in d.rglob('*'):
+            add_file(f)
+
+# append to or create context.jsonl
+mode = 'a' if out.exists() and out.stat().st_size > 0 else 'w'
+with out.open(mode, encoding='utf-8') as fp:
+    for rec in extra:
+        fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
+print(f"Wrote {len(extra)} extra context records → {out}")
 PY
-            fi
-          }
-
-          # 1) .claude/**/*.md
-          while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find .claude -type f -name '*.md' -print0 2>/dev/null || true)
-
-          # 2) claude.md
-          [ -f "claude.md" ] && add_to_context "claude.md"
-
-          # 3) ./docs/requirements/**
-          while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find docs/requirements -type f -print0 2>/dev/null || true)
-
-          # 4) ./bugs ./features ./feedback
-          for d in bugs features feedback; do
-            if [ -d "$d" ]; then
-              while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find "$d" -type f -print0)
-            fi
-          done
-
-          if [ -s artifacts/ci/context.jsonl ]; then
-            cat artifacts/ci/extra_context.jsonl >> artifacts/ci/context.jsonl
-          else
-            mv artifacts/ci/extra_context.jsonl artifacts/ci/context.jsonl
-          fi
 
       - name: Read review mode
         id: mode
