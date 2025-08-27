@@ -1,0 +1,29 @@
+{
+  "timestamp": "2025-08-27T22:03:14Z",
+  "environment": "test",
+  "build_id": "2025-08-27_21-35-15_build-0114",
+  "severity": "medium",
+  "category": "ui_display",
+  "status": "closed",
+  "title": "System Status database connection shows stale/cached status",
+  "description": "Database connection status in System Status pane appears to show cached or stale information rather than real-time connection status. May be caching issue or status endpoint not refreshing properly.",
+  "source": "user_submission",
+  "files": [
+    "app/server.py:/status endpoint",
+    "admin UI system status pane"
+  ],
+  "requirements": [
+    "ADM-001",
+    "ADM-003"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "9459640717",
+  "closed_by": "system_implementation",
+  "closed_at": 1756332309.0431938,
+  "closed_reason": "Added proper error handling to status endpoint and cache-busting headers to prevent stale database status display. Status now shows real-time connection status with error messages when connection fails."
+}

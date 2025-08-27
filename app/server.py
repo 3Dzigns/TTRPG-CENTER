@@ -216,6 +216,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(html.encode("utf-8"))
     
+    def _send_status(self, code, data):
+        """Send status response with cache-busting headers"""
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # Add cache-busting headers to prevent stale status display
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        if isinstance(data, dict) or isinstance(data, list):
+            self.wfile.write(json.dumps(data, indent=2).encode("utf-8"))
+        else:
+            self.wfile.write(str(data).encode("utf-8"))
+    
     def _require_admin(self) -> bool:
         """Require admin token for destructive operations"""
         token = self.headers.get("X-Admin-Token", "")
@@ -300,9 +317,18 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 build_id = os.getenv("APP_RELEASE_BUILD", "dev")
             
-            # Detailed health checks
+            # Detailed health checks with proper error handling
+            try:
+                astra_health = vector_store.health_check()
+                astra_status = astra_health.get("status", "error")
+                astra_message = astra_health.get("message", "")
+            except Exception as e:
+                astra_status = "error"
+                astra_message = f"Connection failed: {str(e)}"
+                
             health_checks = {
-                "astra_vector": vector_store.health_check()["status"],
+                "astra_vector": astra_status,
+                "astra_vector_message": astra_message,
                 "astra_graph": "connected" if cfg["graph"]["token_present"] else "missing_token", 
                 "openai": "connected" if cfg["openai"]["key_present"] else "missing_key"
             }
@@ -318,7 +344,7 @@ class Handler(BaseHTTPRequestHandler):
                 "uptime_status": "operational"
             }
             
-            self._send(200, {
+            self._send_status(200, {
                 "env": cfg["runtime"]["env"],
                 "port": cfg["runtime"]["port"],
                 "build_id": build_id,
@@ -327,7 +353,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ngrok_public_url": ngrok if cfg["runtime"]["env"] == "prod" else "",
                 "performance": current_stats,
                 "workflows": len(workflow_engine.workflows),
-                "active_executions": len(workflow_engine.active_executions)
+                "active_executions": len(workflow_engine.active_executions),
+                "timestamp": time.time()  # Add timestamp to force refresh
             })
         elif path == "/validate-dev":
             # DEV Testing Gates - Comprehensive validation before TEST promotion
