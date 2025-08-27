@@ -1,8 +1,14 @@
 name: AI Code Review (OpenAI, Diff-Only)
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch: {}                # <— manual “Run workflow” button
+  push:                                # <— runs when you push (useful while you tune it)
+    branches: ["**"]
+    paths-ignore:
+      - "**/*.md"                      # pushes that only touch .md won’t fire
+  pull_request:                        # <— runs on PR activity
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: ["**"]
 
 permissions:
   contents: read
@@ -22,25 +28,39 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show PR SHAs (debug)
+      - name: Show event + SHAs (debug)
         shell: bash
         run: |
           set -euo pipefail
-          echo "BASE=${{ github.event.pull_request.base.sha }}"
-          echo "HEAD=${{ github.event.pull_request.head.sha }}"
+          echo "GH_EVENT_NAME=${{ github.event_name }}"
+          echo "PR? ${{ github.event.pull_request.number || 'no PR' }}"
+          echo "BASE=${{ github.event.pull_request.base.sha || 'n/a' }}"
+          echo "HEAD=${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Compute code diff (exclude .md)
         id: diff
         shell: bash
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            # push/workflow_dispatch fallback: compare against previous commit
+            BASE_SHA="$(git rev-parse HEAD~1 || true)"
+            HEAD_SHA="$(git rev-parse HEAD)"
+          fi
+
+          if [ -z "${BASE_SHA}" ]; then
+            echo "First commit on branch or non-PR run. Using empty tree for BASE."
+            BASE_SHA="$(git hash-object -t tree /dev/null)"
+          fi
 
           echo "::group::Changed files (raw)"
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true
           echo "::endgroup::"
 
+          # Non-markdown files only
           mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
 
           if [ "${#CODE_FILES[@]}" -eq 0 ]; then
@@ -120,12 +140,12 @@ jobs:
             function fail(msg) { core.setFailed(msg); throw new Error(msg); }
             if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY.');
 
-            // Prefer repo prompt file; if missing, fall back to an inline array (joined) to avoid YAML newline issues.
+            // Prefer committed prompt; fall back to inline array (avoids YAML newline issues)
             let basePrompt = '';
             const promptPath = '.github/ai/prompt.txt';
             if (fs.existsSync(promptPath)) {
               basePrompt = fs.readFileSync(promptPath, 'utf8').trim();
-              if (!basePrompt) core.warning('prompt.txt is empty; using fallback prompt.');
+              if (!basePrompt) core.warning('prompt.txt is empty; using fallback.');
             }
             if (!basePrompt) {
               basePrompt = [
