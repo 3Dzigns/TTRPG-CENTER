@@ -1,0 +1,14 @@
+name: Sanity
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["**"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "✅ Actions are firing. sha=${{ github.sha }} event=${{ github.event_name }}"
