@@ -1,158 +1,168 @@
-name: Main CI (AI Review + Status)
+name: AI Code Review (OpenAI, Diff-Only)
 
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/review_status.md'
   pull_request:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/review_status.md'
+    types: [opened, synchronize, reopened]
+    branches: [ "**" ]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
+env:
+  OPENAI_MODEL: gpt-4o-mini     # adjust if you prefer a different model
+  MAX_CHARS_PER_CHUNK: "120000" # keep comfortably under model limits
+  FAIL_ON_SEVERITY: "none"      # options: none | high | critical
+
 jobs:
-  ai-review:
+  review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (full history for diff)
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          fetch-depth: 0
 
-      - name: Install deps
-        run: pip install --disable-pip-version-check requests
-
-      - name: Validate OPENAI_API_KEY
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Compute diff vs base
+        id: diff
         run: |
-          if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "***" ]; then
-            echo "ERROR: OPENAI_API_KEY is missing or placeholder. Add in Settings → Secrets → Actions."
-            exit 1
-          fi
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Base: $BASE_SHA"
+          echo "Head: $HEAD_SHA"
 
-      - name: Build context pack
-        run: |
-          mkdir -p artifacts/ci
-          python scripts/ci/make_context_pack.py
+          # Unified diff, no context (keeps the payload smaller but precise)
+          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" > diff.patch
 
-      - name: Read review mode
-        id: mode
-        run: |
-          MODE=diff
-          if [ -f ".ci/review_mode.txt" ]; then
-            MODE=$(tr -d '\r\n\t ' < .ci/review_mode.txt)
-          fi
-          if [ "$MODE" != "full" ]; then MODE=diff; fi
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
-          echo "Selected review mode: $MODE"
-
-      - name: Generate DIFF (push)
-        if: steps.mode.outputs.mode == 'diff' && github.event_name == 'push'
-        id: diff_push
-        run: |
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            git diff --unified=0 HEAD^...HEAD > pr.diff || true
+          if [ ! -s diff.patch ]; then
+            echo "No changes detected in diff."
+            echo "has_diff=false" >> $GITHUB_OUTPUT
           else
-            : > pr.diff
+            echo "has_diff=true" >> $GITHUB_OUTPUT
           fi
-          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
-          wc -l pr.diff || true
 
-      - name: Generate DIFF (pull_request)
-        if: steps.mode.outputs.mode == 'diff' && github.event_name == 'pull_request'
-        id: diff_pr
+      - name: Stop if no diff
+        if: steps.diff.outputs.has_diff == 'false'
+        run: echo "Nothing to review."
+
+      - name: Prepare prompt
+        if: steps.diff.outputs.has_diff == 'true'
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1 || true
-          git diff --unified=0 origin/${{ github.base_ref }}...HEAD > pr.diff || true
-          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
-          wc -l pr.diff || true
+          mkdir -p .github/ai
+          cat > .github/ai/prompt.txt <<'PROMPT'
+You are a senior software engineer doing a PEER REVIEW of a pull request.
 
-      - name: Run AI review
+STRICT SCOPE:
+- Review ONLY the supplied git DIFF/patch for this PR (changed lines & immediate context).
+- DO NOT discuss project requirements, architecture, or policies unless they are directly violated by lines in the diff.
+- DO NOT summarize the whole repo—focus purely on the code changes.
+
+OUTPUT FORMAT (concise, actionable):
+- Summary: 2–5 bullet points
+- Findings: numbered items; each item MUST include:
+  * File path and line(s) from the diff
+  * What’s wrong / improvement opportunity
+  * Concrete suggestion or snippet (patch-ready where possible)
+  * Severity: LOW | MEDIUM | HIGH | CRITICAL
+- Tests: list missing/updated tests specifically tied to changed code
+- Security/Concurrency (only if evident in the diff): call out exact lines and the risk
+- GO/NO-GO at the end (based ONLY on the diff): GO if mergeable as-is; otherwise NO-GO with the 1–3 blocking items.
+
+Assume the reviewer cannot see any files beyond this diff. If a point depends on unseen code, say “Assumption: …” explicitly.
+
+Now review the following DIFF:
+PROMPT
+
+      - name: Chunk diff
+        if: steps.diff.outputs.has_diff == 'true'
+        id: chunk
+        run: |
+          python3 - <<'PY'
+import os, sys, math
+max_chars = int(os.environ.get("MAX_CHARS_PER_CHUNK","120000"))
+data = open("diff.patch","r",encoding="utf-8",errors="ignore").read()
+chunks = [data[i:i+max_chars] for i in range(0, len(data), max_chars)]
+os.makedirs(".github/ai", exist_ok=True)
+for i, ch in enumerate(chunks, start=1):
+    with open(f".github/ai/chunk_{i:03d}.patch","w",encoding="utf-8") as f:
+        f.write(ch)
+print(f"CHUNKS={len(chunks)}")
+PY
+
+      - name: Run OpenAI review (per chunk) and aggregate
+        if: steps.diff.outputs.has_diff == 'true'
+        uses: actions/github-script@v7
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GIT_COMMIT_SHA: ${{ github.sha }}
-        run: |
-          mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
-          DIFF_PATH="pr.diff"
-          if [ "${{ steps.mode.outputs.mode }}" != "diff" ]; then
-            DIFF_PATH="/dev/null"
-          fi
-
-          python scripts/ci/ai_review.py \
-            --mode ${{ steps.mode.outputs.mode }} \
-            --diff "$DIFF_PATH" \
-            --context artifacts/ci/context.jsonl \
-            --out_json artifacts/ci/ai-review.json \
-            --out_md artifacts/review/ci/review.md
-
-          cp artifacts/review/ci/review.md "docs/reviews/${GIT_COMMIT_SHA}.md"
-          cp artifacts/ci/ai-review.json  "docs/reviews_json/${GIT_COMMIT_SHA}.json"
-
-      - name: Upload review artifacts
-        uses: actions/upload-artifact@v4
+          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
         with:
-          name: ai-review
-          path: |
-            artifacts/ci/ai-review.json
-            artifacts/review/ci/review.md
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const basePrompt = fs.readFileSync('.github/ai/prompt.txt','utf8');
+            const chunkFiles = fs.readdirSync('.github/ai')
+              .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
+              .sort();
+            if (!process.env.OPENAI_API_KEY) {
+              core.setFailed('Missing OPENAI_API_KEY secret.');
+              return;
+            }
 
-      - name: Commit review docs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/reviews docs/reviews_json
-          git commit -m "chore(ci): add AI review for $GITHUB_SHA [skip ci]" || echo "No changes to commit"
-          git push
+            async function askOpenAI(content) {
+              const r = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                  temperature: 0.2,
+                  messages: [
+                    { role: 'system', content: 'You are a precise, terse, and helpful senior engineer.' },
+                    { role: 'user', content: content }
+                  ]
+                })
+              });
+              if (!r.ok) {
+                const txt = await r.text();
+                throw new Error(`OpenAI error: ${r.status} ${txt}`);
+              }
+              const json = await r.json();
+              return json.choices?.[0]?.message?.content || '';
+            }
 
-      - name: Write Status Page (docs/review_status.md)
-        run: |
-          python - << 'PY'
-          import json, pathlib, time, os
-          p = pathlib.Path("artifacts/ci/ai-review.json")
-          data = json.loads(p.read_text())
-          ok = data.get("ok", False)
-          high = [i for i in data.get("issues", []) if i.get("severity")=="high"]
-          sha = data.get("metadata", {}).get("sha","")
-          ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-          review_md = f"docs/reviews/{sha}.md"
-          review_json = f"docs/reviews_json/{sha}.json"
-          md = []
-          md.append("# Review Status")
-          md.append(f"**SHA:** `{sha}`  ")
-          md.append(f"**STATUS:** {'OK' if ok and not high else 'FAIL'}  ")
-          md.append(f"**HIGH_ISSUES:** {len(high)}  ")
-          md.append(f"**UPDATED:** {ts}")
-          md.append("")
-          md.append("## Summary")
-          md.append(data.get("summary","")) ; md.append("")
-          md.append("## Full Review")
-          md.append(f"See **[{review_md}]({review_md})** for details.") ; md.append("")
-          md.append("## Raw JSON")
-          md.append(f"[{review_json}]({review_json})") ; md.append("")
-          md.append("## Provider")
-          md.append(data.get("metadata",{}).get("provider","openai")) ; md.append("")
-          md.append("## Notes")
-          md.append("This file is auto-updated by CI. Claude must read this file before proceeding.")
-          pathlib.Path("docs").mkdir(exist_ok=True)
-          pathlib.Path("docs/review_status.md").write_text("\n".join(md), encoding="utf-8")
-          PY
+            let aggregate = [];
+            for (const f of chunkFiles) {
+              const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
+              const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
+              const out = await askOpenAI(prompt);
+              aggregate.push(`### Review for ${f}\n${out}`);
+            }
+            const full = aggregate.join("\n\n---\n\n");
+            fs.writeFileSync('.github/ai/review.md', full);
 
-      - name: Commit Status Page
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Post PR review comment
+        if: steps.diff.outputs.has_diff == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('.github/ai/review.md','utf8');
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              event: 'COMMENT',
+              body
+            });
+
+      - name: Optionally fail on HIGH/CRITICAL
+        if: steps.diff.outputs.has_diff == 'true' && env.FAIL_ON_SEVERITY != 'none'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/review_status.md
-          git commit -m "chore(ci): update review status [skip ci]" || echo "No changes to commit"
-          git push
+          if grep -Eiq "Severity:\s*(CRITICAL|HIGH)" .github/ai/review.md; then
+            if [ "${FAIL_ON_SEVERITY}" != "none" ]; then
+              echo "HIGH/CRITICAL findings present. Failing check per policy."
+              exit 2
+            fi
+          fi
