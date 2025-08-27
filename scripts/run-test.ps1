@@ -1,4 +1,4 @@
-$buildId = Get-Content ".\releases\test_current.txt" -ErrorAction SilentlyContinue
+$buildId = (Get-Content ".\releases\test_current.txt" -ErrorAction SilentlyContinue).Trim()
 if (-not $buildId) { 
   Write-Host "No TEST release pointer found. Running in dev mode."
   $buildId = "dev"
@@ -13,7 +13,9 @@ Get-Content ".\config\.env.test" | ForEach-Object {
   if ($k -and $v) { [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim()) }
 }
 
-# Set build ID
+# Set build ID (ensure it's properly trimmed)
+$buildId = $buildId.Trim()
+Write-Host "Setting APP_RELEASE_BUILD to: $buildId"
 [Environment]::SetEnvironmentVariable("APP_RELEASE_BUILD", $buildId)
 
 # Start server using our working runner approach

@@ -43,7 +43,9 @@
       "Bash(PYTHONPATH=. python -m pytest tests/test_bug_tracker.py tests/test_build_validator.py -v)",
       "Bash(find:*)",
       "Bash(dir:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(SET APP_RELEASE_BUILD=2025-08-27_12-06-31_build-6674)",
+      "Bash(del debug_env.py)"
     ],
     "deny": [],
     "ask": [],
