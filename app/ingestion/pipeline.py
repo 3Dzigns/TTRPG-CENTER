@@ -1,8 +1,14 @@
 import logging
 import time
 import json
-import fcntl
 import os
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    # fcntl is not available on Windows
+    HAS_FCNTL = False
+    fcntl = None
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -49,13 +55,17 @@ def ingestion_lock(env: str = "dev"):
                     yield f
                 finally:
                     msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-            else:  # Unix-like systems
+            elif HAS_FCNTL:  # Unix-like systems
                 try:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     logger.info(f"Acquired ingestion lock for environment: {env}")
                     yield f
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            else:
+                # No locking available, proceed with caution
+                logger.warning(f"File locking not available on this platform for environment: {env}")
+                yield f
     except (IOError, OSError) as e:
         logger.error(f"Could not acquire ingestion lock for {env}: {e}")
         raise RuntimeError(f"Another ingestion process is running for environment {env}")

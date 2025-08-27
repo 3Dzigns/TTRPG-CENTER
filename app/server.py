@@ -353,6 +353,8 @@ class Handler(BaseHTTPRequestHandler):
                         <option value="all">All Bugs</option>
                         <option value="open">Open</option>
                         <option value="closed">Closed</option>
+                        <option value="on_hold">On Hold</option>
+                        <option value="peer_review">Peer Review</option>
                     </select>
                     <button onclick="refreshBugs()" style="background: #0088ff; margin-left: 10px;">Refresh</button>
                     <button onclick="window.location.href='/admin/bugs'" style="margin-left: 5px;">Detailed View</button>
@@ -836,8 +838,10 @@ class Handler(BaseHTTPRequestHandler):
                     // Update summary
                     const open = data.summary?.open || 0;
                     const closed = data.summary?.closed || 0;
+                    const onHold = data.summary?.on_hold || 0;
+                    const peerReview = data.summary?.peer_review || 0;
                     const total = data.total || 0;
-                    summaryDiv.innerHTML = `Total: ${{total}} | Open: ${{open}} | Closed: ${{closed}}`;
+                    summaryDiv.innerHTML = `Total: ${{total}} | Open: ${{open}} | Closed: ${{closed}} | On Hold: ${{onHold}} | Peer Review: ${{peerReview}}`;
                     
                     // Update preview
                     let previewHtml = '';
@@ -846,14 +850,23 @@ class Handler(BaseHTTPRequestHandler):
                         previewHtml = `<strong>Recent ${{currentBugFilter}} bugs (${{displayCount}} of ${{data.bugs.length}}):</strong><br>`;
                         
                         data.bugs.slice(0, displayCount).forEach(bug => {{
-                            const statusIcon = bug.status === 'closed' ? '✅' : '🔴';
+                            const statusIcon = bug.status === 'closed' ? '✅' : 
+                                             bug.status === 'on_hold' ? '⏸️' : '🔴';
                             const severityColor = bug.severity === 'high' ? '#ff4444' : 
                                                 bug.severity === 'medium' ? '#ffaa00' : '#aaa';
                             const title = bug.title || bug.bug_id || 'Unknown';
+                            const sourceIcon = bug.source === 'peer_review' ? '🔍' : 
+                                             bug.source === 'cli_submission' ? '💻' :
+                                             bug.source === 'ui_submission' ? '🖥️' : '👤';
+                            const escalatedIcon = bug.escalated ? '⬆️' : '';
                             
                             previewHtml += `<div style="margin: 5px 0; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 3px;">`;
-                            previewHtml += `${{statusIcon}} <span style="color: ${{severityColor}};">${{title.substring(0, 40)}}...</span>`;
+                            previewHtml += `${{statusIcon}} ${{sourceIcon}} <span style="color: ${{severityColor}};">${{title.substring(0, 35)}}...</span>`;
+                            previewHtml += `${{escalatedIcon}}`;
                             previewHtml += `<span style="float: right; color: #666; font-size: 10px;">${{bug.category || 'general'}}</span>`;
+                            if (bug.peer_review_count > 1) {{
+                                previewHtml += `<br><span style="color: #ff6600; font-size: 9px;">⚠️ Found ${{bug.peer_review_count}} times</span>`;
+                            }}
                             previewHtml += `</div>`;
                         }});
                         
@@ -1893,19 +1906,27 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": str(e)})
     
     def _handle_bugs_request(self):
-        """Handle bug bundles requests with filtering support"""
+        """Handle bug bundles requests with enhanced filtering and admin controls"""
         try:
             # Parse query parameters
             url_parts = urlparse(self.path)
             query_params = parse_qs(url_parts.query)
             filter_type = query_params.get('filter', ['all'])[0]
             
+            # Check for admin actions (POST requests)
+            if self.command == 'POST':
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 0:
+                    post_data = self.rfile.read(content_length)
+                    data = json.loads(post_data.decode('utf-8'))
+                    return self._handle_bug_admin_action(data)
+            
             bugs_dir = Path("bugs")
             if not bugs_dir.exists():
                 self._send(200, {
                     "bugs": [], 
                     "total": 0,
-                    "summary": {"open": 0, "closed": 0}
+                    "summary": {"open": 0, "closed": 0, "on_hold": 0}
                 })
                 return
             
@@ -1940,7 +1961,13 @@ class Handler(BaseHTTPRequestHandler):
                             "severity": bug_data.get("severity", "unknown"),
                             "category": bug_data.get("category", "general"),
                             "status": status,
-                            "environment": bug_data.get("environment", "unknown")
+                            "environment": bug_data.get("environment", "unknown"),
+                            "source": bug_data.get("source", "user_report"),
+                            "admin_controls": bug_data.get("admin_controls", {}),
+                            "review_id": bug_data.get("review_id", ""),
+                            "escalated": bug_data.get("severity_escalated", False),
+                            "peer_review_count": len(bug_data.get("peer_review_history", [])),
+                            "on_hold_reason": bug_data.get("on_hold_reason", "") if status == "on_hold" else ""
                         }
                         all_bugs.append(bug_info)
                 except Exception as e:
@@ -1955,12 +1982,18 @@ class Handler(BaseHTTPRequestHandler):
                 filtered_bugs = [b for b in all_bugs if b["status"] == "open"]
             elif filter_type == "closed":
                 filtered_bugs = [b for b in all_bugs if b["status"] == "closed"]
+            elif filter_type == "on_hold":
+                filtered_bugs = [b for b in all_bugs if b["status"] == "on_hold"]
+            elif filter_type == "peer_review":
+                filtered_bugs = [b for b in all_bugs if b["source"] == "peer_review"]
             else:  # "all"
                 filtered_bugs = all_bugs
             
             # Calculate summary
             open_count = sum(1 for b in all_bugs if b["status"] == "open")
             closed_count = sum(1 for b in all_bugs if b["status"] == "closed")
+            on_hold_count = sum(1 for b in all_bugs if b["status"] == "on_hold")
+            peer_review_count = sum(1 for b in all_bugs if b["source"] == "peer_review")
             
             # Return limited results (last 20 for the detailed view)
             result_bugs = filtered_bugs[:20] if filter_type != "all" else filtered_bugs[:20]
@@ -1971,12 +2004,109 @@ class Handler(BaseHTTPRequestHandler):
                 "filtered_total": len(filtered_bugs),
                 "summary": {
                     "open": open_count,
-                    "closed": closed_count
+                    "closed": closed_count,
+                    "on_hold": on_hold_count,
+                    "peer_review": peer_review_count
                 },
                 "filter": filter_type
             })
         except Exception as e:
             logger.error(f"Bugs request failed: {e}")
+            self._send(500, {"error": str(e)})
+    
+    def _handle_bug_admin_action(self, data: Dict[str, Any]):
+        """Handle admin actions on bugs"""
+        try:
+            from app.common.bug_tracker import get_bug_tracker
+            
+            action = data.get("action", "")
+            bug_id = data.get("bug_id", "")
+            reason = data.get("reason", "")
+            
+            if not bug_id:
+                self._send(400, {"error": "bug_id is required"})
+                return
+            
+            bug_tracker = get_bug_tracker()
+            
+            if action == "put_on_hold":
+                if not reason:
+                    self._send(400, {"error": "reason is required for putting bug on hold"})
+                    return
+                
+                success = bug_tracker.put_bug_on_hold(bug_id, reason)
+                if success:
+                    self._send(200, {"success": True, "message": f"Bug {bug_id} put on hold"})
+                else:
+                    self._send(400, {"success": False, "error": "Failed to put bug on hold - check admin permissions"})
+            
+            elif action == "admin_close":
+                if not reason:
+                    self._send(400, {"error": "reason is required for closing bug"})
+                    return
+                
+                success = bug_tracker.admin_close_bug(bug_id, reason)
+                if success:
+                    self._send(200, {"success": True, "message": f"Bug {bug_id} closed by admin"})
+                else:
+                    self._send(400, {"success": False, "error": "Failed to close bug - check admin permissions"})
+            
+            elif action == "reopen":
+                # Reopen a bug (only for non-peer-review bugs)
+                bug = bug_tracker.get_bug(bug_id)
+                if not bug:
+                    self._send(404, {"error": "Bug not found"})
+                    return
+                
+                admin_controls = bug.get("admin_controls", {})
+                if not admin_controls.get("can_modify_status", False):
+                    self._send(400, {"success": False, "error": "Cannot reopen peer review bug - not allowed by admin controls"})
+                    return
+                
+                bug["status"] = "open"
+                bug["reopened_by"] = "admin"
+                bug["reopened_at"] = time.time()
+                bug["reopened_reason"] = reason or "Reopened by admin"
+                
+                if bug_tracker._save_bug(bug):
+                    self._send(200, {"success": True, "message": f"Bug {bug_id} reopened"})
+                else:
+                    self._send(500, {"success": False, "error": "Failed to save bug"})
+            
+            elif action == "remove_from_hold":
+                # Remove a bug from hold status
+                bug = bug_tracker.get_bug(bug_id)
+                if not bug:
+                    self._send(404, {"error": "Bug not found"})
+                    return
+                
+                if bug.get("status") != "on_hold":
+                    self._send(400, {"success": False, "error": "Bug is not on hold"})
+                    return
+                
+                admin_controls = bug.get("admin_controls", {})
+                if not admin_controls.get("can_modify_status", False):
+                    self._send(400, {"success": False, "error": "Cannot modify peer review bug status"})
+                    return
+                
+                bug["status"] = "open"
+                bug["removed_from_hold_by"] = "admin"
+                bug["removed_from_hold_at"] = time.time()
+                if "on_hold_reason" in bug:
+                    del bug["on_hold_reason"]
+                if "on_hold_at" in bug:
+                    del bug["on_hold_at"]
+                
+                if bug_tracker._save_bug(bug):
+                    self._send(200, {"success": True, "message": f"Bug {bug_id} removed from hold"})
+                else:
+                    self._send(500, {"success": False, "error": "Failed to save bug"})
+            
+            else:
+                self._send(400, {"error": f"Unknown action: {action}"})
+        
+        except Exception as e:
+            logger.error(f"Bug admin action failed: {e}")
             self._send(500, {"error": str(e)})
     
     def _get_base_admin_style(self):
@@ -2487,6 +2617,8 @@ class Handler(BaseHTTPRequestHandler):
                     <option value="all">All Bugs</option>
                     <option value="open">Open Only</option>
                     <option value="closed">Closed Only</option>
+                    <option value="on_hold">On Hold</option>
+                    <option value="peer_review">Peer Review</option>
                 </select>
                 <button onclick="refreshBugsDetailed()" style="background: #0088ff;">Refresh</button>
                 <button onclick="exportBugReport()" style="background: #ff6600;">Export Report</button>
@@ -2521,27 +2653,56 @@ class Handler(BaseHTTPRequestHandler):
                         const filtered = data.filtered_total || 0;
                         const open = data.summary?.open || 0;
                         const closed = data.summary?.closed || 0;
+                        const on_hold = data.summary?.on_hold || 0;
+                        const peer_review = data.summary?.peer_review || 0;
                         
-                        statsDiv.innerHTML = `<strong>Total Reports:</strong> ${{total}} | <strong>Open:</strong> ${{open}} | <strong>Closed:</strong> ${{closed}} | <strong>Showing:</strong> ${{filtered}} ${{filter}} bugs`;
+                        statsDiv.innerHTML = `<strong>Total Reports:</strong> ${{total}} | <strong>Open:</strong> ${{open}} | <strong>Closed:</strong> ${{closed}} | <strong>On Hold:</strong> ${{on_hold}} | <strong>Peer Review:</strong> ${{peer_review}} | <strong>Showing:</strong> ${{filtered}} ${{filter}} bugs`;
                         
                         // Update bug list
                         let content = '';
                         if (data.bugs && data.bugs.length > 0) {{
                             data.bugs.forEach(bug => {{
                                 const date = new Date(bug.created * 1000).toLocaleString();
-                                const severityColor = bug.severity === 'high' ? '#ff4444' : 
+                                const severityColor = bug.severity === 'critical' ? '#ff0000' :
+                                                    bug.severity === 'high' ? '#ff4444' : 
                                                     bug.severity === 'medium' ? '#ffaa00' : '#aaa';
-                                const statusColor = bug.status === 'closed' ? '#00ff00' : '#ff6600';
-                                const statusIcon = bug.status === 'closed' ? '✅' : '🔴';
+                                
+                                let statusColor, statusIcon;
+                                if (bug.status === 'closed') {{
+                                    statusColor = '#00ff00';
+                                    statusIcon = '✅';
+                                }} else if (bug.status === 'on_hold') {{
+                                    statusColor = '#888888';
+                                    statusIcon = '⏸️';
+                                }} else {{
+                                    statusColor = '#ff6600';
+                                    statusIcon = '🔴';
+                                }}
+                                
+                                // Source indicator
+                                const sourceIcon = bug.source === 'peer_review' ? '🔍' : 
+                                                  bug.source === 'cli_submission' ? '⌨️' : 
+                                                  bug.source === 'ui_submission' ? '🖥️' : '👤';
+                                const sourceColor = bug.source === 'peer_review' ? '#00ffff' : '#aaa';
                                 
                                 content += `<div style="margin: 15px 0; padding: 15px; background: rgba(0,0,0,0.3); border-left: 4px solid ${{severityColor}}; border-radius: 4px;">`;
                                 content += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">`;
                                 content += `<strong style="color: #ff6600; font-size: 14px;">${{bug.title || bug.bug_id}}</strong>`;
                                 content += `<div style="display: flex; gap: 10px; align-items: center;">`;
+                                content += `<span style="color: ${{sourceColor}}; font-size: 10px; title="${{bug.source}}">${{sourceIcon}} ${{(bug.source || 'user_report').replace('_', ' ').toUpperCase()}}</span>`;
                                 content += `<span style="color: ${{statusColor}}; font-size: 12px;">${{statusIcon}} ${{bug.status.toUpperCase()}}</span>`;
                                 content += `<span style="color: ${{severityColor}}; font-size: 11px; text-transform: uppercase; font-weight: bold;">${{bug.severity}}</span>`;
+                                if (bug.severity_escalated) {{
+                                    content += `<span style="color: #ff0000; font-size: 10px;">⬆️ ESCALATED</span>`;
+                                }}
                                 content += `</div></div>`;
                                 
+                                // Description
+                                if (bug.description) {{
+                                    content += `<div style="margin: 8px 0;"><span style="color: #ccc; font-size: 12px;">${{bug.description}}</span></div>`;
+                                }}
+                                
+                                // Legacy query/feedback support
                                 if (bug.query) {{
                                     content += `<div style="margin: 8px 0;"><strong style="color: #00ffff; font-size: 12px;">Query:</strong> <span style="color: #aaa; font-size: 12px;">${{bug.query}}</span></div>`;
                                 }}
@@ -2553,16 +2714,50 @@ class Handler(BaseHTTPRequestHandler):
                                 content += `<span>📅 ${{date}}</span>`;
                                 content += `<span>🏷️ ${{bug.category}}</span>`;
                                 content += `<span>🖥️ ${{bug.environment}}</span>`;
+                                if (bug.build_id) {{
+                                    content += `<span>🔗 ${{bug.build_id.substring(0, 8)}}</span>`;
+                                }}
                                 content += `</div>`;
                                 
-                                // Add action buttons
-                                content += `<div style="margin-top: 10px; display: flex; gap: 10px;">`;
+                                // Peer review history
+                                if (bug.peer_review_count > 0) {{
+                                    content += `<div style="margin: 8px 0; padding: 8px; background: rgba(0,255,255,0.1); border-radius: 3px;">`;
+                                    content += `<strong style="color: #00ffff; font-size: 11px;">Peer Review History:</strong> `;
+                                    content += `<span style="color: #aaa; font-size: 11px;">${{bug.peer_review_count}} review(s) found this issue</span>`;
+                                    if (bug.escalation_reason) {{
+                                        content += `<div style="color: #ffaa00; font-size: 10px; margin-top: 4px;">${{bug.escalation_reason}}</div>`;
+                                    }}
+                                    content += `</div>`;
+                                }}
+                                
+                                // Admin controls and action buttons
+                                content += `<div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">`;
+                                
+                                // Admin controls based on source and permissions
+                                const adminControls = bug.admin_controls || {{}};
+                                const isPeerReview = bug.source === 'peer_review';
+                                
                                 if (bug.status === 'open') {{
-                                    content += `<button onclick="closeBug('${{bug.bug_id}}')" style="background: #00ff00; color: #000; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Mark Closed</button>`;
-                                }} else {{
+                                    if (adminControls.can_modify_status) {{
+                                        content += `<button onclick="adminCloseBug('${{bug.bug_id}}')" style="background: #00ff00; color: #000; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Admin Close</button>`;
+                                    }}
+                                    if (adminControls.can_put_on_hold) {{
+                                        content += `<button onclick="putBugOnHold('${{bug.bug_id}}')" style="background: #888888; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Put On Hold</button>`;
+                                    }}
+                                }} else if (bug.status === 'on_hold') {{
+                                    if (adminControls.can_modify_status) {{
+                                        content += `<button onclick="removeBugFromHold('${{bug.bug_id}}')" style="background: #ff6600; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Remove Hold</button>`;
+                                    }}
+                                }} else if (bug.status === 'closed' && adminControls.can_modify_status) {{
                                     content += `<button onclick="reopenBug('${{bug.bug_id}}')" style="background: #ff6600; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">Reopen</button>`;
                                 }}
+                                
                                 content += `<button onclick="viewBugDetails('${{bug.bug_id}}')" style="background: #0088ff; color: #fff; padding: 4px 8px; border: none; border-radius: 3px; font-size: 10px; cursor: pointer;">View Details</button>`;
+                                
+                                if (isPeerReview) {{
+                                    content += `<span style="color: #00ffff; font-size: 10px; padding: 4px 8px; background: rgba(0,255,255,0.1); border-radius: 3px;">Auto-managed</span>`;
+                                }}
+                                
                                 content += `</div></div>`;
                             }});
                         }} else {{
@@ -2588,20 +2783,58 @@ class Handler(BaseHTTPRequestHandler):
                 loadBugsDetailed(filter);
             }}
             
-            function closeBug(bugId) {{
-                if (confirm('Mark this bug as closed?')) {{
-                    // This would update the bug status - for now just show confirmation
-                    alert('Bug ' + bugId + ' marked as closed (functionality to be implemented)');
-                    refreshBugsDetailed();
+            function adminCloseBug(bugId) {{
+                const reason = prompt('Enter reason for closing this bug:');
+                if (reason) {{
+                    performBugAction(bugId, 'admin_close', {{reason: reason}});
+                }}
+            }}
+            
+            function putBugOnHold(bugId) {{
+                const reason = prompt('Enter reason for putting this bug on hold:');
+                if (reason) {{
+                    performBugAction(bugId, 'put_on_hold', {{reason: reason}});
+                }}
+            }}
+            
+            function removeBugFromHold(bugId) {{
+                if (confirm('Remove this bug from hold status?')) {{
+                    performBugAction(bugId, 'remove_from_hold', {{}});
                 }}
             }}
             
             function reopenBug(bugId) {{
                 if (confirm('Reopen this bug?')) {{
-                    // This would update the bug status - for now just show confirmation
-                    alert('Bug ' + bugId + ' reopened (functionality to be implemented)');
-                    refreshBugsDetailed();
+                    performBugAction(bugId, 'reopen', {{}});
                 }}
+            }}
+            
+            function performBugAction(bugId, action, params) {{
+                const requestBody = {{
+                    action: action,
+                    bug_id: bugId,
+                    ...params
+                }};
+                
+                fetch('/api/bugs', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify(requestBody)
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.success) {{
+                        alert(data.message || 'Action completed successfully');
+                        refreshBugsDetailed();
+                    }} else {{
+                        alert('Error: ' + (data.error || 'Action failed'));
+                    }}
+                }})
+                .catch(error => {{
+                    alert('Network error: ' + error.message);
+                }});
             }}
             
             function viewBugDetails(bugId) {{
