@@ -3,18 +3,18 @@
 You are “Claude Code,” acting as a senior engineer on this repo. Follow these rules exactly.
 
 ## 1) Mission & Scope
-- Build and maintain an **admin Web UI** and backend for ingesting TTRPG source material into AstraDB; support both **single** and **bulk** uploads.
+- Build and maintain a **Web UI** and backend for ingesting TTRPG source material into AstraDB; support both **single** and **bulk** uploads.
 - Provide **phase-by-phase ingestion status** with live progress and error surfacing.
 - Enable **RAG QA** that shows: top 3 chunks, OpenAI answer, Claude answer, and a chooser/heuristic to pick the better answer.
-- Honor **environment separation** (Dev/Test/Prod) until explicit promotion.
+- Honor strict **environment separation** (Dev/Test/Prod) until explicit promotion.
 
 ## 2) Canonical Requirements (always read first)
-- `/mnt/data/2025-08-25_MVP_Requirements.json`
-- `/mnt/data/README.md`
-- `/mnt/data/LAUNCH_GUIDE.md`
-- `/mnt/data/API_TESTING.md`
-- `/mnt/data/STATUS.md`
-- `/mnt/data/documentation.md`
+Authoritative specifications live under:
+```
+
+./docs/requirements/\*
+
+```
 If any instruction in this CLAUDE.md conflicts with those files, **prefer the requirements docs** and propose an update here.
 
 ## 3) Environments & Configuration
@@ -24,19 +24,20 @@ If any instruction in this CLAUDE.md conflicts with those files, **prefer the re
 - **Redis** may be used for job queues and real-time status caching. Add `redis` to `requirements.txt` if needed, but **only import when used**.
 
 ## 4) Ingestion Phases (must expose status)
-1. **Upload → temp storage** (show %; file size + ETA).
+1. **Upload → Temp Storage** (show %; file size + ETA).
 2. **Chunking** (show % + last 2–3 chunk previews in natural language).
-3. **Dictionary/Metadata extraction** (title, publisher, ISBN, system, chapter/section/sub-section; add dynamic tags like `spell/school`, etc.).
+3. **Dictionary / Metadata Extraction**  
+   (title, publisher, ISBN, system, chapter/section/sub-section; add dynamic tags like `spell.school`, etc.).
 4. **Embeddings + Upsert → AstraDB** (batched; retry on failures).
 5. **Enrichment** (optional classifiers; record provenance).
-6. **Verify & commit** (write summary manifest; mark job complete).
+6. **Verify & Commit** (write summary manifest; mark job complete).
 
 For each phase, publish:
 - `status` (queued|running|stalled|error|done), `progress` 0–100, `updated_at`, recent logs, and any **actionable error** details.
-- Admin UI subscribes to live updates (e.g., SSE/WebSocket or Redis pub/sub).
+- Admin UI subscribes to live updates (SSE/WebSocket or Redis pub/sub).
 
 ## 5) Admin UI Expectations
-- Show **separate progress bars per phase** + rolling log tail.
+- Show **separate progress bars per phase** with rolling log tail.
 - Allow viewing the evolving **dictionary** in plain natural language (not Markdown).
 - Surface **errors and stalls** prominently with remediation hints.
 - Provide a **global “Shutdown”** that safely cancels running jobs and releases file locks.
@@ -46,7 +47,7 @@ For each phase, publish:
   - **Top 3 chunks** (verbatim excerpts + metadata).
   - **Answer A (OpenAI)** and **Answer B (Claude)**.
   - A **selector/heuristic** that chooses a preferred answer and explains the rationale.
-- Log retrieval traces: what was asked, how routed, which chunks returned, scoring.
+- Log retrieval traces: what was asked, how routed, which chunks returned, and scoring.
 
 ## 7) Coding Standards & Guardrails
 - Prefer **typed Python** (mypy-clean) for services; **FastAPI** for APIs.
@@ -75,9 +76,11 @@ For each phase, publish:
 
 ## 11) Custom Commands (examples)
 Create these under `.claude/commands/`:
-- `ingest.md`: “Run the ingestion pipeline on $ARGUMENTS and stream per-phase status to console and Redis.”
-- `trace-status.md`: “Show live status for job $ARGUMENTS, including last 20 log lines per phase.”
-- `write-tests.md`: “Generate missing tests for modules changed in last commit.”
+- `ingest.md`: Run the ingestion pipeline on $ARGS and stream per-phase status to console and Redis.
+- `trace-status.md`: Show live status for job $ARGS, including last 20 log lines per phase.
+- `write-tests.md`: Generate missing tests for modules changed in last commit.
+- `promote.md`: Promote tested builds/artifacts between environments.
+- `rag-eval.md`: Run RAG evaluation datasets.
 
 ## 12) Style of Responses
 - Use concise bullet points.
@@ -85,33 +88,53 @@ Create these under `.claude/commands/`:
 - Always include **next steps** and **test instructions**.
 
 ## 13) Supplemental Memory & Commands
-
-- Persistent project rules live in `.claude/memory/`
+- Persistent project rules live in `.claude/memory/`:
   - `requirements-index.md` → Canonical requirements sources
   - `status-schema.md` → Status event contract
   - `coding-standards.md` → Language/framework/test/DoD
   - `environments.md` → DEV/TEST/PROD separation rules
   - `ingestion-phases.md` → Six ingestion phase contract
 
-- Reusable task prompts live in `.claude/commands/`
-  - `ingest.md` → Run ingestion pipeline
-  - `trace-status.md` → Monitor ingestion progress
-  - `write-tests.md` → Generate/update tests
-  - `promote.md` → Promote builds/artifacts between ENVs
-  - `rag-eval.md` → Run RAG evaluation datasets
+- Reusable task prompts live in `.claude/commands/`:
+  - `ingest.md`, `trace-status.md`, `write-tests.md`, `promote.md`, `rag-eval.md`
 
 ## 14) Standard Workflow Automation
-**ALWAYS execute the standard workflow on EVERY user request** before addressing the specific request:
+**ALWAYS execute this workflow on EVERY user request before addressing the specific request:**
 
-1. **Git pull to refresh from repository**
-2. **Respond and acknowledge user request**
+1. **Git pull** to refresh from repository.
+2. **Respond and acknowledge** the user request.
 3. **Parse new peer reviews and create bugs**  
-   - New bug requires creating a bug file with unique ID and **status tracking** (`open` → `resolved`).
-4. **Resolve all existing bugs**
+   - New bug = create file with machine ID (`CR-###`) + user-friendly 10-digit ID.  
+   - Status tracking required (`open` → `resolved`).
+4. **Resolve all existing bugs**.
 5. **Process feature requests**  
-   - New feature requires creating a feature request file with unique ID and **status tracking** (`pending` → `approved`/`removed`).
-6. **Update status documentation**
-7. **Create new automated test cases as needed**
-8. **Automated Testing in Dev env (localhost:8000), Unit, Funcational, Regression, Security**
-9. **Promote to Test env and restart Test env on localhost:8181**
-10. **Git commit and git push all changes**
+   - New feature = create file with machine ID (`FR-YYYYMMDD-###`) + user-friendly 10-digit ID.  
+   - Status tracking required (`pending` → `approved` or `removed`).
+6. **Update status documentation**.
+7. **Create automated test cases** as needed.
+8. **Run automated tests in Dev** (localhost:8000) — unit, functional, regression, security.
+9. **Promote to Test env** and restart (localhost:8181).
+10. **Git commit and push all changes**.
+
+## 15) Features, Bugs, and Feedback
+- **IDs & Tracking**
+  - Every Bug, Feature, and Feedback item must have:
+    - **Internal machine ID** (CR-###, FR-YYYYMMDD-###, FB-###).
+    - **User-friendly 10-digit display ID** in the Admin UI.
+- **Bugs**
+  - Found in `./docs/reviews/*` → must be logged in `./bugs/`.
+  - Must be resolved in Step 4 of Standard Workflow.
+  - Each bug requires new **unit + functional test cases** to validate the fix and prevent regressions.
+  - Bugs may be submitted via Admin UI or user command **New Bug**.
+- **Features**
+  - Stored in `./features/`.
+  - Always originate from Admin. Processed in Step 5 of Standard Workflow.
+  - Must include tests (unit, functional, regression).
+  - Features may be submitted via Admin UI or user command **New Feature**.
+- **Feedback**
+  - Stored in `./feedback/`.
+  - Displayed in Admin UI as **Feedback** with Admin options:  
+    `Promote to Bug | Promote to Feature | Delete`.
+  - Approved feedback moves to Bug or Feature (with new IDs).
+  - **Delete** = archive feedback (hidden from UI but retrievable).
+  - Admin UI must provide a way to view archived feedback.

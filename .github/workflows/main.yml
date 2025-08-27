@@ -18,8 +18,10 @@ jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (full history for diffs)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -27,7 +29,8 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: pip install --disable-pip-version-check requests
+        run: |
+          pip install --disable-pip-version-check requests
 
       - name: Validate OPENAI_API_KEY
         env:
@@ -38,10 +41,48 @@ jobs:
             exit 1
           fi
 
-      - name: Build context pack
+      - name: Build context pack (code + required docs for peer review)
         run: |
-          mkdir -p artifacts/ci
-          python scripts/ci/make_context_pack.py
+          mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
+          python scripts/ci/make_context_pack.py --out artifacts/ci/context.jsonl || true
+
+          echo "" > artifacts/ci/extra_context.jsonl
+          add_to_context() {
+            f="$1"
+            if [ -f "$f" ] && [ $(stat -c%s "$f") -le 256000 ]; then
+              python - "$f" >> artifacts/ci/extra_context.jsonl <<'PY'
+import json, sys, pathlib
+p = sys.argv[1]
+try:
+    txt = pathlib.Path(p).read_text(encoding="utf-8", errors="replace")
+except Exception:
+    txt = ""
+print(json.dumps({"path": p, "content": txt}, ensure_ascii=False))
+PY
+            fi
+          }
+
+          # 1) .claude/**/*.md
+          while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find .claude -type f -name '*.md' -print0 2>/dev/null || true)
+
+          # 2) claude.md
+          [ -f "claude.md" ] && add_to_context "claude.md"
+
+          # 3) ./docs/requirements/**
+          while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find docs/requirements -type f -print0 2>/dev/null || true)
+
+          # 4) ./bugs ./features ./feedback
+          for d in bugs features feedback; do
+            if [ -d "$d" ]; then
+              while IFS= read -r -d '' f; do add_to_context "$f"; done < <(find "$d" -type f -print0)
+            fi
+          done
+
+          if [ -s artifacts/ci/context.jsonl ]; then
+            cat artifacts/ci/extra_context.jsonl >> artifacts/ci/context.jsonl
+          else
+            mv artifacts/ci/extra_context.jsonl artifacts/ci/context.jsonl
+          fi
 
       - name: Read review mode
         id: mode
@@ -52,41 +93,29 @@ jobs:
           fi
           if [ "$MODE" != "full" ]; then MODE=diff; fi
           echo "mode=$MODE" >> $GITHUB_OUTPUT
-          echo "Selected review mode: $MODE"
 
-      # Only create a diff file when mode=diff
       - name: Generate DIFF (push)
         if: steps.mode.outputs.mode == 'diff' && github.event_name == 'push'
-        id: diff_push
         run: |
-          # Use previous commit as base if available
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             git diff --unified=0 HEAD^...HEAD > pr.diff || true
           else
-            # First commit: no base; create an empty diff
             : > pr.diff
           fi
-          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
-          wc -l pr.diff || true
 
       - name: Generate DIFF (pull_request)
         if: steps.mode.outputs.mode == 'diff' && github.event_name == 'pull_request'
-        id: diff_pr
         run: |
           git fetch origin ${{ github.base_ref }} --depth=1 || true
           git diff --unified=0 origin/${{ github.base_ref }}...HEAD > pr.diff || true
-          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
-          wc -l pr.diff || true
 
       - name: Run AI review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GIT_COMMIT_SHA: ${{ github.sha }}
         run: |
-          mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
           DIFF_PATH="pr.diff"
           if [ "${{ steps.mode.outputs.mode }}" != "diff" ]; then
-            # reviewer will ignore diff content in full mode
             DIFF_PATH="/dev/null"
           fi
 
@@ -97,7 +126,6 @@ jobs:
             --out_json artifacts/ci/ai-review.json \
             --out_md artifacts/review/ci/review.md
 
-          # persist review in repo for local consumption
           cp artifacts/review/ci/review.md "docs/reviews/${GIT_COMMIT_SHA}.md"
           cp artifacts/ci/ai-review.json  "docs/reviews_json/${GIT_COMMIT_SHA}.json"
 
@@ -108,6 +136,7 @@ jobs:
           path: |
             artifacts/ci/ai-review.json
             artifacts/review/ci/review.md
+            artifacts/ci/context.jsonl
 
       - name: Commit review docs
         env:
@@ -121,36 +150,7 @@ jobs:
 
       - name: Write Status Page (docs/review_status.md)
         run: |
-          python - << 'PY'
-          import json, pathlib, time, os
-          p = pathlib.Path("artifacts/ci/ai-review.json")
-          data = json.loads(p.read_text())
-          ok = data.get("ok", False)
-          high = [i for i in data.get("issues", []) if i.get("severity")=="high"]
-          sha = data.get("metadata", {}).get("sha","")
-          ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-          review_md = f"docs/reviews/{sha}.md"
-          review_json = f"docs/reviews_json/{sha}.json"
-          md = []
-          md.append("# Review Status")
-          md.append(f"**SHA:** `{sha}`  ")
-          md.append(f"**STATUS:** {'OK' if ok and not high else 'FAIL'}  ")
-          md.append(f"**HIGH_ISSUES:** {len(high)}  ")
-          md.append(f"**UPDATED:** {ts}")
-          md.append("")
-          md.append("## Summary")
-          md.append(data.get("summary","")) ; md.append("")
-          md.append("## Full Review")
-          md.append(f"See **[{review_md}]({review_md})** for details.") ; md.append("")
-          md.append("## Raw JSON")
-          md.append(f"[{review_json}]({review_json})") ; md.append("")
-          md.append("## Provider")
-          md.append(data.get("metadata",{}).get("provider","openai")) ; md.append("")
-          md.append("## Notes")
-          md.append("This file is auto-updated by CI. Claude must read this file before proceeding.")
-          pathlib.Path("docs").mkdir(exist_ok=True)
-          pathlib.Path("docs/review_status.md").write_text("\n".join(md), encoding="utf-8")
-          PY
+          python scripts/ci/write_status_page.py artifacts/ci/ai-review.json
 
       - name: Commit Status Page
         env:
@@ -160,4 +160,18 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/review_status.md
           git commit -m "chore(ci): update review status [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Generate bugs/features/feedback from review + add example code (medium+)
+        run: |
+          python scripts/ci/postprocess_review.py artifacts/ci/ai-review.json $GITHUB_SHA
+
+      - name: Commit tracker updates (bugs/features/feedback + examples)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bugs features feedback docs/reviews/*_examples.md
+          git commit -m "chore(ci): address review items (bugs/features/feedback) and add example code for medium+ [skip ci]" || echo "No changes to commit"
           git push
