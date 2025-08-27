@@ -2,7 +2,7 @@
 
 **Project:** TTRPG Center MVP (Build: 2025-08-27_07-29-16_build-4980)  
 **Status:** ✅ **COMPLETE** - All MVP requirements implemented and operational  
-**Last Updated:** 2025-08-27 15:05:00 UTC  
+**Last Updated:** 2025-08-27 16:55:00 UTC  
 
 ## 🎯 Executive Summary
 
@@ -296,7 +296,27 @@ All core MVP requirements implemented and operational. System ready for UAT with
 
 ## 🔄 Recent Changes (August 27, 2025 - Latest Release)
 
-### **Latest Update (Build 2025-08-27_07-02-53_build-3439) - August 27, 2025**
+### **Latest Update (Build 2025-08-27_07-29-16_build-4980) - August 27, 2025**
+
+**🚀 Browser Cache-Busting Implementation**
+
+1. **Comprehensive Cache Control Headers**
+   - Implemented cache-busting headers for all HTML responses: Cache-Control: no-cache, no-store, must-revalidate
+   - Added Pragma: no-cache and Expires: 0 headers for maximum browser compatibility
+   - Applied cache-busting to static file serving to ensure latest assets are always loaded
+   - Added timestamp-based cache buster meta tags to HTML templates
+
+2. **User-Submitted Bug Resolution**
+   - **Bug #7185524250** - Admin UI Cache Clearing: CLOSED (comprehensive cache-busting implemented)
+   - Fixed issue where users may see outdated UI after system updates
+   - Ensures browser always fetches latest version of Admin UI and assets
+
+3. **Peer Review Processing**
+   - Removed 8 bugs targeting .claude/commands/*.md files per system restrictions
+   - All bugs properly marked as "removed" status with clear resolution notes
+   - System correctly handles restrictions on MD file editing
+
+### **Previous Release Features (Build 2025-08-27_07-02-53_build-3439)**
 
 **🚀 Enhanced Security and Error Handling**
 

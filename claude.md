@@ -106,7 +106,9 @@ Create these under `.claude/commands/`:
 3. **Parse new peer reviews and create bugs**  
    - New bug = create file with machine ID (`CR-###`) + user-friendly 10-digit ID.  
    - Status tracking required (`open` → `resolved`).
+   - remove new review file after bugs are created
 4. **Resolve all existing bugs**.
+   - Remove any bugs that suggest making changes to a .md file.
 5. **Process feature requests**  
    - New feature = create file with machine ID (`FR-YYYYMMDD-###`) + user-friendly 10-digit ID.  
    - Status tracking required (`pending` → `approved` or `removed`).

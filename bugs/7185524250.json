@@ -1,0 +1,64 @@
+{
+  "bug_id": "7185524250",
+  "timestamp": "2025-08-27T12:00:00Z",
+  "environment": "dev",
+  "build_id": "current",
+  "severity": "medium",
+  "category": "ui_caching",
+  "status": "closed",
+  "resolution": "Fixed - Added comprehensive cache-busting headers to both HTML responses and static file serving. Implemented Cache-Control: no-cache, Pragma: no-cache, Expires: 0 headers plus timestamp-based cache buster in HTML meta tags.",
+  "resolution_timestamp": "2025-08-27T16:55:00Z",
+  "title": "Admin UI Needs Forced Browser Cache Clearing on Reload",
+  "description": "Admin UI needs to force clear browser cache on reload to ensure latest version is running. Users may be running stale cached versions of the UI after updates.",
+  "source": "user_submission",
+  "admin_controls": {
+    "can_modify_status": false,
+    "can_put_on_hold": false,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "technical_analysis": {
+    "root_cause_potential": [
+      "Lack of cache-busting mechanisms in frontend builds",
+      "Missing cache control headers for static assets",
+      "No versioning strategy for UI updates",
+      "Browser caching of HTML/JS/CSS files preventing updates"
+    ],
+    "affected_components": [
+      "Admin UI frontend",
+      "Static asset serving",
+      "Build process",
+      "HTTP cache headers"
+    ],
+    "requirements_impact": [
+      "UI-001"
+    ],
+    "suggested_solution": "Implement cache-busting strategies including versioned asset URLs, proper cache control headers, and force reload mechanisms"
+  },
+  "immediate_fixes": [
+    {
+      "action": "Add cache-busting query parameters to static assets (CSS/JS)",
+      "rationale": "Ensure browsers fetch latest versions of updated files"
+    },
+    {
+      "action": "Implement proper HTTP cache control headers",
+      "rationale": "Control browser caching behavior for different asset types"
+    },
+    {
+      "action": "Add version stamps to HTML templates",
+      "rationale": "Force browser to recognize when UI has been updated"
+    },
+    {
+      "action": "Consider adding a 'force refresh' button in Admin UI",
+      "rationale": "Provide users manual control over cache clearing"
+    }
+  ],
+  "impact_assessment": {
+    "user_impact": "Medium - Users may see outdated UI and miss important updates",
+    "functionality_impact": "Medium - Stale UI may not work correctly with updated backend",
+    "urgency": "Medium - Should be addressed to ensure users get latest features and fixes"
+  },
+  "related_requirements": [
+    "UI-001"
+  ]
+}
