@@ -18,10 +18,8 @@ jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (full history for diffs)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -40,55 +38,10 @@ jobs:
             exit 1
           fi
 
-      - name: Build context pack (code + required docs for peer review)
+      - name: Build context pack
         run: |
-          mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
-          python scripts/ci/make_context_pack.py --out artifacts/ci/context.jsonl || true
-
-          python - << 'PY'
-          import json, pathlib
-root = pathlib.Path('.')
-out = pathlib.Path('artifacts/ci/context.jsonl')
-extra = []
-
-def add_file(p: pathlib.Path):
-    try:
-        if p.is_file() and p.stat().st_size <= 256000:
-            txt = p.read_text(encoding='utf-8', errors='replace')
-            extra.append({'path': str(p), 'content': txt})
-    except Exception:
-        pass
-
-# 1) .claude/**/*.md
-claude = root/'.claude'
-if claude.exists():
-    for f in claude.rglob('*.md'):
-        add_file(f)
-
-# 2) claude.md
-cm = root/'claude.md'
-if cm.exists():
-    add_file(cm)
-
-# 3) ./docs/requirements/**
-req = root/'docs'/'requirements'
-if req.exists():
-    for f in req.rglob('*'):
-        add_file(f)
-
-# 4) ./bugs ./features ./feedback
-for dname in ('bugs','features','feedback'):
-    d = root/dname
-    if d.exists():
-        for f in d.rglob('*'):
-            add_file(f)
-
-mode = 'a' if out.exists() and out.stat().st_size > 0 else 'w'
-with out.open(mode, encoding='utf-8') as fp:
-    for rec in extra:
-        fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
-print(f"Wrote {len(extra)} extra context records → {out}")
-          PY
+          mkdir -p artifacts/ci
+          python scripts/ci/make_context_pack.py
 
       - name: Read review mode
         id: mode
@@ -99,27 +52,35 @@ print(f"Wrote {len(extra)} extra context records → {out}")
           fi
           if [ "$MODE" != "full" ]; then MODE=diff; fi
           echo "mode=$MODE" >> $GITHUB_OUTPUT
+          echo "Selected review mode: $MODE"
 
       - name: Generate DIFF (push)
         if: steps.mode.outputs.mode == 'diff' && github.event_name == 'push'
+        id: diff_push
         run: |
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             git diff --unified=0 HEAD^...HEAD > pr.diff || true
           else
             : > pr.diff
           fi
+          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
+          wc -l pr.diff || true
 
       - name: Generate DIFF (pull_request)
         if: steps.mode.outputs.mode == 'diff' && github.event_name == 'pull_request'
+        id: diff_pr
         run: |
           git fetch origin ${{ github.base_ref }} --depth=1 || true
           git diff --unified=0 origin/${{ github.base_ref }}...HEAD > pr.diff || true
+          echo "DIFF_PATH=pr.diff" >> $GITHUB_OUTPUT
+          wc -l pr.diff || true
 
       - name: Run AI review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GIT_COMMIT_SHA: ${{ github.sha }}
         run: |
+          mkdir -p artifacts/ci artifacts/review/ci docs/reviews docs/reviews_json
           DIFF_PATH="pr.diff"
           if [ "${{ steps.mode.outputs.mode }}" != "diff" ]; then
             DIFF_PATH="/dev/null"
@@ -142,7 +103,6 @@ print(f"Wrote {len(extra)} extra context records → {out}")
           path: |
             artifacts/ci/ai-review.json
             artifacts/review/ci/review.md
-            artifacts/ci/context.jsonl
 
       - name: Commit review docs
         env:
@@ -156,7 +116,36 @@ print(f"Wrote {len(extra)} extra context records → {out}")
 
       - name: Write Status Page (docs/review_status.md)
         run: |
-          python scripts/ci/write_status_page.py artifacts/ci/ai-review.json
+          python - << 'PY'
+          import json, pathlib, time, os
+          p = pathlib.Path("artifacts/ci/ai-review.json")
+          data = json.loads(p.read_text())
+          ok = data.get("ok", False)
+          high = [i for i in data.get("issues", []) if i.get("severity")=="high"]
+          sha = data.get("metadata", {}).get("sha","")
+          ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+          review_md = f"docs/reviews/{sha}.md"
+          review_json = f"docs/reviews_json/{sha}.json"
+          md = []
+          md.append("# Review Status")
+          md.append(f"**SHA:** `{sha}`  ")
+          md.append(f"**STATUS:** {'OK' if ok and not high else 'FAIL'}  ")
+          md.append(f"**HIGH_ISSUES:** {len(high)}  ")
+          md.append(f"**UPDATED:** {ts}")
+          md.append("")
+          md.append("## Summary")
+          md.append(data.get("summary","")) ; md.append("")
+          md.append("## Full Review")
+          md.append(f"See **[{review_md}]({review_md})** for details.") ; md.append("")
+          md.append("## Raw JSON")
+          md.append(f"[{review_json}]({review_json})") ; md.append("")
+          md.append("## Provider")
+          md.append(data.get("metadata",{}).get("provider","openai")) ; md.append("")
+          md.append("## Notes")
+          md.append("This file is auto-updated by CI. Claude must read this file before proceeding.")
+          pathlib.Path("docs").mkdir(exist_ok=True)
+          pathlib.Path("docs/review_status.md").write_text("\n".join(md), encoding="utf-8")
+          PY
 
       - name: Commit Status Page
         env:
@@ -166,18 +155,4 @@ print(f"Wrote {len(extra)} extra context records → {out}")
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/review_status.md
           git commit -m "chore(ci): update review status [skip ci]" || echo "No changes to commit"
-          git push
-
-      - name: Generate bugs/features/feedback from review + add example code (medium+)
-        run: |
-          python scripts/ci/postprocess_review.py artifacts/ci/ai-review.json $GITHUB_SHA
-
-      - name: Commit tracker updates (bugs/features/feedback + examples)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add bugs features feedback docs/reviews/*_examples.md
-          git commit -m "chore(ci): address review items (bugs/features/feedback) and add example code for medium+ [skip ci]" || echo "No changes to commit"
           git push
