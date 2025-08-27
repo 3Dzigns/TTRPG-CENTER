@@ -1,8 +1,8 @@
 # TTRPG Center MVP - Implementation Status
 
-**Project:** TTRPG Center MVP (Build: 2025-08-27_12-06-31_build-6674)  
+**Project:** TTRPG Center MVP (Build: 09f7562)  
 **Status:** ✅ **COMPLETE** - All MVP requirements implemented and operational  
-**Last Updated:** 2025-08-27 20:15:00 UTC  
+**Last Updated:** 2025-08-27 21:30:00 UTC  
 
 ## 🎯 Executive Summary
 
@@ -238,7 +238,34 @@ curl http://localhost:8000/validate-dev
 
 ## 🐛 Known Issues & Resolutions
 
-### ✅ **Recent Fixes (August 27, 2025)**
+### ✅ **Recent Security & Performance Fixes (August 27, 2025)**
+
+1. **Bug #6084339765 - Admin Endpoints Without Authentication** ✅ **RESOLVED** (CRITICAL)
+   - **Issue**: Destructive admin operations accessible without authentication with CORS * access
+   - **Resolution**: Implemented admin authentication with X-Admin-Token header requirement
+   - **Files Modified**: `app/server.py` - Added _require_admin() method and admin controls
+
+2. **Bug #2792699693 - Single-threaded Server Blocking** ✅ **RESOLVED** (HIGH)
+   - **Issue**: HTTPServer blocking requests during long-running ingestion operations
+   - **Resolution**: Upgraded to ThreadingHTTPServer with background task executor
+   - **Files Modified**: `app/server.py` - Threading support and concurrent request handling
+
+3. **Bug #3630020708 - Collection Name Validation** ✅ **RESOLVED** (HIGH)
+   - **Issue**: User-specified collection names increase blast radius for destructive operations
+   - **Resolution**: Environment-specific collection allowlists with validation
+   - **Files Modified**: `app/server.py` - Added _validate_collection() method
+
+4. **Bug #5856203995 - Deprecated Embedding Model** ✅ **RESOLVED** (MEDIUM)
+   - **Issue**: text-embedding-ada-002 deprecated, brittle tokenizer mapping
+   - **Resolution**: Upgraded to text-embedding-3-small with retry logic and cl100k_base tokenizer
+   - **Files Modified**: `app/common/embeddings.py` - Modern embedding model with resilience
+
+5. **Bug #4075201362 - Missing Size Limits** ✅ **RESOLVED** (MEDIUM)
+   - **Issue**: JSON and multipart handlers lack explicit size limits
+   - **Resolution**: Added 1MB JSON limit and 50MB upload limit with 413 responses
+   - **Files Modified**: `app/server.py` - Request size validation and memory protection
+
+### ✅ **Previous Infrastructure Fixes**
 
 1. **Bug #7185524250 - Admin UI Cache Clearing** ✅ **RESOLVED**
    - **Issue**: Admin UI not loading latest version, requiring manual browser cache clearing
