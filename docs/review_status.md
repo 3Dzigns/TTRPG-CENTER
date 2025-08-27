@@ -1,17 +1,17 @@
 # Review Status
-**SHA:** `912ff75c2c682540afcfb3c851b0ff1c57a84d06`  
+**SHA:** `8c75a820a5bf3afd4d171b8a88a75758baccf1f0`  
 **STATUS:** FAIL  
 **HIGH_ISSUES:** 1  
-**UPDATED:** 2025-08-27 10:46:48 UTC
+**UPDATED:** 2025-08-27 10:57:47 UTC
 
 ## Summary
-The overall code quality shows several areas for improvement, particularly in error handling, security, and testing. Addressing these issues will enhance the robustness and security of the project.
+The overall code quality shows several areas for improvement, particularly in error handling, security, and testing. Addressing these issues will enhance the robustness and security of the TTRPG Center project.
 
 ## Full Review
-See **[docs/reviews/912ff75c2c682540afcfb3c851b0ff1c57a84d06.md](docs/reviews/912ff75c2c682540afcfb3c851b0ff1c57a84d06.md)** for details.
+See **[docs/reviews/8c75a820a5bf3afd4d171b8a88a75758baccf1f0.md](docs/reviews/8c75a820a5bf3afd4d171b8a88a75758baccf1f0.md)** for details.
 
 ## Raw JSON
-[docs/reviews_json/912ff75c2c682540afcfb3c851b0ff1c57a84d06.json](docs/reviews_json/912ff75c2c682540afcfb3c851b0ff1c57a84d06.json)
+[docs/reviews_json/8c75a820a5bf3afd4d171b8a88a75758baccf1f0.json](docs/reviews_json/8c75a820a5bf3afd4d171b8a88a75758baccf1f0.json)
 
 ## Provider
 openai
