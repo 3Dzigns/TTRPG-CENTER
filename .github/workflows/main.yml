@@ -46,7 +46,7 @@ jobs:
           python scripts/ci/make_context_pack.py --out artifacts/ci/context.jsonl || true
 
           python - << 'PY'
-import json, pathlib
+          import json, pathlib
 root = pathlib.Path('.')
 out = pathlib.Path('artifacts/ci/context.jsonl')
 extra = []
@@ -88,7 +88,7 @@ with out.open(mode, encoding='utf-8') as fp:
     for rec in extra:
         fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
 print(f"Wrote {len(extra)} extra context records → {out}")
-PY
+          PY
 
       - name: Read review mode
         id: mode
