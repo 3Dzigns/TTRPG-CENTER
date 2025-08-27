@@ -1,8 +1,8 @@
 # TTRPG Center MVP - Implementation Status
 
-**Project:** TTRPG Center MVP (Build: 2025-08-27_07-29-16_build-4980)  
+**Project:** TTRPG Center MVP (Build: 2025-08-27_12-06-31_build-6674)  
 **Status:** ✅ **COMPLETE** - All MVP requirements implemented and operational  
-**Last Updated:** 2025-08-27 17:30:00 UTC  
+**Last Updated:** 2025-08-27 20:15:00 UTC  
 
 ## 🎯 Executive Summary
 
@@ -238,7 +238,25 @@ curl http://localhost:8000/validate-dev
 
 ## 🐛 Known Issues & Resolutions
 
-### ✅ **Resolved Issues**
+### ✅ **Recent Fixes (August 27, 2025)**
+
+1. **Bug #7185524250 - Admin UI Cache Clearing** ✅ **RESOLVED**
+   - **Issue**: Admin UI not loading latest version, requiring manual browser cache clearing
+   - **Resolution**: Implemented comprehensive cache-busting headers (`Cache-Control: no-cache`, `Pragma: no-cache`, `Expires: 0`)
+   - **Files Modified**: `app/server.py` - Enhanced HTML and static file serving with anti-cache headers
+
+2. **Bug #8829990111 - Test Environment Non-Functional** ✅ **RESOLVED**
+   - **Issue**: Admin UI showing "loading" state with non-functional database management in test environment
+   - **Root Cause**: Build ID mismatch between running process and expected test build
+   - **Resolution**: Fixed build ID retrieval for test environment and improved PowerShell script trimming
+   - **Files Modified**: `app/server.py`, `scripts/run-test.ps1`
+
+3. **Bug #4829736051 - GitHub Workflow Improvements** ✅ **RESOLVED**
+   - **Issue**: GitHub Actions workflow needed diff-only mode and line formatting fixes
+   - **Resolution**: Set `MODE=diff` explicitly, improved YAML formatting, fixed YAML syntax errors
+   - **Files Modified**: `.github/workflows/main.yml`
+
+### ✅ **Previous Resolved Issues**
 
 1. **Connection Reset on Ingestion Page**
    - **Issue**: `http://localhost:8181/admin/ingestion` connection reset

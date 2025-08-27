@@ -45,7 +45,12 @@
       "Bash(dir:*)",
       "Bash(timeout:*)",
       "Bash(SET APP_RELEASE_BUILD=2025-08-27_12-06-31_build-6674)",
-      "Bash(del debug_env.py)"
+      "Bash(del debug_env.py)",
+      "Bash(PYTHONPATH=. python -c \"from app.common.bug_tracker import get_bug_tracker; bt = get_bug_tracker(); bugs = bt.get_bugs_by_criteria({''status'': ''open''}); print(f''Open bugs: {len(bugs)}''); [print(f''- {bug[\"\"bug_id\"\"]}: {bug[\"\"title\"\"]}'') for bug in bugs]\")",
+      "Bash(PYTHONPATH=. python -m pytest tests/test_server_endpoints.py -v)",
+      "Bash(PYTHONPATH=. python -m pytest tests/test_config.py -v)",
+      "Bash(PYTHONPATH=. python -m pytest tests/ -v --tb=short)",
+      "Bash(PYTHONPATH=. python -c \"from app.common.build_validator import get_build_validator; bv = get_build_validator(); info = bv.get_build_info(''dev''); print(f''Current dev build: {info[\"\"build_id\"\"]}'')\")"
     ],
     "deny": [],
     "ask": [],
