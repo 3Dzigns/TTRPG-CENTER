@@ -3,7 +3,6 @@ name: AI Code Review (OpenAI, Diff-Only)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # omit branches filter to avoid YAML/pathspec edge cases
 
 permissions:
   contents: read
@@ -12,7 +11,7 @@ permissions:
 env:
   OPENAI_MODEL: gpt-4o-mini
   MAX_BYTES_PER_CHUNK: 120000
-  FAIL_ON_SEVERITY: none   # none | high | critical
+  FAIL_ON_SEVERITY: none  # none | high | critical
 
 jobs:
   review:
@@ -27,15 +26,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "BASE: ${{ github.event.pull_request.base.sha }}"
-          echo "HEAD: ${{ github.event.pull_request.head.sha }}"
+          echo "BASE=${{ github.event.pull_request.base.sha }}"
+          echo "HEAD=${{ github.event.pull_request.head.sha }}"
 
       - name: Compute code diff (exclude .md)
         id: diff
         shell: bash
         run: |
           set -euo pipefail
-
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
 
@@ -43,11 +41,11 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true
           echo "::endgroup::"
 
-          # Build a list of changed non-markdown files first (safer than pathspec-only)
+          # Non-markdown files only
           mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
 
           if [ "${#CODE_FILES[@]}" -eq 0 ]; then
-            echo "No non-Markdown changes found."
+            echo "No non-Markdown changes."
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -56,11 +54,10 @@ jobs:
           printf '%s\n' "${CODE_FILES[@]}"
           echo "::endgroup::"
 
-          # Now produce a patch including only those code files
           git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- "${CODE_FILES[@]}" > diff.patch || true
 
           if [ ! -s diff.patch ]; then
-            echo "Diff patch is empty after filtering; nothing to review."
+            echo "Diff patch is empty after filtering."
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
@@ -76,60 +73,58 @@ jobs:
       - name: Ensure OPENAI_API_KEY is present
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "::error::OPENAI_API_KEY secret is missing. Add it in repo/org secrets."
+            echo "::error::OPENAI_API_KEY secret is missing."
             exit 1
-          else
-            echo "OPENAI_API_KEY detected."
           fi
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          echo "OPENAI_API_KEY found."
 
-      - name: Prepare prompt (printf; no heredoc)
+      - name: Prepare prompt (simple printf)
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .github/ai
-          printf "%s\n" \
-"You are a senior software engineer performing a peer review of a pull request." \
-"" \
-"STRICT SCOPE" \
-"- Review ONLY the supplied git DIFF/patch for this PR (changed lines & immediate context)." \
-"- DO NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only." \
-"- You may use .md content to understand requirements or intended behavior, but DO NOT flag issues or give suggestions about .md changes." \
-"- DO NOT review project-wide requirements, policies, or architecture unless the changed lines in code directly violate them." \
-"- DO NOT summarize the whole repo — focus only on the code changes." \
-"" \
-"OUTPUT FORMAT" \
-"1. **Summary**: 2–5 bullet points (what was improved or concerning in the code diff)." \
-"2. **Findings**: Numbered list. Each finding MUST include:" \
-"   - File path and line(s) from the code diff" \
-"   - Issue description or improvement opportunity" \
-"   - Concrete suggestion with a sample code or patch snippet showing a possible resolution" \
-"   - Severity: LOW | MEDIUM | HIGH | CRITICAL" \
-"3. **Tests**: Explicitly call out tests that are missing or need updating for the new code." \
-"4. **Security/Concurrency**: Only if visible in the code diff — call out exact lines and risks, with a sample mitigation." \
-"5. **GO/NO-GO**: Decide based ONLY on the code diff. “GO” if mergeable as-is; “NO-GO” if blocking issues remain." \
-"" \
-"TONE" \
-"- Be concise, technical, and actionable." \
-"- Always provide at least one possible resolution (sample code, config change, or patch) for each issue." \
-"- If context outside the diff is needed, state clearly: “Assumption: …”." \
-"" \
-"Remember: this is a developer code review of code changes only. Markdown files are context, not review targets." \
-> .github/ai/prompt.txt
-          echo "Prompt written to .github/ai/prompt.txt"
+          {
+            echo "You are a senior software engineer performing a peer review of a pull request."
+            echo
+            echo "STRICT SCOPE"
+            echo "- Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context)."
+            echo "- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only."
+            echo "- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes."
+            echo "- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them."
+            echo "- Do NOT summarize the whole repo; focus only on code changes."
+            echo
+            echo "OUTPUT FORMAT"
+            echo "1. Summary: 2-5 bullet points."
+            echo "2. Findings: Numbered list. Each finding MUST include:"
+            echo "   - File path and line(s) from the code diff"
+            echo "   - Issue description or improvement opportunity"
+            echo "   - Concrete suggestion with a sample code or patch snippet showing a possible resolution"
+            echo "   - Severity: LOW | MEDIUM | HIGH | CRITICAL"
+            echo "3. Tests: Explicitly call out missing or to-be-updated tests for the new code."
+            echo "4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation."
+            echo "5. GO/NO-GO: Decide based only on the code diff."
+            echo
+            echo "TONE"
+            echo "- Be concise, technical, and actionable."
+            echo "- Always include at least one possible resolution (sample code, config change, or patch) for each issue."
+            echo "- If context outside the diff is needed, state clearly: Assumption: ..."
+            echo
+            echo "Remember: this is a developer code review of code changes only. Markdown files are context, not review targets."
+          } > .github/ai/prompt.txt
+          echo "Prompt written."
 
-      - name: Chunk diff file (no heredoc)
+      - name: Chunk diff file
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .github/ai
-          # Clean prior chunks if re-run
           rm -f .github/ai/chunk_*.patch || true
           split -b "${MAX_BYTES_PER_CHUNK}" -d -a 3 diff.patch .github/ai/chunk_ || true
 
@@ -139,11 +134,12 @@ jobs:
             mv "$f" "${f}.patch"
             COUNT=$((COUNT+1))
           done
+
           if [ "$COUNT" -eq 0 ]; then
-            # Fallback: single chunk equals whole diff
             cp diff.patch .github/ai/chunk_000.patch
             COUNT=1
           fi
+
           echo "Chunks created: $COUNT"
           echo "::group::Chunk list"
           ls -la .github/ai/chunk_*.patch
@@ -160,23 +156,19 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            function abort(msg) {
+            function fail(msg) {
               core.setFailed(msg);
               throw new Error(msg);
             }
 
-            if (!process.env.OPENAI_API_KEY) {
-              abort('Missing OPENAI_API_KEY.');
-            }
+            if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY.');
 
             const basePrompt = fs.readFileSync('.github/ai/prompt.txt','utf8');
             const chunkFiles = fs.readdirSync('.github/ai')
               .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
               .sort();
 
-            if (chunkFiles.length === 0) {
-              abort('No diff chunks found to send to OpenAI.');
-            }
+            if (chunkFiles.length === 0) fail('No diff chunks found.');
 
             async function askOpenAI(content) {
               const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -194,28 +186,27 @@ jobs:
                   ]
                 })
               });
+
               const txt = await r.text();
-              if (!r.ok) {
-                abort(`OpenAI error ${r.status}: ${txt}`);
-              }
-              try {
-                const json = JSON.parse(txt);
-                return json.choices?.[0]?.message?.content || '';
-              } catch (e) {
-                abort(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`);
-              }
+              if (!r.ok) fail(`OpenAI error ${r.status}: ${txt}`);
+
+              let json;
+              try { json = JSON.parse(txt); }
+              catch (e) { fail(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`); }
+
+              const out = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+              return out || '';
             }
 
-            let aggregate = [];
+            let parts = [];
             for (const f of chunkFiles) {
               const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
               const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
               core.info(`Sending ${f} to OpenAI (${diff.length} bytes)`);
               const out = await askOpenAI(prompt);
-              aggregate.push(`### Review for ${f}\n${out}`);
+              parts.push(`### Review for ${f}\n${out}`);
             }
-            const full = aggregate.join("\n\n---\n\n");
-            fs.writeFileSync('.github/ai/review.md', full);
+            fs.writeFileSync('.github/ai/review.md', parts.join('\n\n---\n\n'));
             core.info('Wrote .github/ai/review.md');
 
       - name: Print review excerpt (debug)
@@ -223,8 +214,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::group::Review (first 100 lines)"
-          head -n 100 .github/ai/review.md || true
+          echo "::group::Review (first 80 lines)"
+          head -n 80 .github/ai/review.md || true
           echo "::endgroup::"
 
       - name: Post PR review comment
@@ -236,8 +227,8 @@ jobs:
             if (!fs.existsSync('.github/ai/review.md')) {
               core.setFailed('review.md missing; cannot post comment.');
             } else {
-              const body = fs.readFileSync('.github/ai/review.md','utf8');
-              if (!body.trim()) {
+              const body = fs.readFileSync('.github/ai/review.md','utf8').trim();
+              if (!body) {
                 core.setFailed('review.md is empty; refusing to post an empty comment.');
               } else {
                 await github.rest.pulls.createReview({
