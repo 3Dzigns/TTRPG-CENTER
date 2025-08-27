@@ -1,12 +1,10 @@
 name: AI Code Review (OpenAI, Diff-Only)
 
 on:
-  workflow_dispatch: {}                # <— manual “Run workflow” button
-  push:                                # <— runs when you push (useful while you tune it)
+  workflow_dispatch: {}
+  push:
     branches: ["**"]
-    paths-ignore:
-      - "**/*.md"                      # pushes that only touch .md won’t fire
-  pull_request:                        # <— runs on PR activity
+  pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
     branches: ["**"]
 
@@ -17,25 +15,16 @@ permissions:
 env:
   OPENAI_MODEL: gpt-4o-mini
   MAX_BYTES_PER_CHUNK: 120000
-  FAIL_ON_SEVERITY: none  # none | high | critical
+  FAIL_ON_SEVERITY: none
 
 jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Show event + SHAs (debug)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "GH_EVENT_NAME=${{ github.event_name }}"
-          echo "PR? ${{ github.event.pull_request.number || 'no PR' }}"
-          echo "BASE=${{ github.event.pull_request.base.sha || 'n/a' }}"
-          echo "HEAD=${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Compute code diff (exclude .md)
         id: diff
@@ -46,63 +35,37 @@ jobs:
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           else
-            # push/workflow_dispatch fallback: compare against previous commit
             BASE_SHA="$(git rev-parse HEAD~1 || true)"
             HEAD_SHA="$(git rev-parse HEAD)"
+            if [ -z "${BASE_SHA}" ]; then BASE_SHA="$(git hash-object -t tree /dev/null)"; fi
           fi
 
-          if [ -z "${BASE_SHA}" ]; then
-            echo "First commit on branch or non-PR run. Using empty tree for BASE."
-            BASE_SHA="$(git hash-object -t tree /dev/null)"
-          fi
-
-          echo "::group::Changed files (raw)"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true
-          echo "::endgroup::"
-
-          # Non-markdown files only
           mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
-
           if [ "${#CODE_FILES[@]}" -eq 0 ]; then
-            echo "No non-Markdown changes."
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          echo "::group::Code files to review"
-          printf '%s\n' "${CODE_FILES[@]}"
-          echo "::endgroup::"
-
           git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- "${CODE_FILES[@]}" > diff.patch || true
-
           if [ ! -s diff.patch ]; then
-            echo "Diff patch is empty after filtering."
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
-            echo "::group::Diff (first 200 lines)"
-            head -n 200 diff.patch
-            echo "::endgroup::"
           fi
 
       - name: Stop if no diff
         if: steps.diff.outputs.has_diff == 'false'
         run: echo "Nothing to review."
 
-      - name: Ensure OPENAI_API_KEY is present
+      - name: Ensure OPENAI_API_KEY
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "::error::OPENAI_API_KEY secret is missing."
-            exit 1
-          fi
-          echo "OPENAI_API_KEY found."
+          [ -n "${OPENAI_API_KEY:-}" ] || { echo "::error::OPENAI_API_KEY missing"; exit 1; }
 
-      - name: Chunk diff file
+      - name: Chunk diff
         if: steps.diff.outputs.has_diff == 'true'
         shell: bash
         run: |
@@ -110,23 +73,12 @@ jobs:
           mkdir -p .github/ai
           rm -f .github/ai/chunk_*.patch || true
           split -b "${MAX_BYTES_PER_CHUNK}" -d -a 3 diff.patch .github/ai/chunk_ || true
-
           shopt -s nullglob
           COUNT=0
-          for f in .github/ai/chunk_*; do
-            mv "$f" "${f}.patch"
-            COUNT=$((COUNT+1))
-          done
-          if [ "$COUNT" -eq 0 ]; then
-            cp diff.patch .github/ai/chunk_000.patch
-            COUNT=1
-          fi
-          echo "Chunks created: $COUNT"
-          echo "::group::Chunk list"
-          ls -la .github/ai/chunk_*.patch
-          echo "::endgroup::"
+          for f in .github/ai/chunk_*; do mv "$f" "${f}.patch"; COUNT=$((COUNT+1)); done
+          if [ "$COUNT" -eq 0 ]; then cp diff.patch .github/ai/chunk_000.patch; fi
 
-      - name: Run OpenAI review and aggregate
+      - name: Run OpenAI review → review.md
         if: steps.diff.outputs.has_diff == 'true'
         uses: actions/github-script@v7
         env:
@@ -138,14 +90,12 @@ jobs:
             const path = require('path');
 
             function fail(msg) { core.setFailed(msg); throw new Error(msg); }
-            if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY.');
 
-            // Prefer committed prompt; fall back to inline array (avoids YAML newline issues)
+            // Load prompt from repo, fallback to strict inline array (array ensures correct type)
             let basePrompt = '';
             const promptPath = '.github/ai/prompt.txt';
             if (fs.existsSync(promptPath)) {
               basePrompt = fs.readFileSync(promptPath, 'utf8').trim();
-              if (!basePrompt) core.warning('prompt.txt is empty; using fallback.');
             }
             if (!basePrompt) {
               basePrompt = [
@@ -178,13 +128,15 @@ jobs:
               ].join('\n');
             }
 
-            const chunkFiles = fs.readdirSync('.github/ai')
+            const chunks = fs.readdirSync('.github/ai')
               .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
               .sort();
-            if (chunkFiles.length === 0) fail('No diff chunks found.');
 
-            async function askOpenAI(content) {
-              const r = await fetch('https://api.openai.com/v1/chat/completions', {
+            if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY');
+            if (chunks.length === 0) fail('No diff chunks found.');
+
+            async function askOpenAI(prompt) {
+              const res = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -195,26 +147,26 @@ jobs:
                   temperature: 0.2,
                   messages: [
                     { role: 'system', content: 'You are a precise, terse, and helpful senior engineer.' },
-                    { role: 'user', content: content }
-                  ]
+                    { role: 'user', content: prompt }
+                  ] // <-- ARRAY (prevents "expected array, found object")
                 })
               });
-              const txt = await r.text();
-              if (!r.ok) fail(`OpenAI error ${r.status}: ${txt}`);
-              let json; try { json = JSON.parse(txt); } catch (e) { fail(`OpenAI response parse error: ${e.message}\nRaw: ${txt}`); }
-              const out = json.choices?.[0]?.message?.content ?? '';
-              return out;
+              const text = await res.text();
+              if (!res.ok) fail(`OpenAI HTTP ${res.status}: ${text}`);
+              let json;
+              try { json = JSON.parse(text); } catch (e) { fail(`OpenAI JSON parse error: ${e.message}\nRaw: ${text}`); }
+              const content = json?.choices?.[0]?.message?.content ?? '';
+              return content;
             }
 
-            let parts = [];
-            for (const f of chunkFiles) {
-              const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
+            let out = [];
+            for (const f of chunks) {
+              const diff = fs.readFileSync(path.join('.github/ai', f), 'utf8');
               const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
-              core.info(`Sending ${f} to OpenAI (${diff.length} bytes)`);
-              const out = await askOpenAI(prompt);
-              parts.push(`### Review for ${f}\n${out}`);
+              const ans = await askOpenAI(prompt);
+              out.push(`### Review for ${f}\n${ans}`.trim());
             }
-            fs.writeFileSync('.github/ai/review.md', parts.join('\n\n---\n\n'));
+            fs.writeFileSync('.github/ai/review.md', out.join('\n\n---\n\n'));
             core.info('Wrote .github/ai/review.md');
 
       - name: Print review excerpt (debug)
@@ -222,34 +174,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::group::Review (first 80 lines)"
-          head -n 80 .github/ai/review.md || true
-          echo "::endgroup::"
+          head -n 80 .github/ai/review.md || { echo "::error::review.md missing"; exit 1; }
 
+      # Post as PR review only on PR events (prevents undefined pull_request.number)
       - name: Post PR review comment
-        if: steps.diff.outputs.has_diff == 'true'
+        if: steps.diff.outputs.has_diff == 'true' && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            if (!fs.existsSync('.github/ai/review.md')) {
-              core.setFailed('review.md missing; cannot post comment.');
-            } else {
-              const body = fs.readFileSync('.github/ai/review.md','utf8').trim();
-              if (!body) {
-                core.setFailed('review.md is empty; refusing to post an empty comment.');
-              } else {
-                await github.rest.pulls.createReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.payload.pull_request.number,
-                  event: 'COMMENT',
-                  body
-                });
-              }
+            const body = fs.readFileSync('.github/ai/review.md', 'utf8').trim();
+            if (!body) { core.setFailed('review.md empty'); }
+            else {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                event: 'COMMENT',     // no "comments" array sent -> avoids type error
+                body
+              });
             }
 
-      - name: Optionally fail on HIGH/CRITICAL findings
+      # For push/workflow_dispatch, post to the commit instead
+      - name: Post commit comment (non-PR)
+        if: steps.diff.outputs.has_diff == 'true' && github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('.github/ai/review.md', 'utf8').trim();
+            if (!body) { core.setFailed('review.md empty'); }
+            else {
+              await github.rest.repos.createCommitComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+                body
+              });
+            }
+
+      - name: Optionally fail on HIGH/CRITICAL
         if: steps.diff.outputs.has_diff == 'true' && env.FAIL_ON_SEVERITY != 'none'
         shell: bash
         run: |
