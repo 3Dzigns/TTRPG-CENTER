@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-194430-cr001-error-handling",
+  "bug_id": "2179758774",
   "timestamp": "2025-08-26T19:44:30Z",
   "environment": "dev",
   "build_id": "2f9ac255bec0f9de995e0b5ea64754993b67b395",
@@ -37,7 +37,10 @@
       "Database upsert operations",
       "Batch processing logic"
     ],
-    "requirements_impact": ["RAG-001", "ADM-002"],
+    "requirements_impact": [
+      "RAG-001",
+      "ADM-002"
+    ],
     "suggested_solution": "Implement try-catch blocks around critical operations and ensure that errors are logged and handled gracefully"
   },
   "immediate_fixes": [
@@ -59,5 +62,10 @@
     "functionality_impact": "High - Critical ingestion pipeline reliability issue",
     "urgency": "High - Must be resolved for data integrity"
   },
-  "related_requirements": ["RAG-001", "ADM-002"]
+  "related_requirements": [
+    "RAG-001",
+    "ADM-002"
+  ],
+  "migrated_from": "bugid_20250826-194430-cr001-error-handling",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

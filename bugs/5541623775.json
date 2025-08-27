@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_1756246538_cr_004",
+  "bug_id": "5541623775",
   "timestamp": "2025-08-26T22:15:38Z",
   "environment": "dev",
   "build_id": "2f9ac255bec0f9de995e0b5ea64754993b67b395",
@@ -30,5 +30,7 @@
       "found_date": "2025-08-26T22:15:38Z",
       "provider": "openai"
     }
-  ]
+  ],
+  "migrated_from": "bugid_1756246538_cr_004",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

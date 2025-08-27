@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-08-27T10:54:06Z",
+  "environment": "dev",
+  "severity": "medium",
+  "category": "ui_functionality",
+  "status": "open",
+  "title": "Reopen of bug in Bug Management page does not update state in UI",
+  "description": "When reopening a bug through the Bug Management interface, the UI does not properly reflect the state change. The bug status remains showing as closed despite successful reopen action. State synchronization issue between backend and frontend.",
+  "source": "ui_submission",
+  "user_report": "Reopen of bug in Bug Management page does not update state in UI.",
+  "immediate_fixes": [
+    {
+      "action": "Fix UI state refresh after reopen action",
+      "rationale": "Ensure proper state synchronization between frontend and backend"
+    },
+    {
+      "action": "Add proper success callback handling",
+      "rationale": "UI needs to refresh bug list after successful reopen operation"
+    }
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "4859468958"
+}

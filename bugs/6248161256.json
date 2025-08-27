@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182547-cr003-error-handling",
+  "bug_id": "6248161256",
   "timestamp": "2025-08-26T18:25:47Z",
   "environment": "dev",
   "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
@@ -23,7 +23,10 @@
       "Pipeline error recovery",
       "Transaction management"
     ],
-    "requirements_impact": ["RAG-001", "ADM-002"],
+    "requirements_impact": [
+      "RAG-001",
+      "ADM-002"
+    ],
     "suggested_solution": "Ensure that critical errors halt the process or provide a clear rollback mechanism"
   },
   "reproduction_steps": [
@@ -53,5 +56,10 @@
     "functionality_impact": "Medium - Affects ingestion pipeline reliability",
     "urgency": "Medium - Important for data integrity"
   },
-  "related_requirements": ["RAG-001", "ADM-002"]
+  "related_requirements": [
+    "RAG-001",
+    "ADM-002"
+  ],
+  "migrated_from": "bugid_20250826-182547-cr003-error-handling",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

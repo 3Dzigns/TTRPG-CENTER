@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-125758-cleanup-all-ui",
+  "bug_id": "8695948918",
   "timestamp": "2025-08-26T12:57:58Z",
   "environment": "test",
   "build_id": "2025-08-25_20-29-13_build-2936",
@@ -10,10 +10,10 @@
   "user_report": "Cleanup ALL TEST button does not seem to do anything. Selecting a collection and cleaning it up does work. However there is no option to find and clean single chunks/entries.",
   "technical_analysis": {
     "root_cause_primary": "AstraDB delete_many() returns -1 for empty collections instead of 0, causing confusing UI display",
-    "root_cause_secondary": "No chunk/entry level cleanup functionality implemented", 
+    "root_cause_secondary": "No chunk/entry level cleanup functionality implemented",
     "affected_components": [
       "Cleanup ALL TEST button UI feedback",
-      "AstraDB delete_many response handling", 
+      "AstraDB delete_many response handling",
       "Missing chunk-level cleanup functionality"
     ],
     "error_details": {
@@ -28,7 +28,7 @@
   },
   "reproduction_steps": [
     "1. Navigate to http://localhost:8181/admin",
-    "2. Scroll to 'Database Management' section", 
+    "2. Scroll to 'Database Management' section",
     "3. Click 'Cleanup All TEST' button",
     "4. Observe confusing feedback: 'Documents Deleted: -1'",
     "5. Note: API actually works but UI feedback is misleading"
@@ -85,5 +85,7 @@
   "related_requirements": [
     "ADM-005: Admin UI should provide clear feedback for all operations",
     "ADM-006: Database management must support granular operations"
-  ]
+  ],
+  "migrated_from": "bugid_20250826-125758-cleanup-all-ui",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

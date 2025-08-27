@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-08-27T10:54:06Z",
+  "environment": "dev",
+  "severity": "medium",
+  "category": "ui_functionality",
+  "status": "open",
+  "title": "localhost:8181 not refreshing properly",
+  "description": "System Status showing loading indefinitely. UI refresh mechanisms not working correctly on localhost:8181. Page refresh functionality is broken.",
+  "source": "ui_submission",
+  "user_report": "localhost:8181 not refreshing properly. System Status showing loading...",
+  "immediate_fixes": [
+    {
+      "action": "Check server port configuration and restart mechanism",
+      "rationale": "Ensure proper server binding and refresh functionality"
+    },
+    {
+      "action": "Verify status endpoint is responding correctly",
+      "rationale": "System status loading issue may be API endpoint related"
+    }
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "3059216600"
+}

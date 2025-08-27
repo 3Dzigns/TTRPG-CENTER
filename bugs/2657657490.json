@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182548-cr004-unit-tests",
+  "bug_id": "2657657490",
   "timestamp": "2025-08-26T18:25:48Z",
   "environment": "dev",
   "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
@@ -23,12 +23,14 @@
       "Command testing infrastructure",
       "Automated test suite"
     ],
-    "requirements_impact": ["TEST-003"],
+    "requirements_impact": [
+      "TEST-003"
+    ],
     "suggested_solution": "Implement unit tests for all new logic to ensure coverage"
   },
   "reproduction_steps": [
     "1. Review current test coverage for ingestion command",
-    "2. Review current test coverage for promote command", 
+    "2. Review current test coverage for promote command",
     "3. Identify gaps in test coverage for new functionality",
     "4. Run test suite and verify coverage reports"
   ],
@@ -40,7 +42,7 @@
       "rationale": "Ensure ingestion functionality is properly tested"
     },
     {
-      "action": "Create unit tests for promote command logic", 
+      "action": "Create unit tests for promote command logic",
       "rationale": "Ensure promotion functionality is properly tested"
     },
     {
@@ -53,5 +55,9 @@
     "functionality_impact": "Low - Affects maintainability and reliability",
     "urgency": "Low - Should be addressed in next development cycle"
   },
-  "related_requirements": ["TEST-003"]
+  "related_requirements": [
+    "TEST-003"
+  ],
+  "migrated_from": "bugid_20250826-182548-cr004-unit-tests",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

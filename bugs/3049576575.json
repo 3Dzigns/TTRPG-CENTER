@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182549-cr005-documentation",
+  "bug_id": "3049576575",
   "timestamp": "2025-08-26T18:25:49Z",
   "environment": "dev",
   "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
@@ -23,7 +23,9 @@
       "Process documentation",
       "Safety guidelines"
     ],
-    "requirements_impact": ["ADM-002"],
+    "requirements_impact": [
+      "ADM-002"
+    ],
     "suggested_solution": "Update documentation to emphasize the need for environment isolation to prevent data bleed"
   },
   "reproduction_steps": [
@@ -53,5 +55,9 @@
     "functionality_impact": "Low - Affects user understanding and safety practices",
     "urgency": "Low - Should be addressed in next documentation update"
   },
-  "related_requirements": ["ADM-002"]
+  "related_requirements": [
+    "ADM-002"
+  ],
+  "migrated_from": "bugid_20250826-182549-cr005-documentation",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

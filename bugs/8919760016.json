@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-08-27T10:53:05Z",
+  "environment": "dev",
+  "severity": "medium",
+  "category": "ui_functionality",
+  "status": "closed",
+  "title": "Reopen of bug in Bug Management page does not update state in UI",
+  "description": "When reopening a bug through the Bug Management interface, the UI does not properly reflect the state change. The bug status remains showing as closed despite successful reopen action.",
+  "source": "ui_submission",
+  "user_report": "Reopen of bug in Bug Management page does not update state in UI.",
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "8919760016",
+  "migrated_from": "bugid_1756291985_ui_functionality",
+  "migration_timestamp": "2025-08-27T10:56:03Z",
+  "closed_by": "admin",
+  "closed_at": 1756292178.019823,
+  "closed_reason": "Resolved: UI state synchronization improved with better error handling and success feedback"
+}

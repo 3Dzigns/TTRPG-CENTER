@@ -1,8 +1,8 @@
 {
-  "bug_id": "bugid_20250826-130815-ui-not-responding",
+  "bug_id": "9315588637",
   "timestamp": "2025-08-26T13:08:15Z",
   "environment": "test",
-  "build_id": "2025-08-25_20-29-13_build-2936", 
+  "build_id": "2025-08-25_20-29-13_build-2936",
   "severity": "medium",
   "category": "ui_responsiveness",
   "title": "UI not responding with system status and cannot show collections",
@@ -12,7 +12,7 @@
     "root_cause_potential": [
       "JavaScript errors preventing UI updates",
       "Async/Promise handling issues in frontend code",
-      "UI element targeting failures after DOM changes", 
+      "UI element targeting failures after DOM changes",
       "Auto-refresh conflicts or timing issues"
     ],
     "backend_status": "Working correctly - APIs respond in ~0.3-0.4 seconds",
@@ -32,7 +32,7 @@
   },
   "reproduction_steps": [
     "1. Navigate to http://localhost:8181/admin",
-    "2. Observe System Status section - may show 'Loading...' indefinitely", 
+    "2. Observe System Status section - may show 'Loading...' indefinitely",
     "3. Click 'Show Collections' button - no response or delayed response",
     "4. Check browser console for JavaScript errors",
     "5. Note: Backend APIs work when tested directly"
@@ -42,7 +42,7 @@
   "potential_causes": [
     {
       "cause": "JavaScript Promise rejection not handled",
-      "likelihood": "High", 
+      "likelihood": "High",
       "investigation": "Check browser console for uncaught promise rejections"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "cause": "Async function not awaited properly",
-      "likelihood": "Medium", 
+      "likelihood": "Medium",
       "investigation": "showCollectionInfo() function may have async issues"
     }
   ],
@@ -90,5 +90,7 @@
   "related_requirements": [
     "ADM-003: Admin UI must provide real-time system status",
     "ADM-004: Collection management must be accessible and responsive"
-  ]
+  ],
+  "migrated_from": "bugid_20250826-130815-ui-not-responding",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

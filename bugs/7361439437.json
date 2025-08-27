@@ -1,11 +1,11 @@
 {
-  "bug_id": "bugid_20250825-142508-c0dce57b",
+  "bug_id": "7361439437",
   "env": "test",
-  "timestamp": 1756149908.4460196,
-  "iso_timestamp": "2025-08-25T14:25:08-0500",
-  "query": "What is armor class?",
-  "user_feedback": "This is completely incorrect",
-  "response_provided": "wrong information",
+  "timestamp": 1756150068.2477148,
+  "iso_timestamp": "2025-08-25T14:27:48-0500",
+  "query": "Test negative query",
+  "user_feedback": "This is completely wrong",
+  "response_provided": "Wrong response",
   "issue_analysis": {
     "category": "accuracy_error",
     "severity": "high",
@@ -19,7 +19,7 @@
     "system": null,
     "memory_mode": null,
     "session_id": null,
-    "query_type": "rag_lookup",
+    "query_type": null,
     "model_used": null
   },
   "retrieval_data": {
@@ -49,5 +49,7 @@
     "Manual review required"
   ],
   "severity": "high",
-  "category": "accuracy_error"
+  "category": "accuracy_error",
+  "migrated_from": "bugid_20250825-142748-6a386d07",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

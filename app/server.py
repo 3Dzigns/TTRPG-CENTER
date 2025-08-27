@@ -392,11 +392,15 @@ class Handler(BaseHTTPRequestHandler):
                 return;
             }}
             
+            console.log('Starting status refresh for port:', window.location.port);
             healthDiv.innerHTML = '<div class="status-pending">Checking system status...</div>';
             
             // Add timeout to fetch request
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            const timeoutId = setTimeout(() => {{
+                console.error('Status refresh timed out after 10 seconds');
+                controller.abort();
+            }}, 10000); // 10 second timeout
             
             fetch('/status', {{ 
                 signal: controller.signal,
@@ -446,12 +450,19 @@ class Handler(BaseHTTPRequestHandler):
                 .catch(error => {{
                     clearTimeout(timeoutId);
                     console.error('Status refresh error:', error);
+                    console.error('Error details:', {{ 
+                        name: error.name, 
+                        message: error.message, 
+                        stack: error.stack,
+                        port: window.location.port,
+                        hostname: window.location.hostname
+                    }});
                     
                     let errorMessage = 'Status update failed: ';
                     if (error.name === 'AbortError') {{
                         errorMessage += 'Request timed out (10s)';
                     }} else if (error.message.includes('Failed to fetch')) {{
-                        errorMessage += 'Network connection failed';
+                        errorMessage += 'Network connection failed (check if server is running on port ' + window.location.port + ')';
                     }} else if (error.message.includes('HTTP')) {{
                         errorMessage += error.message;
                     }} else {{
@@ -2823,16 +2834,39 @@ class Handler(BaseHTTPRequestHandler):
                     }},
                     body: JSON.stringify(requestBody)
                 }})
-                .then(response => response.json())
+                .then(response => {{
+                    if (!response.ok) {{
+                        throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
+                    }}
+                    return response.json();
+                }})
                 .then(data => {{
+                    console.log('Bug action response:', data);
                     if (data.success) {{
-                        alert(data.message || 'Action completed successfully');
+                        // Show success message briefly
+                        const message = data.message || 'Action completed successfully';
+                        console.log('Bug action success:', message);
+                        
+                        // Refresh the bug list immediately  
                         refreshBugsDetailed();
+                        
+                        // Show non-blocking success feedback
+                        const statusDiv = document.getElementById('bug-stats');
+                        if (statusDiv) {{
+                            const originalText = statusDiv.innerHTML;
+                            statusDiv.innerHTML = '<span style="color: #00ff00;">✅ ' + message + '</span>';
+                            setTimeout(() => {{
+                                statusDiv.innerHTML = originalText;
+                            }}, 3000);
+                        }}
                     }} else {{
-                        alert('Error: ' + (data.error || 'Action failed'));
+                        const errorMsg = data.error || 'Action failed';
+                        console.error('Bug action failed:', errorMsg);
+                        alert('Error: ' + errorMsg);
                     }}
                 }})
                 .catch(error => {{
+                    console.error('Bug action network error:', error);
                     alert('Network error: ' + error.message);
                 }});
             }}

@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+import random
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
@@ -36,13 +37,25 @@ class BugTracker:
     def __init__(self):
         self.bugs_dir = Path("bugs")
         self.bugs_dir.mkdir(exist_ok=True)
+    
+    def _generate_10_digit_id(self) -> str:
+        """Generate a unique 10-digit ID for bugs and feature requests"""
+        while True:
+            # Generate a 10-digit number: first digit can't be 0
+            first_digit = random.randint(1, 9)
+            remaining_digits = random.randint(0, 999999999)
+            bug_id = f"{first_digit}{remaining_digits:09d}"
+            
+            # Ensure uniqueness by checking if file exists
+            bug_file = self.bugs_dir / f"{bug_id}.json"
+            if not bug_file.exists():
+                return bug_id
         
     def create_bug(self, bug_data: Dict[str, Any]) -> str:
         """Create a new bug report with proper automation setup"""
         bug_id = bug_data.get("bug_id")
         if not bug_id:
-            timestamp = int(time.time())
-            bug_id = f"bugid_{timestamp}_{bug_data.get('category', 'general')}"
+            bug_id = self._generate_10_digit_id()
         
         # Set admin controls based on source
         source = bug_data.get("source", BugSource.USER_REPORT.value)
@@ -60,6 +73,9 @@ class BugTracker:
                 "provider": bug_data.get("provider", "unknown")
             }
             bug_data["peer_review_history"].append(review_entry)
+        
+        # Ensure bug_id is set in the data
+        bug_data["bug_id"] = bug_id
         
         # Write bug file
         bug_file = self.bugs_dir / f"{bug_id}.json"
@@ -373,11 +389,11 @@ class BugTracker:
     
     def _convert_review_issue_to_bug(self, issue: Dict[str, Any], review_data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert a peer review issue to bug format"""
-        timestamp = int(time.time())
+        bug_id = self._generate_10_digit_id()
         review_id = issue.get("id", "")
         
         return {
-            "bug_id": f"bugid_{timestamp}_{review_id.lower().replace('-', '_')}",
+            "bug_id": bug_id,
             "timestamp": f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
             "environment": "dev",
             "build_id": review_data.get("sha", ""),

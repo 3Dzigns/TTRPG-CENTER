@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182545-cr001-race-condition",
+  "bug_id": "4012622319",
   "timestamp": "2025-08-26T18:25:45Z",
   "environment": "dev",
   "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
@@ -23,7 +23,10 @@
       "File processing workflow",
       "Shared resource management"
     ],
-    "requirements_impact": ["RAG-001", "ADM-002"],
+    "requirements_impact": [
+      "RAG-001",
+      "ADM-002"
+    ],
     "suggested_solution": "Implement locking mechanisms or use a job queue to manage concurrent executions"
   },
   "reproduction_steps": [
@@ -53,5 +56,10 @@
     "functionality_impact": "Critical - Affects core ingestion pipeline reliability",
     "urgency": "High - Must be resolved before production deployment"
   },
-  "related_requirements": ["RAG-001", "ADM-002"]
+  "related_requirements": [
+    "RAG-001",
+    "ADM-002"
+  ],
+  "migrated_from": "bugid_20250826-182545-cr001-race-condition",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

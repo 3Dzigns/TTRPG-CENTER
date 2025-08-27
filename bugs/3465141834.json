@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182546-cr002-input-validation",
+  "bug_id": "3465141834",
   "timestamp": "2025-08-26T18:25:46Z",
   "environment": "dev",
   "build_id": "d8946dcc1e2064a57b24b635387db98a7adc54b0",
@@ -23,7 +23,10 @@
       "Build validation system",
       "Environment promotion pipeline"
     ],
-    "requirements_impact": ["RAG-001", "ADM-002"],
+    "requirements_impact": [
+      "RAG-001",
+      "ADM-002"
+    ],
     "suggested_solution": "Add checks to ensure the specified build exists before proceeding"
   },
   "reproduction_steps": [
@@ -53,5 +56,10 @@
     "functionality_impact": "Medium - Affects build promotion reliability",
     "urgency": "Medium - Should be fixed before production use"
   },
-  "related_requirements": ["RAG-001", "ADM-002"]
+  "related_requirements": [
+    "RAG-001",
+    "ADM-002"
+  ],
+  "migrated_from": "bugid_20250826-182546-cr002-input-validation",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

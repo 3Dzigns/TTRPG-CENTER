@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-182610-system-status-loading",
+  "bug_id": "7141103358",
   "timestamp": "2025-08-26T18:26:10Z",
   "environment": "test",
   "build_id": "2025-08-25_20-29-13_build-2936",
@@ -48,7 +48,7 @@
     },
     {
       "cause": "/status API endpoint failure or timeout",
-      "likelihood": "High", 
+      "likelihood": "High",
       "investigation": "Test /status endpoint directly via browser or curl"
     },
     {
@@ -90,10 +90,12 @@
   ],
   "impact_assessment": {
     "user_impact": "Medium - Admin dashboard appears broken, affects monitoring capabilities",
-    "functionality_impact": "Medium - System health monitoring not available to administrators", 
+    "functionality_impact": "Medium - System health monitoring not available to administrators",
     "urgency": "Medium - Affects admin usability and system monitoring"
   },
   "related_requirements": [
     "ADM-003"
-  ]
+  ],
+  "migrated_from": "bugid_20250826-182610-system-status-loading",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }

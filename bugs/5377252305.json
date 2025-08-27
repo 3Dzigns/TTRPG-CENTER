@@ -1,5 +1,5 @@
 {
-  "bug_id": "bugid_20250826-124715-cleanup-404",
+  "bug_id": "5377252305",
   "timestamp": "2025-08-26T12:47:15Z",
   "environment": "test",
   "build_id": "2025-08-25_20-29-13_build-2936",
@@ -41,7 +41,7 @@
       "code": "fetch('/api/database/cleanup', { method: 'POST', ..."
     },
     "backend_route": {
-      "file": "app/server.py", 
+      "file": "app/server.py",
       "line": 576,
       "code": "elif path == \"/api/database/cleanup\": # in do_GET method"
     },
@@ -54,14 +54,16 @@
   "immediate_fix": {
     "action": "Move /api/database/cleanup route from do_GET to do_POST method",
     "rationale": "Frontend expects POST method for data-modifying operations",
-    "files_to_modify": ["app/server.py"]
+    "files_to_modify": [
+      "app/server.py"
+    ]
   },
   "enhancement_request": {
     "title": "Add collection/chunk selection granularity to cleanup",
     "description": "Current cleanup is all-or-nothing for entire environment. Need UI to select specific collections or chunk ranges.",
     "suggested_features": [
       "Collection dropdown selector",
-      "Chunk count preview before cleanup", 
+      "Chunk count preview before cleanup",
       "Selective cleanup by source_id or date range",
       "Confirmation dialog with impact summary"
     ]
@@ -82,5 +84,7 @@
   "related_requirements": [
     "ADM-004: Admin UI must provide database management tools",
     "ENV-002: Environment isolation must be maintained during cleanup"
-  ]
+  ],
+  "migrated_from": "bugid_20250826-124715-cleanup-404",
+  "migration_timestamp": "2025-08-27T10:56:03Z"
 }
