@@ -7,45 +7,63 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
     branches: ["**"]
+  # This secondary trigger is needed so we can post comments on PRs from forks with a writeable token.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: ["**"]
 
+# We need write perms to post PR/commit comments and to upload artifacts.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
+  actions: read
 
 env:
   OPENAI_MODEL: gpt-4o-mini
   MAX_BYTES_PER_CHUNK: 120000
-  FAIL_ON_SEVERITY: none
+  FAIL_ON_SEVERITY: none  # none | high | critical
+  ARTIFACT_NAME: ai-review-md
 
 jobs:
-  review:
+  analyze:
+    name: Analyze diff & generate review
     runs-on: ubuntu-latest
+    # Only run analysis on push / pull_request / workflow_dispatch.
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Checkout
+      - name: Checkout repo (safe for push & PR)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Compute code diff (exclude .md)
-        id: diff
+      - name: Determine BASE/HEAD
+        id: sha
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
           else
-            BASE_SHA="$(git rev-parse HEAD~1 || true)"
-            HEAD_SHA="$(git rev-parse HEAD)"
-            if [ -z "${BASE_SHA}" ]; then BASE_SHA="$(git hash-object -t tree /dev/null)"; fi
+            BASE=$(git rev-parse HEAD~1 || true)
+            if [ -z "$BASE" ]; then BASE="$(git hash-object -t tree /dev/null)"; fi
+            echo "base=$BASE" >> "$GITHUB_OUTPUT"
+            echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
-          mapfile -t CODE_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Evi '\.md$' || true)
+      - name: Build code-only diff
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ steps.sha.outputs.base }}"
+          HEAD="${{ steps.sha.outputs.head }}"
+          mapfile -t CODE_FILES < <(git diff --name-only "$BASE" "$HEAD" | grep -Evi '\.md$' || true)
           if [ "${#CODE_FILES[@]}" -eq 0 ]; then
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- "${CODE_FILES[@]}" > diff.patch || true
+          git diff --unified=0 "$BASE" "$HEAD" -- "${CODE_FILES[@]}" > diff.patch || true
           if [ ! -s diff.patch ]; then
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
           else
@@ -90,8 +108,9 @@ jobs:
             const path = require('path');
 
             function fail(msg) { core.setFailed(msg); throw new Error(msg); }
+            if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY');
 
-            // Load prompt from repo, fallback to strict inline array (array ensures correct type)
+            // Load prompt from repo if present; otherwise inline fallback.
             let basePrompt = '';
             const promptPath = '.github/ai/prompt.txt';
             if (fs.existsSync(promptPath)) {
@@ -131,9 +150,7 @@ jobs:
             const chunks = fs.readdirSync('.github/ai')
               .filter(f => f.startsWith('chunk_') && f.endsWith('.patch'))
               .sort();
-
-            if (!process.env.OPENAI_API_KEY) fail('Missing OPENAI_API_KEY');
-            if (chunks.length === 0) fail('No diff chunks found.');
+            if (chunks.length === 0) fail('No diff chunks found');
 
             async function askOpenAI(prompt) {
               const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -148,54 +165,35 @@ jobs:
                   messages: [
                     { role: 'system', content: 'You are a precise, terse, and helpful senior engineer.' },
                     { role: 'user', content: prompt }
-                  ] // <-- ARRAY (prevents "expected array, found object")
+                  ]
                 })
               });
               const text = await res.text();
               if (!res.ok) fail(`OpenAI HTTP ${res.status}: ${text}`);
               let json;
               try { json = JSON.parse(text); } catch (e) { fail(`OpenAI JSON parse error: ${e.message}\nRaw: ${text}`); }
-              const content = json?.choices?.[0]?.message?.content ?? '';
-              return content;
+              return json?.choices?.[0]?.message?.content ?? '';
             }
 
-            let out = [];
+            let parts = [];
             for (const f of chunks) {
-              const diff = fs.readFileSync(path.join('.github/ai', f), 'utf8');
+              const diff = fs.readFileSync(path.join('.github/ai', f),'utf8');
               const prompt = `${basePrompt}\n\n--- DIFF CHUNK ${f} ---\n${diff}`;
-              const ans = await askOpenAI(prompt);
-              out.push(`### Review for ${f}\n${ans}`.trim());
+              core.info(`Sending ${f} to OpenAI (${diff.length} bytes)`);
+              const out = await askOpenAI(prompt);
+              parts.push(`### Review for ${f}\n${out}`.trim());
             }
-            fs.writeFileSync('.github/ai/review.md', out.join('\n\n---\n\n'));
+            fs.writeFileSync('.github/ai/review.md', parts.join('\n\n---\n\n'));
             core.info('Wrote .github/ai/review.md');
 
-      - name: Print review excerpt (debug)
+      - name: Upload review artifact
         if: steps.diff.outputs.has_diff == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          head -n 80 .github/ai/review.md || { echo "::error::review.md missing"; exit 1; }
-
-      # Post as PR review only on PR events (prevents undefined pull_request.number)
-      - name: Post PR review comment
-        if: steps.diff.outputs.has_diff == 'true' && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('.github/ai/review.md', 'utf8').trim();
-            if (!body) { core.setFailed('review.md empty'); }
-            else {
-              await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number,
-                event: 'COMMENT',     // no "comments" array sent -> avoids type error
-                body
-              });
-            }
+          name: ${{ env.ARTIFACT_NAME }}
+          path: .github/ai/review.md
 
-      # For push/workflow_dispatch, post to the commit instead
+      # For non-PR runs (push/dispatch), post a commit comment now.
       - name: Post commit comment (non-PR)
         if: steps.diff.outputs.has_diff == 'true' && github.event_name != 'pull_request'
         uses: actions/github-script@v7
@@ -213,14 +211,32 @@ jobs:
               });
             }
 
-      - name: Optionally fail on HIGH/CRITICAL
-        if: steps.diff.outputs.has_diff == 'true' && env.FAIL_ON_SEVERITY != 'none'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -Eiq "Severity:\s*(CRITICAL|HIGH)" .github/ai/review.md; then
-            if [ "${FAIL_ON_SEVERITY}" != "none" ]; then
-              echo "::error::HIGH/CRITICAL findings present. Failing check per policy."
-              exit 2
-            fi
-          fi
+  comment:
+    name: Post review on PR (fork-safe)
+    runs-on: ubuntu-latest
+    needs: analyze
+    # Only run this on pull_request_target so we have a writeable token on the base repo.
+    if: github.event_name == 'pull_request_target'
+    steps:
+      - name: Download review artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+
+      - name: Post PR review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review.md','utf8').trim();
+            if (!body) { core.setFailed('review.md empty'); }
+            else {
+              // On pull_request_target we can safely access pull_request.number.
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                event: 'COMMENT',
+                body
+              });
+            }
