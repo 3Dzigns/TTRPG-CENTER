@@ -5,12 +5,6 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
-      review_mode:
-        description: 'Review mode'
-        required: true
-        default: 'diff'
-        type: choice
-        options: [diff, full]
       model:
         description: 'OpenAI model (e.g., gpt-4o-mini, gpt-4o)'
         required: false
@@ -25,29 +19,27 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      MAX_SINGLE_BYTES: "900000"   # ~0.9MB: above this we chunk
-      CHUNK_BYTES: "350000"        # chunk size if we split
+      MAX_SINGLE_BYTES: "900000"  # ~0.9MB: above this we chunk
+      CHUNK_BYTES: "350000"       # chunk size if we split
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Init env (mode/model/timestamp)
+      - name: Init env (model/timestamp)
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            MODE="${{ inputs.review_mode }}"
             MODEL="${{ inputs.model }}"
           else
-            MODE="diff"
             MODEL="gpt-4o-mini"
           fi
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
           OUT="docs/reviews/${TS}.json"
           mkdir -p docs/reviews
-          echo "MODE=$MODE"            >> "$GITHUB_ENV"
+          echo "MODE=diff"             >> "$GITHUB_ENV"
           echo "OPENAI_MODEL=$MODEL"   >> "$GITHUB_ENV"
           echo "TIMESTAMP=$TS"         >> "$GITHUB_ENV"
           echo "OUTFILE=$OUT"          >> "$GITHUB_ENV"
@@ -57,24 +49,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$MODE" = "diff" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              BASE_SHA="${{ github.event.pull_request.base.sha }}"
-              HEAD_SHA="${{ github.sha }}"
-            else
-              DEFAULT_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
-              git fetch origin "$DEFAULT_BRANCH" --depth=1
-              BASE_SHA="origin/$DEFAULT_BRANCH"
-              HEAD_SHA="HEAD"
-            fi
-            git diff --unified=3 "${BASE_SHA}...${HEAD_SHA}" -- . ":(exclude)**/*.md" > review.patch || true
+          # Always run in diff mode only
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.sha }}"
           else
-            EMPTY_TREE="$(git hash-object -t tree /dev/null)"
-            git diff --unified=3 "$EMPTY_TREE" HEAD -- . ":(exclude)**/*.md" > review.patch || true
+            DEFAULT_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
+            git fetch origin "$DEFAULT_BRANCH" --depth=1
+            BASE_SHA="origin/$DEFAULT_BRANCH"
+            HEAD_SHA="HEAD"
           fi
+          git diff --unified=3 "${BASE_SHA}...${HEAD_SHA}" \
+            -- . ":(exclude)**/*.md" > review.patch || true
 
           if [ ! -s review.patch ]; then
-            printf '{\n  "summary": ["No applicable code changes (non-.md) found."],\n  "findings": [],\n  "tests": [],\n  "security_concurrency": [],\n  "go_no_go": "GO"\n}\n' > "${OUTFILE}"
+            printf '{\n' > "${OUTFILE}"
+            printf '  "summary": ["No applicable code changes (non-.md) found."],\n' >> "${OUTFILE}"
+            printf '  "findings": [],\n' >> "${OUTFILE}"
+            printf '  "tests": [],\n' >> "${OUTFILE}"
+            printf '  "security_concurrency": [],\n' >> "${OUTFILE}"
+            printf '  "go_no_go": "GO"\n' >> "${OUTFILE}"
+            printf '}\n' >> "${OUTFILE}"
             echo "empty=1" >> "$GITHUB_OUTPUT"
           else
             echo "empty=0" >> "$GITHUB_OUTPUT"
@@ -89,9 +84,12 @@ You are a senior software engineer performing a peer review of a pull request.
 
 STRICT SCOPE
 - Review ONLY the supplied git DIFF/patch for this PR (changed lines and immediate context).
-- Do NOT review or critique changes made to Markdown files (*.md). Treat .md diffs as documentation/context only.
-- You may use .md content to understand requirements or intended behavior, but do NOT flag issues about .md changes.
-- Do NOT review project-wide requirements, policies, or architecture unless changed lines in code directly violate them.
+- Do NOT review or critique changes made to Markdown files (*.md). 
+  Treat .md diffs as documentation/context only.
+- You may use .md content to understand requirements or intended behavior, 
+  but do NOT flag issues about .md changes.
+- Do NOT review project-wide requirements, policies, or architecture 
+  unless changed lines in code directly violate them.
 - Do NOT summarize the whole repo; focus only on code changes.
 
 OUTPUT FORMAT
@@ -99,18 +97,22 @@ OUTPUT FORMAT
 2. Findings: Numbered list. Each finding MUST include:
    - File path and line(s) from the code diff
    - Issue description or improvement opportunity
-   - Concrete suggestion with a sample code or patch snippet showing a possible resolution
+   - Concrete suggestion with a sample code or patch snippet 
+     showing a possible resolution
    - Severity: LOW | MEDIUM | HIGH | CRITICAL
 3. Tests: Explicitly call out missing or to-be-updated tests for the new code.
-4. Security/Concurrency: Only if visible in the code diff; include the lines and a sample mitigation.
+4. Security/Concurrency: Only if visible in the code diff; 
+   include the lines and a sample mitigation.
 5. GO/NO-GO: Decide based only on the code diff.
 
 TONE
 - Be concise, technical, and actionable.
-- Always include at least one possible resolution (sample code, config change, or patch) for each issue.
+- Always include at least one possible resolution 
+  (sample code, config change, or patch) for each issue.
 - If context outside the diff is needed, state clearly: Assumption: ...
 
-Remember: this is a developer code review of code changes only. Markdown files are context, not review targets.
+Remember: this is a developer code review of code changes only. 
+Markdown files are context, not review targets.
 TXT
 
       - name: Size check and maybe split
@@ -148,7 +150,14 @@ TXT
               response_format: {type:"json_object"},
               messages: [
                 {role:"system", content:$system},
-                {role:"user",   content:( "DIFF START\n" + $patch + "\nDIFF END\nReturn ONLY valid JSON with keys: summary, findings, tests, security_concurrency, go_no_go." )}
+                {
+                  role: "user",
+                  content: (
+                    "DIFF START\n" + $patch + 
+                    "\nDIFF END\nReturn ONLY valid JSON with keys: " +
+                    "summary, findings, tests, security_concurrency, go_no_go."
+                  )
+                }
               ]
             }' > body.json
 
@@ -187,7 +196,15 @@ TXT
                 response_format: {type:"json_object"},
                 messages: [
                   {role:"system", content:$system},
-                  {role:"user",   content:( "DIFF CHUNK " + $idx + "/" + $total + "\n" + $patch + "\nReturn ONLY valid JSON with keys: summary, findings, tests, security_concurrency, go_no_go. Limit to just this chunk." )}
+                  {
+                    role: "user",
+                    content: (
+                      "DIFF CHUNK " + $idx + "/" + $total + "\n" + $patch +
+                      "\nReturn ONLY valid JSON with keys: " +
+                      "summary, findings, tests, security_concurrency, go_no_go. " +
+                      "Limit to just this chunk."
+                    )
+                  }
                 ]
               }' > "body_$i.json"
 
@@ -233,6 +250,6 @@ TXT
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "${OUTFILE}"
-            git commit -m "AI review: ${TIMESTAMP} (${MODE})" || exit 0
+            git commit -m "AI review: ${TIMESTAMP} (diff mode)" || exit 0
             git push
           fi

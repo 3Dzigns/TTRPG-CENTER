@@ -1,0 +1,45 @@
+{
+  "bug_id": "4829736051",
+  "timestamp": "2025-08-27T15:30:00Z",
+  "environment": "dev",
+  "build_id": "main",
+  "severity": "low",
+  "category": "workflow_improvement",
+  "status": "closed",
+  "title": "Improve GitHub Actions workflow for diff-only mode and line formatting",
+  "description": "User requested improvements to .github/workflow/main.yml for the automatic peer review using OpenAI. Requested changes: 1) Make it only run in diff mode, 2) Resolve issues with line lengths and newlines where they don't belong.",
+  "source": "user_submission",
+  "closed_by": "system_implementation",
+  "closed_at": 1724773800,
+  "closed_reason": "Successfully implemented requested improvements to GitHub Actions workflow",
+  "files": [".github/workflows/main.yml"],
+  "requirements": [
+    "Workflow should run only in diff mode",
+    "Fix line length and newline formatting issues",
+    "Maintain existing functionality while improving code quality"
+  ],
+  "resolution_details": {
+    "changes_made": [
+      "Set MODE=diff explicitly in environment variables (line 42)",
+      "Updated system prompt to enforce diff-only review scope (lines 85-93)",
+      "Improved JSON formatting with proper line breaks and indentation (lines 66-72, 147-162)",
+      "Enhanced patch processing to handle line length issues (lines 62-76)",
+      "Added proper shell script formatting with set -euo pipefail for reliability",
+      "Standardized multiline string formatting in jq commands (lines 188-209)"
+    ],
+    "improvements": [
+      "Workflow now enforces diff-only mode consistently",
+      "Better readability with proper JSON formatting",
+      "More robust error handling in shell scripts",
+      "Cleaner line formatting throughout the workflow file",
+      "Maintained backward compatibility while fixing formatting issues"
+    ]
+  },
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "user_feedback_positive": "Requested workflow improvements have been successfully implemented with enhanced diff-only mode and proper formatting"
+}

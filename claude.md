@@ -108,7 +108,7 @@ Create these under `.claude/commands/`:
    - Status tracking required (`open` → `resolved`).
    - remove new review file after bugs are created
 4. **Resolve all existing bugs**.
-   - Remove any bugs that suggest making changes to a .md file.
+   - Remove any bugs that suggest making changes to a .md or .json file.
 5. **Process feature requests**  
    - New feature = create file with machine ID (`FR-YYYYMMDD-###`) + user-friendly 10-digit ID.  
    - Status tracking required (`pending` → `approved` or `removed`).
