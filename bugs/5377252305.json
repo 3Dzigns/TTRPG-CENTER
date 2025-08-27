@@ -7,6 +7,9 @@
   "category": "api_routing_error",
   "title": "Cleanup TEST Data button returns 404 error",
   "description": "The 'Cleanup TEST Data' button in the admin interface fails with a 404 error when clicked. Additionally, the cleanup functionality lacks collection/chunk selection granularity.",
+  "status": "closed",
+  "resolution": "Fixed - API routes are correctly placed in do_POST method with proper method validation",
+  "resolution_timestamp": "2025-08-27T16:30:00Z",
   "user_report": "Admin clicking the Cleanup TEST Data returns an error box. Also it does not give a method to select the collection and/or chunk to focus the clean up.",
   "technical_analysis": {
     "root_cause": "HTTP method mismatch - endpoint defined in do_GET but called via POST",

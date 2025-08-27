@@ -9,5 +9,5 @@
   - Fill in “Fix Notes”
 - Commit the bug file edits with your code changes:
   - `git add bugs/<HEAD_SHA>/*.md`
-  - `git commit -m "fix: resolve CR-xxx (tests+docs) [refs RAG-xxx]"`
+  - `git commit -m "fix(bugs): resolve CR-xxx (tests+docs) [refs RAG-xxx]"`
   - `git push`

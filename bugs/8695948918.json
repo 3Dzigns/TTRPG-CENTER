@@ -7,6 +7,9 @@
   "category": "ui_feedback_issue",
   "title": "Cleanup ALL TEST button appears to do nothing - confusing UI feedback",
   "description": "The 'Cleanup ALL TEST' button technically works (API returns 200) but provides confusing UI feedback showing '-1 documents deleted' instead of clear success message. Additionally, no chunk/entry level cleanup options exist.",
+  "status": "closed",
+  "resolution": "Fixed - UI now properly handles -1 response from AstraDB and shows 'Collection already empty' message",
+  "resolution_timestamp": "2025-08-27T16:35:00Z",
   "user_report": "Cleanup ALL TEST button does not seem to do anything. Selecting a collection and cleaning it up does work. However there is no option to find and clean single chunks/entries.",
   "technical_analysis": {
     "root_cause_primary": "AstraDB delete_many() returns -1 for empty collections instead of 0, causing confusing UI display",

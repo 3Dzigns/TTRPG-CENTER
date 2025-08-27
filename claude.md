@@ -99,3 +99,19 @@ Create these under `.claude/commands/`:
   - `write-tests.md` → Generate/update tests
   - `promote.md` → Promote builds/artifacts between ENVs
   - `rag-eval.md` → Run RAG evaluation datasets
+
+## 14) Standard Workflow Automation
+**ALWAYS execute the standard workflow on EVERY user request** before addressing the specific request:
+
+1. **Git pull to refresh from repository**
+2. **Respond and acknowledge user request**
+3. **Parse new peer reviews and create bugs**  
+   - New bug requires creating a bug file with unique ID and **status tracking** (`open` → `resolved`).
+4. **Resolve all existing bugs**
+5. **Process feature requests**  
+   - New feature requires creating a feature request file with unique ID and **status tracking** (`pending` → `approved`/`removed`).
+6. **Update status documentation**
+7. **Create new automated test cases as needed**
+8. **Automated Testing in Dev env (localhost:8000), Unit, Funcational, Regression, Security**
+9. **Promote to Test env and restart Test env on localhost:8181**
+10. **Git commit and git push all changes**
