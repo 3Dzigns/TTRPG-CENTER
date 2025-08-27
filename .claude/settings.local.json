@@ -37,7 +37,9 @@
       "Bash(cmd /c:*)",
       "Bash(PYTHONPATH=. python -c \"from app.common.bug_tracker import get_bug_tracker; print(''Bug tracker import successful'')\")",
       "Bash(PYTHONPATH=. python -c \"from app.common.config import load_config; cfg = load_config(); print(''Config loaded for env:'', cfg[''runtime''][''env''])\")",
-      "Bash(PYTHONPATH=. python -c \"from app.common.bug_tracker import get_bug_tracker; bt = get_bug_tracker(); print(''Bug tracker tests passed'')\")"
+      "Bash(PYTHONPATH=. python -c \"from app.common.bug_tracker import get_bug_tracker; bt = get_bug_tracker(); print(''Bug tracker tests passed'')\")",
+      "Bash(PYTHONPATH=. python -m pytest tests/test_bug_tracker.py -v)",
+      "Bash(PYTHONPATH=. python -m pytest tests/test_build_validator.py tests/test_bug_tracker.py -v)"
     ],
     "deny": [],
     "ask": [],

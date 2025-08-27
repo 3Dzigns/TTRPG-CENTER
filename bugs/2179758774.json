@@ -3,9 +3,9 @@
   "timestamp": "2025-08-26T19:44:30Z",
   "environment": "dev",
   "build_id": "2f9ac255bec0f9de995e0b5ea64754993b67b395",
-  "severity": "high",
+  "severity": "critical",
   "category": "error_handling",
-  "status": "open",
+  "status": "on_hold",
   "title": "Missing Error Handling in Ingestion Command",
   "description": "The ingestion command lacks comprehensive error handling, particularly in the upsert process. This could lead to data loss or corruption if an error occurs during batch processing.",
   "review_id": "CR-001",
@@ -16,6 +16,12 @@
       "severity": "high",
       "found_date": "2025-08-26T19:44:30Z",
       "provider": "openai"
+    },
+    {
+      "review_sha": "",
+      "severity": "high",
+      "found_date": 1756292862.6673028,
+      "provider": "unknown"
     }
   ],
   "admin_controls": {
@@ -67,5 +73,16 @@
     "ADM-002"
   ],
   "migrated_from": "bugid_20250826-194430-cr001-error-handling",
-  "migration_timestamp": "2025-08-27T10:56:03Z"
+  "migration_timestamp": "2025-08-27T10:56:03Z",
+  "closed_by": "system_auto_closure",
+  "closed_at": 1756292862.64031,
+  "closed_reason": "Automatically closed - issue resolved in review ",
+  "severity_escalated": true,
+  "escalation_reason": "Recurring issue - escalated from high to critical",
+  "reopened_by": "system_peer_review",
+  "reopened_at": 1756292862.6673028,
+  "reopened_reason": "Reopened - issue found again in peer review",
+  "on_hold_reason": "RESOLVED: Added comprehensive retry logic with exponential backoff for AstraDB upsert operations. Implemented 3-attempt retry mechanism with proper error logging and recovery. System will auto-close when verified in next peer review.",
+  "on_hold_at": 1756292962.7393994,
+  "on_hold_by": "admin"
 }

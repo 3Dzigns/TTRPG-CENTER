@@ -1,0 +1,248 @@
+{
+  "workflow_id": "character_creation_pathfinder_2e",
+  "name": "Character Creation - Pathfinder 2E",
+  "description": "Step-by-step character creation for Pathfinder 2E",
+  "system": "Pathfinder 2E",
+  "edition": "",
+  "start_node": "welcome",
+  "nodes": {
+    "welcome": {
+      "node_id": "welcome",
+      "node_type": "step",
+      "title": "Character Creation Welcome",
+      "prompt": "Welcome to Pathfinder 2E character creation! I'll guide you through creating your character step by step.\n\nWe'll cover:\n1. Choosing your ancestry (race)\n2. Selecting a background\n3. Picking your class\n4. Assigning ability scores\n5. Selecting starting feats\n6. Choosing equipment\n7. Final character details\n\nAre you ready to begin? (Reply 'yes' to continue or 'help' for more information)",
+      "required_inputs": [],
+      "expected_outputs": [
+        "user_ready"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "",
+      "metadata": {
+        "intro_step": true
+      }
+    },
+    "rules_overview": {
+      "node_id": "rules_overview",
+      "node_type": "rag_lookup",
+      "title": "System Rules Overview",
+      "prompt": "Let me provide an overview of Pathfinder 2E character creation rules.",
+      "required_inputs": [],
+      "expected_outputs": [
+        "rules_summary"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "Pathfinder 2E character creation overview basic rules",
+      "metadata": {
+        "provides_context": true
+      }
+    },
+    "choose_ancestry": {
+      "node_id": "choose_ancestry",
+      "node_type": "rag_lookup",
+      "title": "Choose Ancestry",
+      "prompt": "Now let's choose your character's ancestry. In Pathfinder 2E, your ancestry determines:\n- Ability score boosts and flaws\n- Ancestry feats you can select\n- Physical traits and heritage\n- Starting hit points (for some ancestries)\n\nLet me show you the available ancestries:",
+      "required_inputs": [
+        "user_ready"
+      ],
+      "expected_outputs": [
+        "ancestry_choice",
+        "ancestry_bonuses"
+      ],
+      "validation_rules": {
+        "ancestry_choice": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "rag_query_template": "Pathfinder 2E ancestry list character creation available races",
+      "metadata": {
+        "decision_point": true
+      }
+    },
+    "choose_background": {
+      "node_id": "choose_background",
+      "node_type": "rag_lookup",
+      "title": "Choose Background",
+      "prompt": "Great choice! Now let's select your character's background. Your background represents what your character did before becoming an adventurer.\n\nBackgrounds provide:\n- Ability score boosts\n- Skill training\n- Background feat\n- Starting equipment\n\nLet me show you the available backgrounds:",
+      "required_inputs": [
+        "ancestry_choice"
+      ],
+      "expected_outputs": [
+        "background_choice",
+        "background_bonuses"
+      ],
+      "validation_rules": {
+        "background_choice": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "rag_query_template": "Pathfinder 2E background list character creation available",
+      "metadata": {
+        "decision_point": true
+      }
+    },
+    "choose_class": {
+      "node_id": "choose_class",
+      "node_type": "rag_lookup",
+      "title": "Choose Class",
+      "prompt": "Now for the big decision - your character's class! This determines:\n- Your role in the party\n- Hit points and proficiencies\n- Class features and abilities\n- Spell casting (if applicable)\n- Available class feats\n\nHere are the available classes:",
+      "required_inputs": [
+        "background_choice"
+      ],
+      "expected_outputs": [
+        "class_choice",
+        "class_features"
+      ],
+      "validation_rules": {
+        "class_choice": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "rag_query_template": "Pathfinder 2E class list character creation available classes",
+      "metadata": {
+        "decision_point": true,
+        "major_choice": true
+      }
+    },
+    "assign_abilities": {
+      "node_id": "assign_abilities",
+      "node_type": "step",
+      "title": "Assign Ability Scores",
+      "prompt": "Time to determine your character's ability scores! In Pathfinder 2E, you'll apply boosts from:\n1. Your ancestry\n2. Your background  \n3. Your class\n4. Four free boosts you can assign\n\nLet me calculate your starting scores based on your choices so far, then you can assign your free boosts.\n\nCurrent boosts:\n- Ancestry: {ancestry_bonuses}\n- Background: {background_bonuses}\n- Class: {class_features}\n\nYou have 4 free boosts to assign. Each ability can only receive one boost per source.",
+      "required_inputs": [
+        "class_choice"
+      ],
+      "expected_outputs": [
+        "final_abilities"
+      ],
+      "validation_rules": {
+        "final_abilities": {
+          "type": "dict",
+          "required": true
+        }
+      },
+      "rag_query_template": "",
+      "metadata": {
+        "calculation_step": true
+      }
+    },
+    "select_feats": {
+      "node_id": "select_feats",
+      "node_type": "rag_lookup",
+      "title": "Select Starting Feats",
+      "prompt": "Now let's choose your starting feats! At 1st level, you typically get:\n- 1 Ancestry feat\n- 1 Background feat (from your background)\n- 1 Class feat\n- 1 Skill feat (sometimes)\n\nLet me show you the available feats for your choices:",
+      "required_inputs": [
+        "final_abilities"
+      ],
+      "expected_outputs": [
+        "selected_feats"
+      ],
+      "validation_rules": {
+        "selected_feats": {
+          "type": "list",
+          "required": true
+        }
+      },
+      "rag_query_template": "Pathfinder 2E level 1 feats {ancestry_choice} {class_choice}",
+      "metadata": {
+        "decision_point": true
+      }
+    },
+    "starting_equipment": {
+      "node_id": "starting_equipment",
+      "node_type": "rag_lookup",
+      "title": "Starting Equipment",
+      "prompt": "Let's outfit your character! You'll receive:\n- Equipment from your class\n- Equipment from your background\n- Starting gold to purchase additional gear\n\nHere's what your class and background provide:",
+      "required_inputs": [
+        "selected_feats"
+      ],
+      "expected_outputs": [
+        "equipment_list",
+        "remaining_gold"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "Pathfinder 2E starting equipment {class_choice} {background_choice}",
+      "metadata": {
+        "equipment_step": true
+      }
+    },
+    "finalize_character": {
+      "node_id": "finalize_character",
+      "node_type": "completion",
+      "title": "Finalize Character",
+      "prompt": "Excellent! Let's finalize your character. Here's what we've created:\n\n**Ancestry:** {ancestry_choice}\n**Background:** {background_choice}  \n**Class:** {class_choice}\n**Ability Scores:** {final_abilities}\n**Feats:** {selected_feats}\n**Equipment:** {equipment_list}\n\nI'll now calculate your final statistics:\n- Hit Points\n- Armor Class\n- Saving Throws\n- Skill bonuses\n- Attack bonuses\n\nWould you like me to generate a complete character sheet, or would you like to modify anything?",
+      "required_inputs": [
+        "equipment_list"
+      ],
+      "expected_outputs": [
+        "character_sheet"
+      ],
+      "validation_rules": {},
+      "rag_query_template": "",
+      "metadata": {
+        "completion_step": true
+      }
+    }
+  },
+  "edges": [
+    {
+      "edge_id": "welcome_to_rules",
+      "from_node": "welcome",
+      "to_node": "rules_overview",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "rules_to_ancestry",
+      "from_node": "rules_overview",
+      "to_node": "choose_ancestry",
+      "condition": "always",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "ancestry_to_background",
+      "from_node": "choose_ancestry",
+      "to_node": "choose_background",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "background_to_class",
+      "from_node": "choose_background",
+      "to_node": "choose_class",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "class_to_abilities",
+      "from_node": "choose_class",
+      "to_node": "assign_abilities",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "abilities_to_feats",
+      "from_node": "assign_abilities",
+      "to_node": "select_feats",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "feats_to_equipment",
+      "from_node": "select_feats",
+      "to_node": "starting_equipment",
+      "condition": "success",
+      "condition_data": {}
+    },
+    {
+      "edge_id": "equipment_to_finalize",
+      "from_node": "starting_equipment",
+      "to_node": "finalize_character",
+      "condition": "success",
+      "condition_data": {}
+    }
+  ],
+  "metadata": {}
+}

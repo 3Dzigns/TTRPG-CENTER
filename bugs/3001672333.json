@@ -3,9 +3,9 @@
   "timestamp": "2025-08-26T19:44:31Z",
   "environment": "dev",
   "build_id": "2f9ac255bec0f9de995e0b5ea64754993b67b395",
-  "severity": "medium",
+  "severity": "high",
   "category": "security",
-  "status": "open",
+  "status": "on_hold",
   "title": "Potential Path Traversal in Feature Requests",
   "description": "The feature request command allows for file paths that could lead to path traversal vulnerabilities. Input paths need sanitization and validation against a whitelist.",
   "review_id": "CR-002",
@@ -16,6 +16,12 @@
       "severity": "medium",
       "found_date": "2025-08-26T19:44:31Z",
       "provider": "openai"
+    },
+    {
+      "review_sha": "",
+      "severity": "medium",
+      "found_date": 1756292862.6753035,
+      "provider": "unknown"
     }
   ],
   "admin_controls": {
@@ -67,5 +73,16 @@
     "ADM-002"
   ],
   "migrated_from": "bugid_20250826-194431-cr002-path-traversal",
-  "migration_timestamp": "2025-08-27T10:56:03Z"
+  "migration_timestamp": "2025-08-27T10:56:03Z",
+  "closed_by": "system_auto_closure",
+  "closed_at": 1756292862.6413221,
+  "closed_reason": "Automatically closed - issue resolved in review ",
+  "severity_escalated": true,
+  "escalation_reason": "Recurring issue - escalated from medium to high",
+  "reopened_by": "system_peer_review",
+  "reopened_at": 1756292862.6763227,
+  "reopened_reason": "Reopened - issue found again in peer review",
+  "on_hold_reason": "NOT APPLICABLE: Feature request system is not yet implemented - this refers to documentation only. No actual code exists that could have path traversal vulnerabilities. Will be addressed when feature request system is implemented with proper path validation.",
+  "on_hold_at": 1756292993.204949,
+  "on_hold_by": "admin"
 }

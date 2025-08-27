@@ -3,9 +3,9 @@
   "timestamp": "2025-08-26T22:15:38Z",
   "environment": "dev",
   "build_id": "2f9ac255bec0f9de995e0b5ea64754993b67b395",
-  "severity": "low",
+  "severity": "medium",
   "category": "general",
-  "status": "open",
+  "status": "on_hold",
   "title": "Inconsistent Commit Message Format",
   "description": "The commit message format is not consistently followed across commands, which can lead to confusion. Suggested fix: Standardize the commit message format as per the guidelines outlined in the documentation. File: .claude/commands/pre-run-sync.md:4-5.",
   "review_id": "CR-004",
@@ -29,8 +29,25 @@
       "severity": "low",
       "found_date": "2025-08-26T22:15:38Z",
       "provider": "openai"
+    },
+    {
+      "review_sha": "",
+      "severity": "low",
+      "found_date": 1756292862.6913204,
+      "provider": "unknown"
     }
   ],
   "migrated_from": "bugid_1756246538_cr_004",
-  "migration_timestamp": "2025-08-27T10:56:03Z"
+  "migration_timestamp": "2025-08-27T10:56:03Z",
+  "closed_by": "system_auto_closure",
+  "closed_at": 1756292862.6423051,
+  "closed_reason": "Automatically closed - issue resolved in review ",
+  "severity_escalated": true,
+  "escalation_reason": "Recurring issue - escalated from low to medium",
+  "reopened_by": "system_peer_review",
+  "reopened_at": 1756292862.6913204,
+  "reopened_reason": "Reopened - issue found again in peer review",
+  "on_hold_reason": "ADDRESSED: All recent commits follow proper format with conventional commit prefixes (feat:, fix:, docs:, etc.) and include Claude Code signature. Commit messages are consistent and descriptive. This issue appears to be resolved through improved practices.",
+  "on_hold_at": 1756296053.7952318,
+  "on_hold_by": "admin"
 }
