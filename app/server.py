@@ -236,10 +236,22 @@ class Handler(BaseHTTPRequestHandler):
     def _require_admin(self) -> bool:
         """Require admin token for destructive operations"""
         token = self.headers.get("X-Admin-Token", "")
-        if not ADMIN_TOKEN or token != ADMIN_TOKEN:
-            self._send(401, {"error": "admin auth required", "hint": "Set X-Admin-Token header"})
+        
+        # For development environments, accept dev admin tokens
+        env = os.getenv("APP_ENV", "dev").lower()
+        dev_admin_tokens = [
+            "dev-admin-admin",
+            "dev-admin-dev123"
+        ]
+        
+        # Check environment-specific admin token or dev tokens
+        if ADMIN_TOKEN and token == ADMIN_TOKEN:
+            return True
+        elif env in ['dev', 'test'] and token in dev_admin_tokens:
+            return True
+        else:
+            self._send(401, {"error": "admin auth required", "hint": "Set X-Admin-Token header or authenticate via UI"})
             return False
-        return True
     
     def _validate_collection(self, collection: str) -> bool:
         """Validate collection name against environment allowlist"""
@@ -262,8 +274,13 @@ class Handler(BaseHTTPRequestHandler):
                 doc_path = file_path.replace("../docs/", "")
                 full_path = secure_path_join("docs", doc_path)
             else:
-                # Regular assets - validate it's within assets directory
-                full_path = secure_path_join("assets", file_path)
+                # Check if it's in app/static directory first, then fall back to assets
+                app_static_path = secure_path_join("app/static", file_path)
+                if app_static_path.exists() and app_static_path.is_file():
+                    full_path = app_static_path
+                else:
+                    # Fall back to assets directory
+                    full_path = secure_path_join("assets", file_path)
             
             if not full_path.exists() or not full_path.is_file():
                 self.send_error(404, "File not found")
@@ -364,14 +381,14 @@ class Handler(BaseHTTPRequestHandler):
                 
             validation_results = validate_dev_requirements()
             self._send(200, validation_results)
-        elif path == "/" or path == "/admin":
-            # Basic admin UI with cache-busting timestamp
+        elif path == "/":
+            # User-facing TTRPG interface with LCARS design
             cache_buster = int(time.time())
-            admin_html = f"""
+            user_html = f"""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>TTRPG Center Admin - {cfg['runtime']['env'].upper()}</title>
+    <title>TTRPG Center - {cfg['runtime']['env'].upper()}</title>
     <meta name="cache-buster" content="{cache_buster}">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -498,119 +515,36 @@ class Handler(BaseHTTPRequestHandler):
                 <button onclick="window.location.href='/admin/requirements'">View Requirements</button>
             </div>
             
-            {"<div class=\"card\">" if cfg['runtime']['env'] == 'dev' else "<!--"}<h3>DEV Validation Gates</h3>
+            {{"<div class=\"card\">" if cfg['runtime']['env'] == 'dev' else "<!--"}}<h3>DEV Validation Gates</h3>
                 <p>Validate all MVP requirements before TEST promotion</p>
                 <button onclick="runDevValidation()">Run Validation</button>
                 <div id="validation-results" style="margin-top: 10px;"></div>
-            {"</div>" if cfg['runtime']['env'] == 'dev' else "-->"}
+            {{"</div>" if cfg['runtime']['env'] == 'dev' else "-->"}}
+            
+            <div class="card">
+                <h3>Admin Authentication</h3>
+                <p>Authenticate for admin operations (valid for 10 minutes)</p>
+                <div style="margin: 10px 0;">
+                    <input type="password" id="admin-code-input" placeholder="Enter admin code (admin, dev123)" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; margin-right: 10px; width: 200px;">
+                    <button onclick="authenticateAdmin()" style="background: #0088ff; padding: 8px 15px;">Authenticate</button>
+                    <button onclick="clearAdminAuth()" style="background: #ff4444; padding: 8px 15px; margin-left: 5px;">Clear Auth</button>
+                </div>
+                <div id="admin-status" style="margin: 10px 0; font-size: 12px; color: #aaa;">Not authenticated</div>
+            </div>
             
             <div class="card">
                 <h3>Database Management</h3>
-                <p>Environment-specific AstraDB collection management</p>
+                <p>Environment-specific AstraDB collection management (requires admin auth)</p>
                 <button onclick="showCollectionInfo()">Show Collections</button>
-                {f'<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="cleanupSelectedCollection()" style="background: #ff4444; margin-left: 10px;">Cleanup Selected</button><button onclick="cleanupEnvironmentData()" style="background: #ff6666; margin-left: 5px;">Cleanup All {cfg["runtime"]["env"].upper()}</button></div><div style="margin-top: 20px; border-top: 1px solid #00ffff; padding-top: 15px;"><h4 style="color: #00ffff; margin: 0 0 10px 0;">Chunk-Level Cleanup</h4><input type="text" id="chunk-search-input" placeholder="Search chunks by text or metadata..." style="width: 300px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><button onclick="searchChunks()" style="background: #0088ff; margin-right: 10px;">Search Chunks</button><select id="chunk-collection-select" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><option value="">All Collections</option></select><div id="chunk-search-results" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div></div>' if cfg['runtime']['env'] != 'prod' else ''}
+                {('<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="requestAdminAction(\'cleanup-selected\')" style="background: #ff4444; margin-left: 10px;" title="Requires admin authority">Cleanup Selected</button><button onclick="requestAdminAction(\'cleanup-all\')" style="background: #ff6666; margin-left: 5px;" title="Requires admin authority">Cleanup All ' + cfg["runtime"]["env"].upper() + '</button></div><div style="margin-top: 20px; border-top: 1px solid #00ffff; padding-top: 15px;"><h4 style="color: #00ffff; margin: 0 0 10px 0;">Chunk-Level Cleanup</h4><input type="text" id="chunk-search-input" placeholder="Search chunks by text or metadata..." style="width: 300px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><button onclick="searchChunks()" style="background: #0088ff; margin-right: 10px;">Search Chunks</button><select id="chunk-collection-select" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><option value="">All Collections</option></select><div id="chunk-search-results" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div></div>') if cfg['runtime']['env'] != 'prod' else ''}
                 <div id="database-info" style="margin-top: 10px;"></div>
             </div>
         </div>
     </div>
     
+    <script src="/static/js/admin.js"></script>
     <script>
-        function refreshStatus() {{
-            console.log('refreshStatus() called');
-            const healthDiv = document.getElementById('health-status');
-            if (!healthDiv) {{
-                console.error('Could not find health-status element');
-                alert('Error: health-status element not found in DOM');
-                return;
-            }}
-            
-            console.log('Found health-status element, starting status refresh for port:', window.location.port);
-            healthDiv.innerHTML = '<div class="status-pending">Checking system status...</div>';
-            
-            // Add timeout to fetch request
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => {{
-                console.error('Status refresh timed out after 10 seconds');
-                controller.abort();
-            }}, 10000); // 10 second timeout
-            
-            fetch('/status', {{ 
-                signal: controller.signal,
-                headers: {{
-                    'Accept': 'application/json',
-                    'Cache-Control': 'no-cache'
-                }}
-            }})
-                .then(r => {{
-                    clearTimeout(timeoutId);
-                    if (!r.ok) {{
-                        throw new Error('Status request failed: HTTP ' + r.status + ' ' + r.statusText);
-                    }}
-                    return r.json();
-                }})
-                .then(data => {{
-                    console.log('Status data received:', data);
-                    let html = '';
-                    
-                    if (data && data.health_checks) {{
-                        Object.entries(data.health_checks).forEach(([service, status]) => {{
-                            const statusClass = status && status.includes('connected') ? 'status-ok' : 'status-error';
-                            html += '<div class="health-check"><span>' + service + ':</span><span class="' + statusClass + '">' + (status || 'unknown') + '</span></div>';
-                        }});
-                        
-                        // Add build info if available
-                        if (data.build_id) {{
-                            html += '<div class="health-check"><span>Build:</span><span style="color: #aaa; font-size: 11px;">' + data.build_id + '</span></div>';
-                        }}
-                    }} else {{
-                        console.warn('Invalid status data structure:', data);
-                        html += '<div class="status-error">Invalid status data received</div>';
-                    }}
-                    
-                    if (data && data.ngrok_public_url) {{
-                        html += '<div class="health-check"><span>Public URL:</span><span><a href="' + data.ngrok_public_url + '" target="_blank">' + data.ngrok_public_url + '</a></span></div>';
-                    }}
-                    
-                    if (html) {{
-                        healthDiv.innerHTML = html;
-                        console.log('Status display updated successfully');
-                    }} else {{
-                        healthDiv.innerHTML = '<div class="status-error">No valid status data to display</div>';
-                        console.warn('No valid status HTML generated');
-                    }}
-                }})
-                .catch(error => {{
-                    clearTimeout(timeoutId);
-                    console.error('Status refresh error:', error);
-                    console.error('Error details:', {{ 
-                        name: error.name, 
-                        message: error.message, 
-                        stack: error.stack,
-                        port: window.location.port,
-                        hostname: window.location.hostname
-                    }});
-                    
-                    let errorMessage = 'Status update failed: ';
-                    if (error.name === 'AbortError') {{
-                        errorMessage += 'Request timed out (10s)';
-                    }} else if (error.message.includes('Failed to fetch')) {{
-                        errorMessage += 'Network connection failed (check if server is running on port ' + window.location.port + ')';
-                    }} else if (error.message.includes('HTTP')) {{
-                        errorMessage += error.message;
-                    }} else {{
-                        errorMessage += error.message || 'Unknown error';
-                    }}
-                    
-                    healthDiv.innerHTML = '<div class="status-error">' + errorMessage + '<br><button onclick="refreshStatus()" style="margin-top: 5px; font-size: 12px; padding: 5px 10px;">Retry</button></div>';
-                }});
-        }}
-        
-        // Auto-refresh status every 30 seconds
-        refreshStatus();
-        setInterval(refreshStatus, 30000);
-        
-        // Load bug management data on page load
-        refreshBugs();
+        // Additional admin-specific functions that need template variables
         
         function runDevValidation() {{
             const resultsDiv = document.getElementById('validation-results');
@@ -659,73 +593,6 @@ class Handler(BaseHTTPRequestHandler):
                 }});
         }}
         
-        function showCollectionInfo() {{
-            console.log('showCollectionInfo() called');
-            const infoDiv = document.getElementById('database-info');
-            if (!infoDiv) {{
-                console.error('Could not find database-info element');
-                alert('Error: database-info element not found in DOM');
-                return;
-            }}
-            
-            console.log('Found database-info element, starting collections request');
-            infoDiv.innerHTML = '<div class="status-pending">Loading database information...</div>';
-            
-            // Add timeout to prevent hanging requests
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => {{
-                console.error('Collections request timed out');
-                controller.abort();
-            }}, 15000); // 15 second timeout
-            
-            fetch('/api/database/collections', {{ signal: controller.signal }})
-                .then(r => {{
-                    clearTimeout(timeoutId);
-                    console.log('Collections response received, status:', r.status);
-                    if (!r.ok) {{
-                        throw new Error('Collections request failed: ' + r.status);
-                    }}
-                    return r.json();
-                }})
-                .then(data => {{
-                    console.log('Collections data received:', data);
-                    let html = '<div class="database-info">';
-                    
-                    // Current environment info
-                    if (data.current_environment) {{
-                        const env = data.current_environment;
-                        html += '<div style="margin: 10px 0; padding: 10px; background: rgba(0,255,255,0.1); border-radius: 4px;">';
-                        html += '<strong>Current Environment:</strong><br>';
-                        html += 'Collection: <span style="color: #00ffff;">' + env.collection_name + '</span><br>';
-                        html += 'Environment: <span style="color: #ff6600;">' + env.environment.toUpperCase() + '</span><br>';
-                        html += 'Document Count: <span style="color: #00ff00;">' + env.document_count + '</span>';
-                        html += '</div>';
-                    }}
-                    
-                    // All collections
-                    if (data.all_collections && data.all_collections.length > 0) {{
-                        html += '<div style="margin: 10px 0;">';
-                        html += '<strong>All Collections in Database:</strong><br>';
-                        data.all_collections.forEach(collection => {{
-                            const isCurrentEnv = data.current_environment && collection === data.current_environment.collection_name;
-                            const style = isCurrentEnv ? 'color: #00ff00; font-weight: bold;' : 'color: #aaa;';
-                            html += '<span style="' + style + '">• ' + collection + (isCurrentEnv ? ' (current)' : '') + '</span><br>';
-                        }});
-                        html += '</div>';
-                    }}
-                    
-                    html += '</div>';
-                    infoDiv.innerHTML = html;
-                }})
-                .catch(err => {{
-                    console.error('showCollectionInfo error:', err);
-                    let errorMessage = 'Failed to load database info: ' + err.message;
-                    if (err.name === 'AbortError') {{
-                        errorMessage = 'Database request timed out after 15 seconds';
-                    }}
-                    infoDiv.innerHTML = '<div class="status-error">' + errorMessage + '<br><button onclick="showCollectionInfo()" style="margin-top: 5px; font-size: 12px; padding: 5px 10px;">Retry</button></div>';
-                }});
-        }}
         
         function cleanupEnvironmentData() {{
             if (!confirm('Are you sure you want to delete ALL data in the current environment? This cannot be undone!')) {{
@@ -1045,6 +912,465 @@ class Handler(BaseHTTPRequestHandler):
                     previewDiv.innerHTML = '<span style="color: #ff4444;">Failed to load bugs: ' + err.message + '</span>';
                 }});
         }}
+        
+        function filterBugs() {{
+            const filter = document.getElementById('bug-filter').value;
+            currentBugFilter = filter;
+            refreshBugs();
+        }}
+    </script>
+    
+    <div class="build-id-box" id="build-id-box">Loading...</div>
+    
+    <script>
+        // Update build ID box
+        function updateBuildId() {{
+            fetch('/status')
+                .then(r => r.json())
+                .then(data => {{
+                    const buildIdBox = document.getElementById('build-id-box');
+                    buildIdBox.textContent = data.build_id;
+                }})
+                .catch(() => {{
+                    const buildIdBox = document.getElementById('build-id-box');
+                    buildIdBox.textContent = 'build unknown';
+                }});
+        }}
+        
+        // Update build ID on page load and with status refresh
+        updateBuildId();
+        setInterval(updateBuildId, 30000);
+    </script>
+</body>
+</html>
+"""
+            self._send_html(200, user_html)
+        elif path == "/admin":
+            # Redirect to the admin interface (same as root for now)
+            cache_buster = int(time.time())
+            admin_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TTRPG Center Admin - {cfg['runtime']['env'].upper()}</title>
+    <meta name="cache-buster" content="{cache_buster}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+        
+        body {{ 
+            background: 
+                linear-gradient(135deg, rgba(10, 10, 21, 0.85) 0%, rgba(26, 26, 46, 0.9) 50%, rgba(22, 33, 62, 0.85) 100%),
+                url('/static/background/TTRPG_Center_BG.png') center center / cover no-repeat fixed;
+            color: #00ffff;
+            font-family: 'Orbitron', 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .header {{ 
+            text-align: center; 
+            margin-bottom: 30px;
+            border-bottom: 2px solid #ff6600;
+            padding-bottom: 20px;
+        }}
+        
+        .header h1 {{
+            font-size: 2.2em;
+            font-weight: 900;
+            color: #ff6600;
+            text-shadow: 0 0 20px #ff6600, 0 0 40px #ff6600;
+            margin: 0;
+            letter-spacing: 2px;
+        }}
+        .card {{ 
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }}
+        .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
+        .health-check {{ display: flex; justify-content: space-between; margin: 10px 0; }}
+        .status-ok {{ color: #00ff00; }}
+        .status-error {{ color: #ff4444; }}
+        .status-pending {{ color: #ffaa00; }}
+        .status-warn {{ color: #ffaa00; }}
+        .build-id-box {{
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            padding: 5px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            color: #00ffff;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>TTRPG Center Admin</h1>
+            <p>Environment: <strong>{cfg['runtime']['env'].upper()}</strong> | Port: {cfg['runtime']['port']}</p>
+        </div>
+        
+        <div class="status-grid">
+            <div class="card">
+                <h3>System Status</h3>
+                <div id="health-status">Loading...</div>
+                <button onclick="refreshStatus()">Refresh Status</button>
+            </div>
+            
+            <div class="card">
+                <h3>Ingestion Console</h3>
+                <p>Upload and process TTRPG source materials</p>
+                <button onclick="window.location.href='/admin/ingestion'">Open Ingestion</button>
+            </div>
+            
+            <div class="card">
+                <h3>Dictionary Management</h3>
+                <p>View and edit normalization dictionary</p>
+                <button onclick="window.location.href='/admin/dictionary'">Manage Dictionary</button>
+            </div>
+            
+            <div class="card">
+                <h3>Regression Tests</h3>
+                <p>View and manage automated test cases</p>
+                <button onclick="window.location.href='/admin/tests'">View Tests</button>
+            </div>
+            
+            <div class="card">
+                <h3>Bug Management</h3>
+                <p>View and manage all bug reports with filtering</p>
+                <div id="bug-summary" style="margin: 10px 0; font-size: 12px; color: #aaa;">Loading...</div>
+                <div style="margin-top: 15px;">
+                    <label for="bug-filter" style="color: #00ffff; font-size: 12px;">Filter:</label>
+                    <select id="bug-filter" onchange="filterBugs()" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
+                        <option value="all">All Bugs</option>
+                        <option value="open">Open</option>
+                        <option value="closed">Closed</option>
+                        <option value="on_hold">On Hold</option>
+                        <option value="peer_review">Peer Review</option>
+                    </select>
+                    <button onclick="refreshBugs()" style="background: #0088ff; margin-left: 10px;">Refresh</button>
+                    <button onclick="window.location.href='/admin/bugs'" style="margin-left: 5px;">Detailed View</button>
+                </div>
+                <div id="bug-preview" style="margin-top: 15px; max-height: 200px; overflow-y: auto; font-size: 11px;"></div>
+            </div>
+            
+            <div class="card">
+                <h3>Requirements</h3>
+                <p>Manage immutable requirements and feature requests</p>
+                <button onclick="window.location.href='/admin/requirements'">View Requirements</button>
+            </div>
+            
+            {{"<div class=\"card\">" if cfg['runtime']['env'] == 'dev' else "<!--"}}<h3>DEV Validation Gates</h3>
+                <p>Validate all MVP requirements before TEST promotion</p>
+                <button onclick="runDevValidation()">Run Validation</button>
+                <div id="validation-results" style="margin-top: 10px;"></div>
+            {{"</div>" if cfg['runtime']['env'] == 'dev' else "-->"}}
+            
+            <div class="card">
+                <h3>Admin Authentication</h3>
+                <p>Authenticate for admin operations (valid for 10 minutes)</p>
+                <div style="margin: 10px 0;">
+                    <input type="password" id="admin-code-input" placeholder="Enter admin code (admin, dev123)" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; margin-right: 10px; width: 200px;">
+                    <button onclick="authenticateAdmin()" style="background: #0088ff; padding: 8px 15px;">Authenticate</button>
+                    <button onclick="clearAdminAuth()" style="background: #ff4444; padding: 8px 15px; margin-left: 5px;">Clear Auth</button>
+                </div>
+                <div id="admin-status" style="margin: 10px 0; font-size: 12px; color: #aaa;">Not authenticated</div>
+            </div>
+            
+            <div class="card">
+                <h3>Database Management</h3>
+                <p>Environment-specific AstraDB collection management (requires admin auth)</p>
+                <button onclick="showCollectionInfo()">Show Collections</button>
+                {('<div style="margin-top: 15px;"><label for="cleanup-collection-select" style="color: #00ffff;">Select Collection to Cleanup:</label><select id="cleanup-collection-select" style="margin-left: 10px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px;"><option value="">Loading...</option></select><button onclick="requestAdminAction(\'cleanup-selected\')" style="background: #ff4444; margin-left: 10px;" title="Requires admin authority">Cleanup Selected</button><button onclick="requestAdminAction(\'cleanup-all\')" style="background: #ff6666; margin-left: 5px;" title="Requires admin authority">Cleanup All ' + cfg["runtime"]["env"].upper() + '</button></div><div style="margin-top: 20px; border-top: 1px solid #00ffff; padding-top: 15px;"><h4 style="color: #00ffff; margin: 0 0 10px 0;">Chunk-Level Cleanup</h4><input type="text" id="chunk-search-input" placeholder="Search chunks by text or metadata..." style="width: 300px; background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><button onclick="searchChunks()" style="background: #0088ff; margin-right: 10px;">Search Chunks</button><select id="chunk-collection-select" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 5px; margin-right: 10px;"><option value="">All Collections</option></select><div id="chunk-search-results" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div></div>') if cfg['runtime']['env'] != 'prod' else ''}
+                <div id="database-info" style="margin-top: 10px;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/admin.js"></script>
+    <script>
+        // Additional admin-specific functions that need template variables
+        
+        function runDevValidation() {{
+            const resultsDiv = document.getElementById('validation-results');
+            resultsDiv.innerHTML = '<div class="status-pending">Running validation...</div>';
+            
+            fetch('/validate-dev')
+                .then(r => r.json())
+                .then(data => {{
+                    let html = '<div class="validation-summary">';
+                    const statusClass = data.overall_status === 'pass' ? 'status-ok' : 
+                                       data.overall_status === 'warn' ? 'status-warn' : 'status-error';
+                    html += '<strong>Overall Status: <span class="' + statusClass + '">' + data.overall_status.toUpperCase() + '</span></strong>';
+                    
+                    if (data.failed_tests.length > 0) {{
+                        html += '<br><br><strong>Failed Tests:</strong>';
+                        data.failed_tests.forEach(test => {{
+                            html += '<div style="margin: 5px 0; padding: 5px; background: rgba(255, 68, 68, 0.1);">';
+                            html += '<span class="status-error">✗</span> ' + test.test_id;
+                            if (test.error) {{
+                                html += '<br><small style="color: #ff4444;">' + test.error + '</small>';
+                            }}
+                            html += '</div>';
+                        }});
+                    }}
+                    
+                    if (data.warnings && data.warnings.length > 0) {{
+                        html += '<br><br><strong>Warnings:</strong>';
+                        data.warnings.forEach(warning => {{
+                            html += '<div style="margin: 5px 0; padding: 5px; background: rgba(255, 170, 0, 0.1);">';
+                            html += '<span class="status-warn">⚠</span> ' + warning;
+                            html += '</div>';
+                        }});
+                    }}
+                    
+                    html += '</div>';
+                    resultsDiv.innerHTML = html;
+                }})
+                .catch(err => {{
+                    resultsDiv.innerHTML = '<div class="status-error">Validation failed: ' + err.message + '</div>';
+                }});
+        }}
+        
+
+        
+        function cleanupEnvironmentData() {{
+            if (!confirm('Are you sure you want to delete ALL data in the current environment? This cannot be undone!')) {{
+                return;
+            }}
+            
+            const infoDiv = document.getElementById('database-info');
+            infoDiv.innerHTML = '<div class="status-pending">Cleaning up environment data...</div>';
+            
+            fetch('/api/database/cleanup', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ confirm: true }})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.cleanup_result) {{
+                    const result = data.cleanup_result;
+                    let html = '<div class="cleanup-result">';
+                    html += '<strong>Cleanup Complete:</strong><br>';
+                    html += 'Environment: <span style="color: #ff6600;">' + data.environment.toUpperCase() + '</span><br>';
+                    
+                    // Handle AstraDB returning -1 for empty collections
+                    if (result.deleted === -1) {{
+                        html += 'Status: <span style="color: #00ff00;">Collection already empty</span><br>';
+                    }} else {{
+                        html += 'Documents Deleted: <span style="color: #ff4444;">' + result.deleted + '</span><br>';
+                    }}
+                    
+                    html += '<span style="color: #00ff00;">✅ Environment cleaned successfully</span>';
+                    html += '</div>';
+                    infoDiv.innerHTML = html;
+                    
+                    // Refresh collection info after cleanup
+                    setTimeout(showCollectionInfo, 2000);
+                }} else {{
+                    infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + (data.error || 'Unknown error') + '</div>';
+                }}
+            }})
+            .catch(err => {{
+                infoDiv.innerHTML = '<div class="status-error">Cleanup failed: ' + err.message + '</div>';
+            }});
+        }}
+        
+        function cleanupSelectedCollection() {{
+            const select = document.getElementById('cleanup-collection-select');
+            const collection = select.value;
+            
+            if (!collection) {{
+                alert('Please select a collection to cleanup');
+                return;
+            }}
+            
+            if (!confirm(`Are you sure you want to delete ALL data from collection "${{collection}}"? This cannot be undone!`)) {{
+                return;
+            }}
+            
+            const infoDiv = document.getElementById('database-info');
+            infoDiv.innerHTML = '<div class="status-pending">Cleaning up collection: ' + collection + '</div>';
+            
+            fetch('/api/database/cleanup-collection', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ collection: collection, confirm: true }})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.cleanup_result) {{
+                    const result = data.cleanup_result;
+                    let html = '<div class="cleanup-result">';
+                    html += '<strong>Collection Cleanup Complete:</strong><br>';
+                    html += 'Collection: <span style="color: #00ffff;">' + collection + '</span><br>';
+                    html += 'Environment: <span style="color: #ff6600;">' + data.environment.toUpperCase() + '</span><br>';
+                    
+                    // Handle AstraDB returning -1 for empty collections
+                    if (result.deleted === -1) {{
+                        html += 'Status: <span style="color: #00ff00;">Collection was already empty</span><br>';
+                    }} else {{
+                        html += 'Documents Deleted: <span style="color: #ff4444;">' + result.deleted + '</span><br>';
+                    }}
+                    
+                    html += '<span style="color: #00ff00;">✅ Collection cleaned successfully</span>';
+                    html += '</div>';
+                    infoDiv.innerHTML = html;
+                    
+                    // Refresh collection info after cleanup  
+                    setTimeout(showCollectionInfo, 2000);
+                }} else {{
+                    infoDiv.innerHTML = '<div class="status-error">Collection cleanup failed: ' + (data.error || 'Unknown error') + '</div>';
+                }}
+            }})
+            .catch(err => {{
+                infoDiv.innerHTML = '<div class="status-error">Collection cleanup failed: ' + err.message + '</div>';
+            }});
+        }}
+        
+        function populateCollectionDropdown() {{
+            fetch('/api/database/collections')
+                .then(r => r.json())
+                .then(data => {{
+                    const select = document.getElementById('cleanup-collection-select');
+                    const chunkSelect = document.getElementById('chunk-collection-select');
+                    
+                    // Cleanup dropdown
+                    select.innerHTML = '<option value="">Select a collection...</option>';
+                    if (data.all_collections && data.all_collections.length > 0) {{
+                        data.all_collections.forEach(collection => {{
+                            const option = document.createElement('option');
+                            option.value = collection;
+                            option.textContent = collection;
+                            select.appendChild(option);
+                        }});
+                    }}
+                    
+                    // Chunk search dropdown
+                    if (chunkSelect) {{
+                        chunkSelect.innerHTML = '<option value="">All Collections</option>';
+                        if (data.all_collections && data.all_collections.length > 0) {{
+                            data.all_collections.forEach(collection => {{
+                                const option = document.createElement('option');
+                                option.value = collection;
+                                option.textContent = collection;
+                                chunkSelect.appendChild(option);
+                            }});
+                        }}
+                    }}
+                }})
+                .catch(err => {{
+                    console.error('Failed to populate collection dropdown:', err);
+                    const select = document.getElementById('cleanup-collection-select');
+                    select.innerHTML = '<option value="">Error loading collections</option>';
+                }});
+        }}
+        
+        function searchChunks() {{
+            const query = document.getElementById('chunk-search-input').value.trim();
+            const collection = document.getElementById('chunk-collection-select').value;
+            const resultsDiv = document.getElementById('chunk-search-results');
+            
+            if (!query) {{
+                alert('Please enter a search query');
+                return;
+            }}
+            
+            resultsDiv.innerHTML = '<div class="status-pending">Searching chunks...</div>';
+            
+            let searchUrl = '/api/database/search-chunks?query=' + encodeURIComponent(query);
+            if (collection) {{
+                searchUrl += '&collection=' + encodeURIComponent(collection);
+            }}
+            
+            fetch(searchUrl)
+                .then(r => r.json())
+                .then(data => {{
+                    if (data.chunks && data.chunks.length > 0) {{
+                        let html = '<div style="margin-top: 10px;"><strong>Found ' + data.chunks.length + ' chunks:</strong></div>';
+                        data.chunks.forEach((chunk, index) => {{
+                            html += '<div style="margin: 10px 0; padding: 10px; background: rgba(0,0,0,0.3); border-left: 3px solid #00ffff;">';
+                            html += '<div style="font-size: 11px; color: #aaa; margin-bottom: 5px;">';
+                            html += 'ID: <code>' + chunk.chunk_id + '</code> | ';
+                            html += 'Collection: <span style="color: #00ffff;">' + chunk.collection + '</span>';
+                            if (chunk.page) {{
+                                html += ' | Page: ' + chunk.page;
+                            }}
+                            html += '</div>';
+                            html += '<div style="font-size: 12px;">' + chunk.text.substring(0, 200);
+                            if (chunk.text.length > 200) html += '...';
+                            html += '</div>';
+                            html += '<button onclick="deleteChunk(\\'' + chunk.chunk_id + '\\', \\'' + chunk.collection + '\\')" ';
+                            html += 'style="background: #ff4444; margin-top: 5px; font-size: 10px; padding: 3px 6px;">Delete Chunk</button>';
+                            html += '</div>';
+                        }});
+                        resultsDiv.innerHTML = html;
+                    }} else {{
+                        resultsDiv.innerHTML = '<div style="color: #aaa;">No chunks found matching: "' + query + '"</div>';
+                    }}
+                }})
+                .catch(err => {{
+                    resultsDiv.innerHTML = '<div class="status-error">Search failed: ' + err.message + '</div>';
+                }});
+        }}
+        
+        function deleteChunk(chunkId, collection) {{
+            if (!confirm('Are you sure you want to delete this chunk? This cannot be undone!')) {{
+                return;
+            }}
+            
+            fetch('/api/database/delete-chunk', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ 
+                    chunk_id: chunkId, 
+                    collection: collection,
+                    confirm: true 
+                }})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.success) {{
+                    alert('Chunk deleted successfully');
+                    searchChunks(); // Refresh search results
+                }} else {{
+                    alert('Failed to delete chunk: ' + (data.error || 'Unknown error'));
+                }}
+            }})
+            .catch(err => {{
+                alert('Delete failed: ' + err.message);
+            }});
+        }}
+        
+        // Populate collection dropdown on page load
+        document.addEventListener('DOMContentLoaded', function() {{
+            populateCollectionDropdown();
+        }});
+        
+        // Enable search on Enter key
+        document.addEventListener('DOMContentLoaded', function() {{
+            const searchInput = document.getElementById('chunk-search-input');
+            if (searchInput) {{
+                searchInput.addEventListener('keypress', function(e) {{
+                    if (e.key === 'Enter') {{
+                        searchChunks();
+                    }}
+                }});
+            }}
+        }});
+        
+        // Bug management functions
+        let currentBugFilter = 'all';
         
         function filterBugs() {{
             const filter = document.getElementById('bug-filter').value;
