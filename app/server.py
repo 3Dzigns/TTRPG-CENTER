@@ -16,6 +16,7 @@ from app.workflows.graph_engine import get_workflow_engine
 from app.workflows.workflow_executor import get_workflow_executor
 from app.workflows.character_creation import create_character_creation_workflow, create_level_up_workflow
 from app.ingestion.pipeline import get_pipeline
+from app.ingestion.enhanced_pipeline import get_enhanced_pipeline
 from app.ingestion.dictionary import get_dictionary
 import cgi
 import tempfile
@@ -177,6 +178,7 @@ try:
     workflow_engine = get_workflow_engine()
     workflow_executor = get_workflow_executor()
     ingestion_pipeline = get_pipeline()
+    enhanced_pipeline = get_enhanced_pipeline()
     dictionary = get_dictionary()
     
     # Create default workflows if they don't exist
@@ -2190,6 +2192,7 @@ class Handler(BaseHTTPRequestHandler):
             base_title = form.getvalue('title', '')
             source_type = form.getvalue('source_type', 'manual_upload')
             tags = form.getvalue('tags', '').split(',') if form.getvalue('tags') else []
+            pipeline_type = form.getvalue('pipeline_type', 'standard')  # 'standard' or 'enhanced'
             
             # Save uploaded files temporarily and create batch ingestion
             upload_dir = Path("uploads")
@@ -2259,20 +2262,32 @@ class Handler(BaseHTTPRequestHandler):
                     return progress_callback
                 
                 try:
-                    result = ingestion_pipeline.ingest_file(
+                    # Select pipeline based on type
+                    selected_pipeline = enhanced_pipeline if pipeline_type == 'enhanced' else ingestion_pipeline
+                    
+                    result = selected_pipeline.ingest_file(
                         str(temp_path), 
                         metadata,
                         make_progress_callback(ingestion_id)
                     )
                     
                     # Mark as completed with proper data extraction
-                    chunks_created = 0
-                    if "pass_a" in result:
-                        chunks_created = result["pass_a"].get("chunks_created", 0)
-                    
-                    chunks_stored = 0
-                    if "pass_b" in result:
-                        chunks_stored = result["pass_b"].get("chunks_stored", 0)
+                    # Handle both standard and enhanced pipeline result formats
+                    if pipeline_type == 'enhanced':
+                        chunks_created = result.get("chunks_created", 0)
+                        chunks_stored = chunks_created  # Enhanced pipeline stores all created chunks
+                        pages_processed = result.get("pages_processed", 0)
+                    else:
+                        # Standard pipeline format
+                        chunks_created = 0
+                        if "pass_a" in result:
+                            chunks_created = result["pass_a"].get("chunks_created", 0)
+                        
+                        chunks_stored = 0
+                        if "pass_b" in result:
+                            chunks_stored = result["pass_b"].get("chunks_stored", 0)
+                        
+                        pages_processed = result.get("pass_a", {}).get("pages_detected", 0)
                     
                     if ingestion_id in ingestion_status:
                         ingestion_status[ingestion_id].update({
@@ -2285,7 +2300,7 @@ class Handler(BaseHTTPRequestHandler):
                             "total_chunks": chunks_created,
                             "chunks_stored": chunks_stored,
                             "passes_complete": 3,
-                            "pages_processed": result.get("pass_a", {}).get("pages_detected", 0),
+                            "pages_processed": pages_processed,
                             "duration_seconds": result.get("duration_seconds", 0),
                             "pass_a_chunks": chunks_created,
                             "pass_b_stored": chunks_stored,
@@ -2750,6 +2765,17 @@ class Handler(BaseHTTPRequestHandler):
                     <label for="tagsInput" style="display: block; margin-bottom: 5px;">Tags (comma-separated):</label>
                     <input type="text" id="tagsInput" name="tags" placeholder="rulebook, spells, combat..." 
                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
+                </div>
+                <div style="margin: 10px 0;">
+                    <label for="pipelineType" style="display: block; margin-bottom: 5px;">Processing Pipeline:</label>
+                    <select id="pipelineType" name="pipeline_type" 
+                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
+                        <option value="standard">Standard Pipeline (3-Pass)</option>
+                        <option value="enhanced">Enhanced Pipeline (Advanced Chunking)</option>
+                    </select>
+                    <br><small style="color: #aaa; margin-top: 5px;">
+                        Enhanced pipeline provides improved section detection and optimized chunk sizing for better RAG performance
+                    </small>
                 </div>
                 <input type="hidden" name="source_type" value="manual_upload">
                 <button type="submit" onclick="uploadFile(); return false;">Upload and Process</button>
