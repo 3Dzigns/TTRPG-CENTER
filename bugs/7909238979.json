@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-08-27T22:28:06Z",
+  "environment": "test",
+  "build_id": "2025-08-27_21-35-15_build-0114",
+  "severity": "critical",
+  "category": "ui_functionality",
+  "status": "closed",
+  "title": "Admin UI System Status stuck in loading state, database collections not loading",
+  "description": "System Status pane shows loading state indefinitely. Refresh Status button non-functional. Database Management collections button does not populate collections. Previously showed Vector/Graph/Dictionary status.",
+  "source": "user_submission",
+  "files": [
+    "admin UI JavaScript",
+    "database collections endpoint",
+    "status refresh mechanism"
+  ],
+  "requirements": [
+    "ADM-001",
+    "ADM-002",
+    "ADM-003"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "7909238979",
+  "closed_by": "admin",
+  "closed_at": 1756334021.192992,
+  "closed_reason": "Fixed JavaScript DOM timing issue - wrapped initialization functions (refreshStatus, refreshBugs) in DOMContentLoaded event listener to ensure DOM elements exist before functions execute. Admin UI status loading and refresh functionality now works properly."
+}

@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-08-27T22:20:33Z",
+  "environment": "test",
+  "build_id": "2025-08-27_21-35-15_build-0114",
+  "severity": "critical",
+  "category": "system_failure",
+  "status": "closed",
+  "title": "System Status not reflecting database status in test environment",
+  "description": "Database status continues to show stale/cached information in System Status pane despite previous fix. Affects both Firefox and Chrome browsers. No further work can proceed until resolved.",
+  "source": "user_submission",
+  "files": [
+    "app/server.py:/status endpoint",
+    "test environment configuration"
+  ],
+  "requirements": [
+    "ADM-001",
+    "ADM-003",
+    "TEST-001"
+  ],
+  "admin_controls": {
+    "can_modify_status": true,
+    "can_put_on_hold": true,
+    "auto_close_enabled": false,
+    "severity_escalation_enabled": false
+  },
+  "bug_id": "3449842820",
+  "closed_by": "system_implementation",
+  "closed_at": 1756333464.047787,
+  "closed_reason": "RESOLVED: Test environment was running incorrect build (Aug 25) instead of current build with database status fixes. Restarted test environment with correct build 2025-08-27_21-35-15_build-0114. Status endpoint now works with real-time database status, cache-busting headers, and enhanced error handling."
+}
