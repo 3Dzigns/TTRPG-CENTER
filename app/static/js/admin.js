@@ -2,6 +2,37 @@
 
 console.log('Admin UI JavaScript loaded');
 
+// CR-006: Server-provided environment detection
+let environmentInfo = null;
+
+async function getEnvironmentInfo() {
+    if (environmentInfo) {
+        return environmentInfo;
+    }
+    
+    try {
+        const response = await fetch('/api/environment');
+        if (response.ok) {
+            environmentInfo = await response.json();
+            return environmentInfo;
+        }
+    } catch (error) {
+        console.warn('Failed to fetch environment info, falling back to port detection:', error);
+    }
+    
+    // Fallback to port-based detection if server endpoint fails
+    const port = window.location.port;
+    environmentInfo = {
+        environment: port === '8000' ? 'DEV' : 
+                    port === '8181' ? 'TEST' : 
+                    port === '8282' ? 'PROD' : 'UNKNOWN',
+        port: parseInt(port),
+        build_id: 'unknown',
+        server_time: Date.now() / 1000
+    };
+    return environmentInfo;
+}
+
 function refreshStatus() {
     console.log('refreshStatus() called');
     const healthDiv = document.getElementById('health-status');
@@ -253,16 +284,19 @@ function filterBugs() {
         });
 }
 
-// Admin authority management
+// Admin authority management - CR-003 enhanced with server-side session support
 let adminSession = {
     authenticated: false,
-    expires: 0
+    expires: 0,
+    sessionId: null
 };
 
-function requestAdminAction(action) {
+async function requestAdminAction(action) {
     console.log('Admin action requested:', action);
     
-    if (!isAdminAuthenticated()) {
+    // Check if we have a valid session first
+    const isValid = await isAdminAuthenticated();
+    if (!isValid) {
         promptAdminAuthentication(action);
         return;
     }
@@ -271,8 +305,38 @@ function requestAdminAction(action) {
     executeAdminAction(action);
 }
 
-function isAdminAuthenticated() {
-    return adminSession.authenticated && Date.now() < adminSession.expires;
+async function isAdminAuthenticated() {
+    // First check local session state
+    if (!adminSession.authenticated || !adminSession.sessionId || Date.now() >= adminSession.expires) {
+        return false;
+    }
+    
+    // Validate with server
+    try {
+        const response = await fetch('/api/admin/session', {
+            method: 'GET',
+            headers: {
+                'X-Session-ID': adminSession.sessionId
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.valid) {
+                // Update local expiry time
+                adminSession.expires = data.expires * 1000; // Convert to milliseconds
+                return true;
+            }
+        }
+    } catch (error) {
+        console.error('Session validation error:', error);
+    }
+    
+    // Session invalid, clear local state
+    adminSession.authenticated = false;
+    adminSession.sessionId = null;
+    adminSession.expires = 0;
+    return false;
 }
 
 function promptAdminAuthentication(pendingAction) {
@@ -339,7 +403,7 @@ function cleanupSelectedCollection() {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
-            'X-Admin-Token': adminSession.token || ''
+            'X-Session-ID': adminSession.sessionId || ''
         },
         body: JSON.stringify({ 
             collection_name: select.value,
@@ -361,10 +425,9 @@ function cleanupSelectedCollection() {
     });
 }
 
-function cleanupEnvironmentData() {
-    const env = window.location.port === '8000' ? 'DEV' : 
-                window.location.port === '8181' ? 'TEST' : 
-                window.location.port === '8282' ? 'PROD' : 'UNKNOWN';
+async function cleanupEnvironmentData() {
+    const envInfo = await getEnvironmentInfo();
+    const env = envInfo.environment;
     
     if (!confirm(`Are you sure you want to cleanup ALL data in the ${env} environment? This cannot be undone.`)) {
         return;
@@ -376,7 +439,7 @@ function cleanupEnvironmentData() {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
-            'X-Admin-Token': adminSession.token || ''
+            'X-Session-ID': adminSession.sessionId || ''
         },
         body: JSON.stringify({ 
             confirm: true
@@ -397,8 +460,8 @@ function cleanupEnvironmentData() {
     });
 }
 
-// Visible admin authentication functions
-function authenticateAdmin() {
+// Visible admin authentication functions - CR-003 server-side authentication
+async function authenticateAdmin() {
     const input = document.getElementById('admin-code-input');
     const statusDiv = document.getElementById('admin-status');
     const authCode = input.value.trim();
@@ -408,27 +471,45 @@ function authenticateAdmin() {
         return;
     }
     
-    // For development, accept simple codes
-    const validCodes = ['admin', 'ADMIN', 'dev123', 'DEV123'];
+    statusDiv.innerHTML = '<span style="color: #ffaa00;">🔄 Authenticating...</span>';
     
-    if (validCodes.includes(authCode)) {
-        adminSession.authenticated = true;
-        adminSession.expires = Date.now() + (10 * 60 * 1000); // 10 minutes
-        adminSession.token = 'dev-admin-' + authCode.toLowerCase();
+    try {
+        const response = await fetch('/api/admin/auth', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                auth_code: authCode
+            })
+        });
         
-        // Clear the input for security
-        input.value = '';
+        const data = await response.json();
         
-        // Update status display
-        const expiryTime = new Date(adminSession.expires).toLocaleTimeString();
-        statusDiv.innerHTML = `<span style="color: #00ff00;">✅ Authenticated until ${expiryTime}</span>`;
-        
-        console.log('Admin authentication successful via card');
-        
-        // Start countdown timer
-        updateAuthTimer();
-    } else {
-        statusDiv.innerHTML = '<span style="color: #ff4444;">❌ Invalid admin code. Use: admin, ADMIN, dev123, or DEV123</span>';
+        if (response.ok && data.success) {
+            // Update session with server response
+            adminSession.authenticated = true;
+            adminSession.expires = data.expires * 1000; // Convert to milliseconds
+            adminSession.sessionId = data.session_id;
+            
+            // Clear the input for security
+            input.value = '';
+            
+            // Update status display
+            const expiryTime = new Date(adminSession.expires).toLocaleTimeString();
+            statusDiv.innerHTML = `<span style="color: #00ff00;">✅ Authenticated until ${expiryTime}</span>`;
+            
+            console.log('Admin authentication successful via server');
+            
+            // Start countdown timer
+            updateAuthTimer();
+        } else {
+            statusDiv.innerHTML = '<span style="color: #ff4444;">❌ Invalid admin code</span>';
+            input.value = '';
+        }
+    } catch (error) {
+        console.error('Authentication error:', error);
+        statusDiv.innerHTML = '<span style="color: #ff4444;">❌ Authentication failed</span>';
         input.value = '';
     }
 }
@@ -436,7 +517,7 @@ function authenticateAdmin() {
 function clearAdminAuth() {
     adminSession.authenticated = false;
     adminSession.expires = 0;
-    adminSession.token = '';
+    adminSession.sessionId = null;
     
     const statusDiv = document.getElementById('admin-status');
     statusDiv.innerHTML = '<span style="color: #aaa;">Not authenticated</span>';
@@ -502,24 +583,30 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Override any existing cleanup functions to ensure admin protection
-    // Use setTimeout to ensure this happens after inline script executes
-    setTimeout(() => {
-        console.log('Applying admin function overrides...');
-        window.cleanupSelectedCollection = cleanupSelectedCollection;
-        window.cleanupEnvironmentData = cleanupEnvironmentData;
-        window.authenticateAdmin = authenticateAdmin;
-        window.clearAdminAuth = clearAdminAuth;
-        console.log('Admin function overrides applied successfully');
+    // CR-005: Replace setTimeout with proper DOM event handling
+    // Override functions immediately - DOM is ready at this point
+    console.log('Applying admin function overrides...');
+    window.cleanupSelectedCollection = cleanupSelectedCollection;
+    window.cleanupEnvironmentData = cleanupEnvironmentData;
+    window.authenticateAdmin = authenticateAdmin;
+    window.clearAdminAuth = clearAdminAuth;
+    
+    // Also ensure any dynamically created buttons use our functions
+    window.requestAdminAction = requestAdminAction;
+    console.log('Admin function overrides applied successfully');
+    
+    // Add event delegation for dynamic buttons to avoid timing issues
+    document.addEventListener('click', function(event) {
+        const target = event.target;
         
-        // Verify the overrides worked
-        if (typeof window.cleanupSelectedCollection === 'function') {
-            console.log('cleanupSelectedCollection override: SUCCESS');
+        // Handle admin action buttons
+        if (target.hasAttribute('data-admin-action')) {
+            event.preventDefault();
+            const action = target.getAttribute('data-admin-action');
+            requestAdminAction(action);
+            return false;
         }
-        if (typeof window.cleanupEnvironmentData === 'function') {
-            console.log('cleanupEnvironmentData override: SUCCESS');
-        }
-    }, 100); // Small delay to ensure inline script has executed
+    });
     
     console.log('Admin UI initialization complete');
 });

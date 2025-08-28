@@ -192,6 +192,47 @@ except Exception as e:
     logger.error(f"Failed to initialize components: {e}")
     raise
 
+# CR-003: Server-side session management
+admin_sessions = {}
+
+def create_session(auth_code: str) -> Dict[str, Any]:
+    """Create a server-side admin session"""
+    session_id = str(uuid.uuid4())
+    session = {
+        "id": session_id,
+        "auth_code": auth_code,
+        "created": time.time(),
+        "expires": time.time() + (10 * 60),  # 10 minutes
+        "last_access": time.time()
+    }
+    admin_sessions[session_id] = session
+    return session
+
+def validate_session(session_id: str) -> bool:
+    """Validate an admin session server-side"""
+    if not session_id or session_id not in admin_sessions:
+        return False
+    
+    session = admin_sessions[session_id]
+    current_time = time.time()
+    
+    # Check expiration
+    if current_time > session["expires"]:
+        del admin_sessions[session_id]
+        return False
+    
+    # Update last access
+    session["last_access"] = current_time
+    return True
+
+def cleanup_expired_sessions():
+    """Clean up expired sessions"""
+    current_time = time.time()
+    expired_sessions = [sid for sid, session in admin_sessions.items() 
+                       if current_time > session["expires"]]
+    for sid in expired_sessions:
+        del admin_sessions[sid]
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, data, ctype="application/json"):
         self.send_response(code)
@@ -234,7 +275,15 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(str(data).encode("utf-8"))
     
     def _require_admin(self) -> bool:
-        """Require admin token for destructive operations"""
+        """Require admin token for destructive operations - CR-003 enhanced with session support"""
+        # First check for session-based authentication
+        session_id = self.headers.get("X-Session-ID", "")
+        if session_id:
+            cleanup_expired_sessions()
+            if validate_session(session_id):
+                return True
+        
+        # Fall back to token-based authentication for backward compatibility
         token = self.headers.get("X-Admin-Token", "")
         
         # For development environments, accept dev admin tokens
@@ -250,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
         elif env in ['dev', 'test'] and token in dev_admin_tokens:
             return True
         else:
-            self._send(401, {"error": "admin auth required", "hint": "Set X-Admin-Token header or authenticate via UI"})
+            self._send(401, {"error": "admin auth required", "hint": "Set X-Session-ID or X-Admin-Token header"})
             return False
     
     def _validate_collection(self, collection: str) -> bool:
@@ -261,6 +310,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid collection for environment", "allowed": list(allowed)})
             return False
         return True
+    
+    def _get_admin_auth_card_html(self) -> str:
+        """Get Admin Authentication card HTML - CR-004 consolidation"""
+        return '''            <div class="card">
+                <h3>Admin Authentication</h3>
+                <p>Authenticate for admin operations (valid for 10 minutes)</p>
+                <div style="margin: 10px 0;">
+                    <input type="password" id="admin-code-input" placeholder="Enter admin code (admin, dev123)" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; margin-right: 10px; width: 200px;">
+                    <button onclick="authenticateAdmin()" style="background: #0088ff; padding: 8px 15px;">Authenticate</button>
+                    <button onclick="clearAdminAuth()" style="background: #ff4444; padding: 8px 15px; margin-left: 5px;">Clear Auth</button>
+                </div>
+                <div id="admin-status" style="margin: 10px 0; font-size: 12px; color: #aaa;">Not authenticated</div>
+            </div>'''
     
     def _serve_static_file(self, path):
         """Serve static files from assets directory"""
@@ -521,16 +583,7 @@ class Handler(BaseHTTPRequestHandler):
                 <div id="validation-results" style="margin-top: 10px;"></div>
             {{"</div>" if cfg['runtime']['env'] == 'dev' else "-->"}}
             
-            <div class="card">
-                <h3>Admin Authentication</h3>
-                <p>Authenticate for admin operations (valid for 10 minutes)</p>
-                <div style="margin: 10px 0;">
-                    <input type="password" id="admin-code-input" placeholder="Enter admin code (admin, dev123)" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; margin-right: 10px; width: 200px;">
-                    <button onclick="authenticateAdmin()" style="background: #0088ff; padding: 8px 15px;">Authenticate</button>
-                    <button onclick="clearAdminAuth()" style="background: #ff4444; padding: 8px 15px; margin-left: 5px;">Clear Auth</button>
-                </div>
-                <div id="admin-status" style="margin: 10px 0; font-size: 12px; color: #aaa;">Not authenticated</div>
-            </div>
+{self._get_admin_auth_card_html()}
             
             <div class="card">
                 <h3>Database Management</h3>
@@ -1075,16 +1128,7 @@ class Handler(BaseHTTPRequestHandler):
                 <div id="validation-results" style="margin-top: 10px;"></div>
             {{"</div>" if cfg['runtime']['env'] == 'dev' else "-->"}}
             
-            <div class="card">
-                <h3>Admin Authentication</h3>
-                <p>Authenticate for admin operations (valid for 10 minutes)</p>
-                <div style="margin: 10px 0;">
-                    <input type="password" id="admin-code-input" placeholder="Enter admin code (admin, dev123)" style="background: #1a1a2e; color: #00ffff; border: 1px solid #00ffff; padding: 8px; margin-right: 10px; width: 200px;">
-                    <button onclick="authenticateAdmin()" style="background: #0088ff; padding: 8px 15px;">Authenticate</button>
-                    <button onclick="clearAdminAuth()" style="background: #ff4444; padding: 8px 15px; margin-left: 5px;">Clear Auth</button>
-                </div>
-                <div id="admin-status" style="margin: 10px 0; font-size: 12px; color: #aaa;">Not authenticated</div>
-            </div>
+{self._get_admin_auth_card_html()}
             
             <div class="card">
                 <h3>Database Management</h3>
@@ -1431,6 +1475,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_requirements_validation()
         elif path == "/api/requirements/stats":
             self._handle_requirements_stats()
+        elif path == "/api/admin/auth":
+            self._handle_admin_auth()
+        elif path == "/api/admin/session":
+            self._handle_admin_session()
+        elif path == "/api/environment":
+            self._handle_environment_info()
         elif path == "/api/database/collections":
             self._handle_database_collections()
         elif path.startswith("/api/database/search-chunks"):
@@ -3929,6 +3979,104 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Chunk delete request error: {str(e)}")
             self._send(500, {"error": f"Chunk delete failed: {str(e)}"})
+
+    def _handle_admin_auth(self):
+        """Handle admin authentication requests - CR-003 server-side validation"""
+        if self.command != 'POST':
+            self._send(405, {"error": "POST method required"})
+            return
+            
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                auth_code = data.get('auth_code', '').strip()
+            else:
+                auth_code = ''
+                
+            if not auth_code:
+                self._send(400, {"error": "Authentication code required"})
+                return
+                
+            # Validate against existing valid codes (keeping same codes for compatibility)
+            valid_codes = ['admin', 'ADMIN', 'dev123', 'DEV123']
+            
+            if auth_code in valid_codes:
+                # Clean up expired sessions first
+                cleanup_expired_sessions()
+                
+                # Create new session
+                session = create_session(auth_code)
+                
+                self._send(200, {
+                    "success": True,
+                    "session_id": session["id"],
+                    "expires": session["expires"],
+                    "message": "Authentication successful"
+                })
+            else:
+                self._send(401, {"error": "Invalid authentication code"})
+                
+        except Exception as e:
+            logger.error(f"Admin auth error: {str(e)}")
+            self._send(500, {"error": f"Authentication failed: {str(e)}"})
+    
+    def _handle_admin_session(self):
+        """Handle admin session validation requests - CR-003"""
+        if self.command != 'GET':
+            self._send(405, {"error": "GET method required"})
+            return
+            
+        try:
+            # Get session ID from headers
+            session_id = self.headers.get('X-Session-ID', '')
+            
+            if not session_id:
+                self._send(401, {"error": "Session ID required"})
+                return
+                
+            # Clean up expired sessions first
+            cleanup_expired_sessions()
+            
+            # Validate session
+            is_valid = validate_session(session_id)
+            
+            if is_valid:
+                session = admin_sessions[session_id]
+                self._send(200, {
+                    "valid": True,
+                    "expires": session["expires"],
+                    "remaining": max(0, int(session["expires"] - time.time()))
+                })
+            else:
+                self._send(401, {"error": "Invalid or expired session"})
+                
+        except Exception as e:
+            logger.error(f"Session validation error: {str(e)}")
+            self._send(500, {"error": f"Session validation failed: {str(e)}"})
+    
+    def _handle_environment_info(self):
+        """Handle environment information requests - CR-006"""
+        if self.command != 'GET':
+            self._send(405, {"error": "GET method required"})
+            return
+            
+        try:
+            env = os.getenv("APP_ENV", "dev").lower()
+            port = cfg["runtime"]["port"]
+            build_id = os.getenv("APP_RELEASE_BUILD", "dev")
+            
+            self._send(200, {
+                "environment": env.upper(),
+                "port": port,
+                "build_id": build_id,
+                "server_time": time.time()
+            })
+            
+        except Exception as e:
+            logger.error(f"Environment info error: {str(e)}")
+            self._send(500, {"error": f"Environment info failed: {str(e)}"})
 
 def main():
     port = cfg["runtime"]["port"]
