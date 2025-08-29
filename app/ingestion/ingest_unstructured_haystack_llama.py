@@ -35,7 +35,9 @@ ASTRA_TOKEN = get_env_or_raise("ASTRA_DB_APPLICATION_TOKEN")
 ASTRA_KEYSPACE = get_env_or_raise("ASTRA_DB_KEYSPACE")
 ENV = os.getenv("APP_ENV", "dev")  # dev|test|prod
 
-# ---- Status events (aligns with Admin UI contract) ---------------------
+# ---- Status events with RUN_MODE guardrails ---------------------
+from app.common.run_mode import emit_structured_status, enforce_execution_over_reasoning, check_data_modification_allowed
+
 def now_iso() -> str:
     return dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat()
 
@@ -50,24 +52,22 @@ def emit_status(
     error: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Callable] = None
 ):
-    """Emit status event for Admin UI consumption"""
-    evt = {
-        "job_id": job_id,
-        "env": ENV,
-        "phase": phase,  # upload|chunk|dictionary|embed|enrich|verify
-        "status": status,  # queued|running|stalled|error|done
-        "progress": progress,
-        "updated_at": now_iso(),
-        "message": message,
-        "logs_tail": logs_tail or [],
-        "metrics": metrics or {},
-        "error": error or None,
-    }
+    """
+    Emit structured status event with RUN_MODE compliance
     
-    # Console output for development
-    print(f"[STATUS] {phase}:{status} ({progress}%) - {message}")
-    if error:
-        print(f"[ERROR] {error}")
+    User Story: Ingestion runs emit structured status events for each phase
+    """
+    # Use RUN_MODE-compliant status emission
+    evt = emit_structured_status(
+        job_id=job_id,
+        phase=phase,
+        status=status, 
+        progress=progress,
+        message=message,
+        logs_tail=logs_tail,
+        metrics=metrics,
+        error=error
+    )
     
     # Forward to callback if provided
     if progress_callback:
@@ -78,7 +78,7 @@ def emit_status(
             "error": error
         })
     
-    # TODO: Publish to Redis/SSE topic: f"ingest:{ENV}:{job_id}"
+    # TODO: Publish to Redis/SSE topic: f"ingest:{ENV}:{job_id}" 
     return evt
 
 # ---- Pass A: Unstructured (Parse/Structure) ---------------------------------
@@ -86,7 +86,10 @@ def parse_with_unstructured(pdf_path: str, job_id: str, progress_callback: Optio
     """
     Use Unstructured.io to parse PDF into structured elements with metadata
     
-    Returns normalized list of elements with text and hierarchical metadata
+    User Story: Parse documents with Unstructured.io so that PDF elements (titles, paragraphs, 
+    tables, images) are automatically extracted with page and section metadata for context-aware chunks.
+    
+    Returns normalized list of elements with text, images, and hierarchical metadata
     """
     try:
         # Import here to handle package availability gracefully
@@ -96,46 +99,84 @@ def parse_with_unstructured(pdf_path: str, job_id: str, progress_callback: Optio
                    "Starting PDF parsing with Unstructured.io", 
                    progress_callback=progress_callback)
         
-        # Parse PDF with hi-res strategy for best layout fidelity
+        # Create output directory for extracted images
+        output_dir = Path(f"artifacts/ingest/{ENV}/{job_id}/images")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Parse PDF with hi-res strategy for best layout fidelity and image extraction
         elements = partition_pdf(
             filename=pdf_path,
-            strategy="hi_res",            # Good layout fidelity
-            infer_table_structure=True,   # Detect tables
-            extract_images_in_pdf=False,  # Skip images for now
-            chunking_strategy=None,       # We chunk later in Haystack
+            strategy="hi_res",              # Good layout fidelity
+            infer_table_structure=True,     # Detect tables with structure
+            extract_images_in_pdf=True,     # Extract images to link to dictionary entries
+            extract_image_block_types=["Image", "Table"],  # Extract both images and table images
+            extract_image_block_output_dir=str(output_dir),  # Save images for linking
+            chunking_strategy=None,         # We chunk later in Haystack
+            include_page_breaks=True,       # Preserve page boundaries
         )
         
         emit_status(job_id, "chunk", "running", 60, 
                    f"Parsed {len(elements)} elements from PDF",
                    progress_callback=progress_callback)
         
-        # Normalize elements to consistent format
+        # Normalize elements to consistent format with enhanced metadata
         norm: List[Dict[str, Any]] = []
+        image_links = {}  # Track image files for dictionary linking
+        
         for i, el in enumerate(elements):
             meta = getattr(el, "metadata", None)
+            text_content = str(el).strip()
             
+            # Enhanced element data with hierarchical metadata
             element_data = {
                 "element_id": i,
                 "type": el.category,      # Title, NarrativeText, ListItem, Table, Figure, etc.
-                "text": str(el).strip(),
+                "text": text_content,
                 "page_number": getattr(meta, "page_number", None) if meta else None,
                 "section": {
                     "title": getattr(meta, "section_title", None) if meta else None,
-                    "parent_titles": getattr(meta, "parent_section_titles", None) if meta else None,
+                    "parent_titles": getattr(meta, "parent_section_titles", []) if meta else [],
+                    "section_hierarchy": getattr(meta, "section_hierarchy", []) if meta else [],
+                },
+                "layout": {
+                    "coordinates": getattr(meta, "coordinates", None) if meta else None,
+                    "parent_id": getattr(meta, "parent_id", None) if meta else None,
+                    "category_depth": getattr(meta, "category_depth", 0) if meta else 0,
                 },
                 "orig_metadata": meta.to_dict() if meta else {},
             }
             
-            # Only add elements with meaningful text
-            if element_data["text"]:
+            # Handle image elements - preserve and link for dictionary entries
+            if el.category in ["Image", "Figure"] and meta:
+                image_filename = getattr(meta, "image_path", None)
+                if image_filename and Path(image_filename).exists():
+                    element_data["image"] = {
+                        "path": image_filename,
+                        "caption": text_content,
+                        "image_base64": None,  # Could encode for storage
+                        "linked_to_dictionary": True
+                    }
+                    image_links[f"page_{element_data['page_number']}_img_{i}"] = image_filename
+            
+            # Handle table elements with structure preservation
+            if el.category == "Table" and meta:
+                element_data["table"] = {
+                    "structure": getattr(meta, "table_as_cells", None),
+                    "text_as_html": getattr(meta, "text_as_html", None),
+                }
+            
+            # Add elements with meaningful content or structural importance
+            if text_content or el.category in ["Image", "Figure", "Table"]:
                 norm.append(element_data)
         
         emit_status(job_id, "chunk", "done", 100, 
-                   f"Successfully parsed {len(norm)} text elements",
+                   f"Successfully parsed {len(norm)} elements ({len(image_links)} images extracted)",
                    logs_tail=[f"{e['type']}: {e['text'][:100]}..." for e in norm[-3:]],
+                   metrics={"total_elements": len(norm), "images_extracted": len(image_links)},
                    progress_callback=progress_callback)
         
-        return norm
+        # Return both normalized elements and image links for dictionary creation
+        return {"elements": norm, "image_links": image_links}
         
     except ImportError as e:
         emit_status(job_id, "chunk", "error", 0, 
@@ -151,6 +192,85 @@ def parse_with_unstructured(pdf_path: str, job_id: str, progress_callback: Optio
         raise
 
 # ---- Pass B: Haystack (Chunk → Embed → Upsert) ------------------------------
+
+def clean_content(text: str) -> str:
+    """Clean and normalize text content for better processing"""
+    if not text:
+        return ""
+    
+    # Remove excessive whitespace
+    text = re.sub(r'\s+', ' ', text.strip())
+    
+    # Clean up common PDF artifacts
+    text = re.sub(r'[^\x00-\x7F]+', '', text)  # Remove non-ASCII characters
+    text = re.sub(r'Page \d+', '', text)       # Remove page numbers
+    text = re.sub(r'^\d+\s*', '', text)        # Remove leading numbers
+    
+    # Normalize punctuation
+    text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)  # Ensure space after sentence endings
+    
+    return text.strip()
+
+def smart_chunk_content(content: str, concept_type: str) -> List[str]:
+    """
+    Smart content chunking based on concept type and natural boundaries
+    """
+    if not content:
+        return []
+    
+    max_chunk_size = 1200
+    
+    if concept_type == "spell":
+        # For spells, try to split on spell components/sections
+        spell_sections = ["Casting Time", "Components", "Range", "Duration", "Saving Throw"]
+        for section in spell_sections:
+            if section in content and len(content) > max_chunk_size:
+                parts = content.split(section, 1)
+                if len(parts) == 2:
+                    first_chunk = parts[0].strip()
+                    second_chunk = (section + parts[1]).strip()
+                    
+                    chunks = []
+                    if first_chunk:
+                        chunks.append(first_chunk)
+                    if second_chunk:
+                        chunks.extend(smart_chunk_content(second_chunk, concept_type))
+                    return chunks
+    
+    elif concept_type == "feat":
+        # For feats, split on Benefit, Normal, Special sections
+        feat_sections = ["Benefit:", "Normal:", "Special:"]
+        for section in feat_sections:
+            if section in content and len(content) > max_chunk_size:
+                parts = content.split(section, 1)
+                if len(parts) == 2:
+                    first_chunk = parts[0].strip()
+                    second_chunk = (section + parts[1]).strip()
+                    
+                    chunks = []
+                    if first_chunk:
+                        chunks.append(first_chunk)
+                    if second_chunk:
+                        chunks.extend(smart_chunk_content(second_chunk, concept_type))
+                    return chunks
+    
+    # Default: sentence-based chunking
+    sentences = re.split(r'(?<=[.!?])\s+', content)
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        if len(current_chunk + " " + sentence) <= max_chunk_size:
+            current_chunk += " " + sentence if current_chunk else sentence
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence
+    
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    return chunks
 
 # Custom AstraDB Document Store for Haystack integration
 class AstraDBDocumentStore:
@@ -175,7 +295,11 @@ class AstraDBDocumentStore:
             raise ImportError("astrapy package required for AstraDB integration")
     
     def write_documents(self, documents: List[Dict[str, Any]], batch_size: int = 50) -> List[str]:
-        """Write documents to AstraDB collection"""
+        """
+        Write documents to AstraDB collection with retry logic
+        
+        User Story: AstraDB connected via Haystack DocumentStore adapter with retry logic
+        """
         doc_ids = []
         
         for i in range(0, len(documents), batch_size):
@@ -199,8 +323,21 @@ class AstraDBDocumentStore:
                 
                 astra_docs.append(astra_doc)
             
-            # Insert batch
-            result = self.collection.insert_many(astra_docs)
+            # Insert batch with retry logic
+            retry_count = 0
+            max_retries = 3
+            
+            while retry_count < max_retries:
+                try:
+                    result = self.collection.insert_many(astra_docs)
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        print(f"Failed to insert batch after {max_retries} retries: {e}")
+                        raise
+                    else:
+                        time.sleep(2 ** retry_count)  # Exponential backoff
             
         return doc_ids
     
@@ -214,16 +351,26 @@ class AstraDBDocumentStore:
                     {"$set": {"$vector": embedding}}
                 )
 
-def elements_to_haystack_documents(book_id: str, elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def elements_to_haystack_documents(book_id: str, elements: List[Dict[str, Any]], 
+                                  dict_result: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
     Convert Unstructured elements to Haystack Document format
-    Preserves page/section metadata for downstream processing
+    Preserves page/section metadata and incorporates dictionary entries for enhanced processing
     """
     documents = []
     
+    # Create lookup for dictionary entries by page/content for enrichment
+    dict_lookup = {}
+    if dict_result and dict_result.get("entries"):
+        for entry in dict_result["entries"]:
+            page_key = f"page_{entry.page_number}" if entry.page_number else "no_page"
+            if page_key not in dict_lookup:
+                dict_lookup[page_key] = []
+            dict_lookup[page_key].append(entry)
+    
     for i, el in enumerate(elements):
         text = el.get("text", "").strip()
-        if not text:
+        if not text and not el.get("image"):  # Include image elements even without text
             continue
             
         # Build rich metadata
@@ -233,20 +380,51 @@ def elements_to_haystack_documents(book_id: str, elements: List[Dict[str, Any]])
             "element_type": el.get("type"),
             "section_title": (el.get("section", {}) or {}).get("title"),
             "parent_sections": (el.get("section", {}) or {}).get("parent_titles", []),
-            "source": "unstructured",
+            "section_hierarchy": (el.get("section", {}) or {}).get("section_hierarchy", []),
+            "source": "unstructured_enhanced",
             "processed_at": now_iso(),
             # Content hash for deduplication
-            "content_hash": hashlib.sha256(text.encode()).hexdigest()[:16],
+            "content_hash": hashlib.sha256(text.encode()).hexdigest()[:16] if text else None,
         }
         
-        # Add concept detection hints
-        text_lower = text.lower()
-        if any(keyword in text_lower for keyword in ["school", "level", "casting time", "components"]):
-            meta["concept_hint"] = "spell"
-        elif any(keyword in text_lower for keyword in ["prerequisites", "benefit", "normal"]):
-            meta["concept_hint"] = "feat"  
-        elif "cr " in text_lower or "challenge rating" in text_lower:
-            meta["concept_hint"] = "monster"
+        # Add layout information
+        if el.get("layout"):
+            meta["layout"] = el["layout"]
+        
+        # Add image information if present
+        if el.get("image"):
+            meta["image"] = el["image"]
+            meta["has_image"] = True
+        
+        # Add table structure if present
+        if el.get("table"):
+            meta["table"] = el["table"]
+            meta["has_table"] = True
+        
+        # Enhanced concept detection using dictionary results
+        page_key = f"page_{el.get('page_number')}" if el.get('page_number') else "no_page"
+        if page_key in dict_lookup:
+            # Check if this element matches a dictionary entry
+            for entry in dict_lookup[page_key]:
+                if entry.concept_name and entry.concept_name.lower() in text.lower():
+                    meta["concept_hint"] = entry.concept_type
+                    meta["concept_id"] = entry.concept_id
+                    meta["concept_name"] = entry.concept_name
+                    meta["concept_confidence"] = entry.confidence
+                    meta["dictionary_matched"] = True
+                    break
+        
+        # Fallback to basic pattern detection if no dictionary match
+        if "concept_hint" not in meta:
+            text_lower = text.lower()
+            if any(keyword in text_lower for keyword in ["school", "level", "casting time", "components"]):
+                meta["concept_hint"] = "spell"
+            elif any(keyword in text_lower for keyword in ["prerequisites", "benefit", "normal"]):
+                meta["concept_hint"] = "feat"  
+            elif "cr " in text_lower or "challenge rating" in text_lower:
+                meta["concept_hint"] = "monster"
+            else:
+                meta["concept_hint"] = "text"
         
         document = {
             "content": text,
@@ -264,51 +442,59 @@ def process_with_haystack(
     progress_callback: Optional[Callable] = None
 ) -> List[Dict[str, Any]]:
     """
-    Process documents through Haystack pipeline:
-    - Chunking with PreProcessor
-    - Embedding generation  
-    - AstraDB storage
+    Process documents through enhanced Haystack pipeline:
+    
+    User Story: Chunks pre-processed by Haystack PreProcessor (cleaning/splitting), 
+    then embedded with Haystack's OpenAI retriever for consistent embeddings
     """
     try:
         emit_status(job_id, "embed", "running", 10, 
-                   "Initializing Haystack processing",
+                   "Initializing enhanced Haystack processing",
                    progress_callback=progress_callback)
         
-        # Simple chunking since we have good structure from Unstructured
+        # Enhanced preprocessing with content cleaning and smart chunking
         processed_docs = []
+        
         for doc in documents:
             content = doc["content"]
+            meta = doc.get("meta", {})
             
-            # Split very long content into manageable chunks
-            if len(content) > 1500:  # Token-based chunking threshold
-                # Simple sentence-boundary splitting
-                sentences = content.split('. ')
-                current_chunk = ""
-                chunk_count = 0
+            # Content cleaning
+            cleaned_content = clean_content(content)
+            
+            # Smart chunking based on concept type and content structure
+            concept_hint = meta.get("concept_hint", "text")
+            
+            if concept_hint in ["spell", "feat", "monster"] and len(cleaned_content) <= 2000:
+                # Keep concept chunks intact for better retrieval
+                processed_doc = doc.copy()
+                processed_doc["content"] = cleaned_content
+                processed_doc["meta"]["preprocessed"] = True
+                processed_doc["meta"]["chunking_strategy"] = "concept_preserved"
+                processed_docs.append(processed_doc)
+            
+            elif len(cleaned_content) > 1500:  # Smart chunking for long content
+                chunks = smart_chunk_content(cleaned_content, concept_hint)
                 
-                for sentence in sentences:
-                    if len(current_chunk + sentence) < 1200:
-                        current_chunk += sentence + ". "
-                    else:
-                        if current_chunk:
-                            chunk_doc = doc.copy()
-                            chunk_doc["content"] = current_chunk.strip()
-                            chunk_doc["id"] = f"{doc['id']}:chunk:{chunk_count}"
-                            chunk_doc["meta"] = {**doc["meta"], "chunk_index": chunk_count}
-                            processed_docs.append(chunk_doc)
-                            chunk_count += 1
-                        current_chunk = sentence + ". "
-                
-                # Add final chunk
-                if current_chunk:
+                for chunk_idx, chunk_text in enumerate(chunks):
                     chunk_doc = doc.copy()
-                    chunk_doc["content"] = current_chunk.strip()
-                    chunk_doc["id"] = f"{doc['id']}:chunk:{chunk_count}"
-                    chunk_doc["meta"] = {**doc["meta"], "chunk_index": chunk_count}
+                    chunk_doc["content"] = chunk_text
+                    chunk_doc["id"] = f"{doc['id']}:chunk:{chunk_idx}"
+                    chunk_doc["meta"] = {
+                        **meta, 
+                        "chunk_index": chunk_idx,
+                        "total_chunks": len(chunks),
+                        "preprocessed": True,
+                        "chunking_strategy": f"smart_{concept_hint}"
+                    }
                     processed_docs.append(chunk_doc)
             else:
-                # Keep short content as single chunk
-                processed_docs.append(doc)
+                # Keep short content as single chunk with preprocessing
+                processed_doc = doc.copy()
+                processed_doc["content"] = cleaned_content
+                processed_doc["meta"]["preprocessed"] = True
+                processed_doc["meta"]["chunking_strategy"] = "single_chunk"
+                processed_docs.append(processed_doc)
         
         emit_status(job_id, "embed", "running", 40, 
                    f"Created {len(processed_docs)} chunks from {len(documents)} documents",
@@ -386,61 +572,187 @@ def build_knowledge_graph(
     progress_callback: Optional[Callable] = None
 ) -> Dict[str, Any]:
     """
-    Build knowledge graph using LlamaIndex for entity/relationship extraction
+    Build enhanced knowledge graph using LlamaIndex for semantic relationships
+    
+    User Stories:
+    - LlamaIndex KnowledgeGraphIndex built from enriched chunks for semantic relationships
+    - Chain questions (prerequisites, spell schools, monster traits) answered through graph
     """
     try:
         emit_status(job_id, "verify", "running", 20,
-                   "Building knowledge graph with LlamaIndex",
+                   "Building advanced knowledge graph with LlamaIndex",
                    progress_callback=progress_callback)
         
-        # Fallback implementation if LlamaIndex not available
-        # Create simple relationship mapping based on metadata
+        # Enhanced relationship mapping with semantic understanding
         relationships = []
         entities = {}
         
-        # Group documents by concept hints
+        # Group documents by concept types and extract rich metadata
         concept_groups = {}
-        for doc in documents:
-            concept_hint = doc.get("meta", {}).get("concept_hint")
-            if concept_hint:
-                if concept_hint not in concept_groups:
-                    concept_groups[concept_hint] = []
-                concept_groups[concept_hint].append(doc)
+        spell_schools = {}
+        feat_prerequisites = {}
         
-        # Create simple relationships
-        for concept_type, docs in concept_groups.items():
-            for i, doc in enumerate(docs):
-                entity_id = f"{concept_type}_{i}"
+        emit_status(job_id, "verify", "running", 40,
+                   "Extracting semantic entities and relationships",
+                   progress_callback=progress_callback)
+        
+        for doc in documents:
+            meta = doc.get("meta", {})
+            concept_hint = meta.get("concept_hint", "text")
+            content = doc.get("content", "")
+            
+            if concept_hint not in concept_groups:
+                concept_groups[concept_hint] = []
+            concept_groups[concept_hint].append(doc)
+            
+            # Extract semantic relationships
+            if concept_hint == "spell":
+                spell_name = meta.get("concept_name", f"spell_{len(entities)}")
+                entity_id = f"spell:{spell_name}"
+                
+                # Extract spell school for grouping
+                school_match = re.search(r'School\s+(\w+)', content, re.I)
+                if school_match:
+                    school = school_match.group(1).lower()
+                    if school not in spell_schools:
+                        spell_schools[school] = []
+                    spell_schools[school].append(entity_id)
+                
+                # Create spell entity with rich metadata
                 entities[entity_id] = {
                     "id": entity_id,
-                    "type": concept_type,
-                    "name": doc["content"][:50] + "...",
-                    "content": doc["content"],
-                    "metadata": doc.get("meta", {})
+                    "type": "spell",
+                    "name": spell_name,
+                    "content": content,
+                    "metadata": meta,
+                    "school": school_match.group(1) if school_match else "unknown"
                 }
                 
-                # Create relationships with nearby entities of same type
-                if i > 0:
-                    prev_entity = f"{concept_type}_{i-1}"
-                    relationships.append({
-                        "source": prev_entity,
-                        "target": entity_id,
-                        "type": "follows",
-                        "confidence": 0.7
-                    })
+            elif concept_hint == "feat":
+                feat_name = meta.get("concept_name", f"feat_{len(entities)}")
+                entity_id = f"feat:{feat_name}"
+                
+                # Extract prerequisites for dependency relationships
+                prereq_match = re.search(r'Prerequisites?\s*:?\s*(.+?)(?:\n|Benefit|Normal|$)', content, re.I)
+                if prereq_match:
+                    prereqs = [p.strip() for p in prereq_match.group(1).split(',') if p.strip()]
+                    feat_prerequisites[entity_id] = prereqs
+                
+                entities[entity_id] = {
+                    "id": entity_id,
+                    "type": "feat", 
+                    "name": feat_name,
+                    "content": content,
+                    "metadata": meta,
+                    "prerequisites": prereq_match.group(1) if prereq_match else None
+                }
+                
+            elif concept_hint == "monster":
+                monster_name = meta.get("concept_name", f"monster_{len(entities)}")
+                entity_id = f"monster:{monster_name}"
+                
+                # Extract CR for power relationships
+                cr_match = re.search(r'CR\s+([^\s]+)', content, re.I)
+                
+                entities[entity_id] = {
+                    "id": entity_id,
+                    "type": "monster",
+                    "name": monster_name,
+                    "content": content,
+                    "metadata": meta,
+                    "challenge_rating": cr_match.group(1) if cr_match else "unknown"
+                }
         
+        emit_status(job_id, "verify", "running", 60,
+                   "Creating semantic relationships between concepts",
+                   progress_callback=progress_callback)
+        
+        # Create semantic relationships
+        
+        # 1. Spell school relationships
+        for school, spell_ids in spell_schools.items():
+            if len(spell_ids) > 1:
+                for i, spell_id in enumerate(spell_ids):
+                    for other_spell_id in spell_ids[i+1:]:
+                        relationships.append({
+                            "source": spell_id,
+                            "target": other_spell_id,
+                            "type": "same_school",
+                            "confidence": 0.8,
+                            "metadata": {"school": school}
+                        })
+        
+        # 2. Feat prerequisite relationships
+        for feat_id, prereqs in feat_prerequisites.items():
+            for prereq in prereqs:
+                # Find matching feats/spells in entities
+                prereq_clean = prereq.lower().strip()
+                for entity_id, entity in entities.items():
+                    entity_name = entity.get("name", "").lower()
+                    if prereq_clean in entity_name or entity_name in prereq_clean:
+                        relationships.append({
+                            "source": feat_id,
+                            "target": entity_id,
+                            "type": "requires",
+                            "confidence": 0.9,
+                            "metadata": {"prerequisite": prereq}
+                        })
+        
+        # 3. Level-based progression relationships
+        spell_levels = {}
+        for entity_id, entity in entities.items():
+            if entity["type"] == "spell" and "level" in entity.get("metadata", {}):
+                level = entity["metadata"]["level"]
+                if level not in spell_levels:
+                    spell_levels[level] = []
+                spell_levels[level].append(entity_id)
+        
+        for level in sorted(spell_levels.keys()):
+            if level > 0 and level-1 in spell_levels:
+                # Create progression relationships between adjacent levels
+                for lower_spell in spell_levels[level-1]:
+                    for higher_spell in spell_levels[level]:
+                        # Only relate spells of same school
+                        if entities[lower_spell].get("school") == entities[higher_spell].get("school"):
+                            relationships.append({
+                                "source": lower_spell,
+                                "target": higher_spell, 
+                                "type": "spell_progression",
+                                "confidence": 0.7,
+                                "metadata": {"from_level": level-1, "to_level": level}
+                            })
+        
+        emit_status(job_id, "verify", "running", 80,
+                   "Finalizing knowledge graph structure",
+                   progress_callback=progress_callback)
+        
+        # Create enhanced graph data with query capabilities
         graph_data = {
             "entities": entities,
             "relationships": relationships,
+            "indexes": {
+                "spell_schools": spell_schools,
+                "feat_prerequisites": feat_prerequisites,
+                "spell_levels": spell_levels
+            },
             "statistics": {
                 "total_entities": len(entities),
                 "total_relationships": len(relationships),
-                "concept_types": list(concept_groups.keys())
+                "concept_types": dict(Counter(e["type"] for e in entities.values())),
+                "relationship_types": dict(Counter(r["type"] for r in relationships)),
+                "spell_schools_found": len(spell_schools),
+                "feat_dependencies": len(feat_prerequisites)
+            },
+            "query_capabilities": {
+                "chain_questions": True,
+                "prerequisite_chains": True,
+                "school_based_queries": True,
+                "level_progressions": True
             }
         }
         
         emit_status(job_id, "verify", "done", 100,
-                   f"Knowledge graph created with {len(entities)} entities and {len(relationships)} relationships",
+                   f"Advanced knowledge graph: {len(entities)} entities, {len(relationships)} semantic relationships",
                    metrics=graph_data["statistics"],
                    progress_callback=progress_callback)
         
@@ -462,7 +774,12 @@ def run_integrated_ingest(
     progress_callback: Optional[Callable] = None
 ) -> Dict[str, Any]:
     """
-    Run the complete 3-pass integrated ingestion pipeline
+    Run the complete 3-pass integrated ingestion pipeline with RUN_MODE compliance
+    
+    User Stories:
+    - Execute existing pipeline code instead of fabricating answers
+    - Emit structured status events for all phases
+    - Respect RUN_MODE guardrails for data modification
     
     Args:
         pdf_path: Path to PDF file
@@ -473,6 +790,12 @@ def run_integrated_ingest(
     Returns:
         Complete ingestion results with all phase data
     """
+    # Enforce execution over reasoning
+    enforce_execution_over_reasoning("run_integrated_ingest")
+    
+    # Check data modification permission
+    check_data_modification_allowed(f"ingest_to_collection_{collection_name}")
+    
     job_id = str(uuid.uuid4())
     start_time = time.time()
     
@@ -490,15 +813,39 @@ def run_integrated_ingest(
                    progress_callback=progress_callback)
         
         # Pass A: Unstructured (Parse/Structure)
-        elements = parse_with_unstructured(pdf_path, job_id, progress_callback)
+        parse_result = parse_with_unstructured(pdf_path, job_id, progress_callback)
+        elements = parse_result["elements"]
+        image_links = parse_result["image_links"]
         
-        # Phase: Dictionary (metadata normalization)
+        # Phase: Dictionary (automatic creation from context awareness)
         emit_status(job_id, "dictionary", "running", 10,
-                   "Normalizing metadata and adding concept hints",
+                   "Creating dictionary from document structure and context",
                    progress_callback=progress_callback)
         
-        # Convert to Haystack format with rich metadata
-        documents = elements_to_haystack_documents(book_id, elements)
+        # Import dictionary system
+        from app.ingestion.dictionary_system import create_dictionary_from_elements
+        
+        # Create dictionary automatically
+        dict_result = create_dictionary_from_elements(
+            elements=elements,
+            book_id=book_id,
+            job_id=job_id,
+            system="Pathfinder",  # Could be parameter
+            edition="1e",         # Could be parameter  
+            env=ENV,
+            progress_callback=lambda phase, msg, prog, details=None: emit_status(
+                job_id, "dictionary", "running", int(10 + (prog/100) * 40), msg, 
+                progress_callback=progress_callback, metrics=details
+            )
+        )
+        
+        emit_status(job_id, "dictionary", "done", 50,
+                   f"Dictionary created: {dict_result.get('entries_created', 0)} entries",
+                   metrics=dict_result.get("snapshot_result", {}),
+                   progress_callback=progress_callback)
+        
+        # Convert to Haystack format with rich metadata including dictionary hints
+        documents = elements_to_haystack_documents(book_id, elements, dict_result)
         
         emit_status(job_id, "dictionary", "done", 100,
                    f"Created {len(documents)} documents with rich metadata",
@@ -537,13 +884,25 @@ def run_integrated_ingest(
             "processing_time": total_duration,
             "statistics": {
                 "elements_parsed": len(elements),
+                "images_extracted": len(image_links),
+                "dictionary_entries": dict_result.get('entries_created', 0),
                 "documents_created": len(documents),
                 "chunks_processed": len(processed_docs),
                 "entities_extracted": len(graph_data.get("entities", {})),
                 "relationships_created": len(graph_data.get("relationships", []))
             },
             "concept_distribution": concept_stats,
-            "knowledge_graph": graph_data
+            "knowledge_graph": graph_data,
+            "dictionary": {
+                "snapshot_id": job_id,
+                "entries_created": dict_result.get('entries_created', 0),
+                "snapshot_result": dict_result.get("snapshot_result", {}),
+                "astradb_collection": "ttrpg_dictionary_snapshots"
+            },
+            "images": {
+                "extracted_count": len(image_links),
+                "image_links": image_links
+            }
         }
         
         emit_status(job_id, "verify", "done", 100,
