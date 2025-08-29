@@ -1450,9 +1450,18 @@ class Handler(BaseHTTPRequestHandler):
 </html>
 """
             self._send_html(200, admin_html)
-        elif path == "/admin/ingestion":
+        elif path.startswith("/admin/ingestion"):
             try:
-                html_content = self._get_ingestion_page()
+                # Parse URL parameters for auto-population
+                url_parts = urlparse(self.path)
+                query_params = parse_qs(url_parts.query)
+                
+                # Extract parameters
+                file_param = query_params.get('file', [''])[0]
+                title_param = query_params.get('title', [''])[0] 
+                tags_param = query_params.get('tags', [''])[0]
+                
+                html_content = self._get_ingestion_page(file_param, title_param, tags_param)
                 self._send_html(200, html_content)
             except Exception as e:
                 logger.error(f"Error loading ingestion page: {str(e)}")
@@ -2728,8 +2737,8 @@ class Handler(BaseHTTPRequestHandler):
         }
         """
     
-    def _get_ingestion_page(self):
-        """Get ingestion management page"""
+    def _get_ingestion_page(self, file_name='', title='', tags=''):
+        """Get ingestion management page with optional pre-filled values"""
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -2758,12 +2767,12 @@ class Handler(BaseHTTPRequestHandler):
                 </div>
                 <div style="margin: 10px 0;">
                     <label for="titleInput" style="display: block; margin-bottom: 5px;">Title (optional):</label>
-                    <input type="text" id="titleInput" name="title" placeholder="Document title..." 
+                    <input type="text" id="titleInput" name="title" value="{title}" placeholder="Document title..." 
                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
                 </div>
                 <div style="margin: 10px 0;">
                     <label for="tagsInput" style="display: block; margin-bottom: 5px;">Tags (comma-separated):</label>
-                    <input type="text" id="tagsInput" name="tags" placeholder="rulebook, spells, combat..." 
+                    <input type="text" id="tagsInput" name="tags" value="{tags}" placeholder="rulebook, spells, combat..." 
                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
                 </div>
                 <div style="margin: 10px 0;">
@@ -2784,6 +2793,25 @@ class Handler(BaseHTTPRequestHandler):
         </div>
         
         <script>
+            // Clean URL parameters on page load for security/UX
+            window.addEventListener('load', function() {{
+                if (window.location.search) {{
+                    // Clean the URL without refreshing the page
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                    window.history.replaceState({{path: newUrl}}, '', newUrl);
+                    
+                    // Show file info if provided
+                    const fileName = '{file_name}';
+                    if (fileName) {{
+                        const statusDiv = document.getElementById('uploadStatus');
+                        statusDiv.style.display = 'block';
+                        statusDiv.innerHTML = '<div style="background: rgba(0,100,200,0.2); padding: 10px; border-radius: 5px; border-left: 4px solid #00ffff;">' +
+                                            '<strong>📁 File Referenced:</strong> ' + fileName + '<br>' +
+                                            '<small>Please select the file using the file input above to proceed with ingestion.</small></div>';
+                    }}
+                }}
+            }});
+            
             function uploadFile() {{
                 const form = document.getElementById('uploadForm');
                 const statusDiv = document.getElementById('uploadStatus');
