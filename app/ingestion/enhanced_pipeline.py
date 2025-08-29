@@ -193,19 +193,35 @@ class EnhancedDocumentLoader:
     
     def _load_pdf(self, path: Path) -> List[PageBlock]:
         """Load PDF using existing PDFParser"""
-        result = self.pdf_parser.extract_text(str(path))
-        if not result.get("success", False):
+        # Create empty metadata dict for PDF parsing
+        metadata = {"source": str(path)}
+        result = self.pdf_parser.parse_pdf(str(path), metadata)
+        
+        if "error" in result:
             raise ValueError(f"PDF parsing failed: {result.get('error', 'Unknown error')}")
         
         pages = []
-        page_texts = result.get("pages", [])
-        for i, page_text in enumerate(page_texts, start=1):
-            normalized = self._normalize_whitespace(page_text)
+        # The PDFParser creates chunks, but we need the raw pages
+        # Let's extract from chunks_data which contains page info
+        chunks_data = result.get("chunks_data", [])
+        
+        # Group chunks by page to reconstruct pages
+        page_texts = {}
+        for chunk in chunks_data:
+            page_num = chunk.get("page_number", 1)
+            if page_num not in page_texts:
+                page_texts[page_num] = []
+            page_texts[page_num].append(chunk.get("text", ""))
+        
+        for page_num in sorted(page_texts.keys()):
+            combined_text = "\n".join(page_texts[page_num])
+            normalized = self._normalize_whitespace(combined_text)
             pages.append(PageBlock(
-                page_number=i,
+                page_number=page_num,
                 text=normalized,
                 metadata={"extraction_method": "pypdf2"}
             ))
+        
         return pages
     
     def _text_to_pages(self, text: str, format_type: str) -> List[PageBlock]:
