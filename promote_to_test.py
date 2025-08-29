@@ -46,10 +46,14 @@ def validate_current_build():
     result = subprocess.run(['git', 'status', '--porcelain'], 
                           capture_output=True, text=True)
     
-    # Filter out untracked files (??) and ignore settings files
+    # Filter out untracked files (??) and ignore settings/cache files
     uncommitted_changes = []
     for line in result.stdout.strip().split('\n'):
-        if line.strip() and not line.startswith('??') and not 'settings.local.json' in line:
+        if (line.strip() and 
+            not line.startswith('??') and 
+            not 'settings.local.json' in line and
+            not '__pycache__' in line and
+            not '.pyc' in line):
             uncommitted_changes.append(line.strip())
     
     if uncommitted_changes:
