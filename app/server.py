@@ -2201,7 +2201,7 @@ class Handler(BaseHTTPRequestHandler):
             base_title = form.getvalue('title', '')
             source_type = form.getvalue('source_type', 'manual_upload')
             tags = form.getvalue('tags', '').split(',') if form.getvalue('tags') else []
-            pipeline_type = form.getvalue('pipeline_type', 'standard')  # 'standard' or 'enhanced'
+            pipeline_type = form.getvalue('pipeline_type', 'enhanced')  # Always use enhanced 3rd party pipeline
             
             # Save uploaded files temporarily and create batch ingestion
             upload_dir = Path("uploads")
@@ -2775,18 +2775,15 @@ class Handler(BaseHTTPRequestHandler):
                     <input type="text" id="tagsInput" name="tags" value="{tags}" placeholder="rulebook, spells, combat..." 
                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
                 </div>
-                <div style="margin: 10px 0;">
-                    <label for="pipelineType" style="display: block; margin-bottom: 5px;">Processing Pipeline:</label>
-                    <select id="pipelineType" name="pipeline_type" 
-                            style="width: 300px; background: rgba(0,0,0,0.5); color: #00ffff; border: 1px solid #00ffff; padding: 5px;">
-                        <option value="standard">Standard Pipeline (3-Pass)</option>
-                        <option value="enhanced">Enhanced Pipeline (Advanced Chunking)</option>
-                    </select>
+                <div style="margin: 10px 0; padding: 10px; background: rgba(0,100,0,0.1); border-left: 4px solid #00ff00; border-radius: 4px;">
+                    <strong>🚀 Enhanced Pipeline Enabled</strong>
                     <br><small style="color: #aaa; margin-top: 5px;">
-                        Enhanced pipeline provides improved section detection and optimized chunk sizing for better RAG performance
+                        Using advanced 3rd party integration: Unstructured → Haystack → LlamaIndex with automatic dictionary creation, 
+                        image preservation, knowledge graphs, and RUN_MODE compliance.
                     </small>
                 </div>
                 <input type="hidden" name="source_type" value="manual_upload">
+                <input type="hidden" name="pipeline_type" value="enhanced">
                 <button type="submit">Upload and Process</button>
             </form>
             <div id="uploadStatus" style="margin-top: 20px; padding: 10px; display: none;"></div>
