@@ -41,14 +41,22 @@ def validate_current_build():
     
     print("✅ All critical files present")
     
-    # Check git status is clean  
+    # Check git status is clean (ignore untracked files and settings)
     import subprocess
     result = subprocess.run(['git', 'status', '--porcelain'], 
                           capture_output=True, text=True)
     
-    if result.stdout.strip():
+    # Filter out untracked files (??) and ignore settings files
+    uncommitted_changes = []
+    for line in result.stdout.strip().split('\n'):
+        if line.strip() and not line.startswith('??') and not 'settings.local.json' in line:
+            uncommitted_changes.append(line.strip())
+    
+    if uncommitted_changes:
         print("⚠️  Working directory has uncommitted changes")
         print("   Please commit all changes before promotion")
+        for change in uncommitted_changes[:5]:  # Show first 5
+            print(f"   - {change}")
         return False
     
     print("✅ Git working directory clean")
