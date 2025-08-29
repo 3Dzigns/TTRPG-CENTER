@@ -2758,7 +2758,7 @@ class Handler(BaseHTTPRequestHandler):
         <div class="content-card">
             <h3>Upload TTRPG Materials</h3>
             <p>Upload and process source materials for the RAG system.</p>
-            <form id="uploadForm" enctype="multipart/form-data" style="margin: 20px 0;">
+            <form id="uploadForm" method="POST" action="/api/ingestion/upload" enctype="multipart/form-data" style="margin: 20px 0;" onsubmit="return handleFormSubmit(event);">
                 <div style="margin: 10px 0;">
                     <label for="fileInput" style="display: block; margin-bottom: 5px;">Select Files:</label>
                     <input type="file" id="fileInput" name="file" accept=".pdf,.txt,.md" multiple required 
@@ -2787,7 +2787,7 @@ class Handler(BaseHTTPRequestHandler):
                     </small>
                 </div>
                 <input type="hidden" name="source_type" value="manual_upload">
-                <button type="submit" onclick="uploadFile(); return false;">Upload and Process</button>
+                <button type="submit">Upload and Process</button>
             </form>
             <div id="uploadStatus" style="margin-top: 20px; padding: 10px; display: none;"></div>
         </div>
@@ -2812,9 +2812,23 @@ class Handler(BaseHTTPRequestHandler):
                 }}
             }});
             
-            function uploadFile() {{
+            function handleFormSubmit(event) {{
+                event.preventDefault(); // Prevent default form submission
+                
                 const form = document.getElementById('uploadForm');
                 const statusDiv = document.getElementById('uploadStatus');
+                const fileInput = document.getElementById('fileInput');
+                
+                // Store file list to preserve it
+                const selectedFiles = fileInput.files;
+                
+                // Validate file selection
+                if (!selectedFiles || selectedFiles.length === 0) {{
+                    statusDiv.style.display = 'block';
+                    statusDiv.innerHTML = '<p style="color: #ff4444;">❌ Please select at least one file.</p>';
+                    return false;
+                }}
+                
                 const formData = new FormData(form);
                 
                 statusDiv.style.display = 'block';
@@ -2863,14 +2877,21 @@ class Handler(BaseHTTPRequestHandler):
                             pollIngestionProgress(ingestionId);
                         }}
                         
+                        // Only reset form on successful upload
                         form.reset();
                     }} else {{
-                        statusDiv.innerHTML = '<p style="color: #ff4444;">❌ Upload failed: ' + (data.error || 'Unknown error') + '</p>';
+                        // On upload failure, preserve file selection and show error
+                        statusDiv.innerHTML = '<p style="color: #ff4444;">❌ Upload failed: ' + (data.error || 'Unknown error') + '</p>' +
+                                            '<p style="color: #aaa; font-size: 14px;">Files remain selected. Fix the issue and try again.</p>';
                     }}
                 }})
                 .catch(error => {{
-                    statusDiv.innerHTML = '<p style="color: #ff4444;">❌ Upload failed: ' + error.message + '</p>';
+                    // On network error, preserve file selection
+                    statusDiv.innerHTML = '<p style="color: #ff4444;">❌ Network error: ' + error.message + '</p>' +
+                                        '<p style="color: #aaa; font-size: 14px;">Files remain selected. Check connection and try again.</p>';
                 }});
+                
+                return false; // Prevent default form submission
             }}
             
             function pollIngestionProgress(ingestionId) {{
