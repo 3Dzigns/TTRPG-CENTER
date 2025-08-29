@@ -345,7 +345,7 @@ git push -f origin main  # Only if safe to force push
 """
     
     instructions_file = Path("DEPLOYMENT_TEST.md")
-    with open(instructions_file, 'w') as f:
+    with open(instructions_file, 'w', encoding='utf-8') as f:
         f.write(instructions.strip())
     
     print(f"📝 Deployment instructions created: {instructions_file}")
