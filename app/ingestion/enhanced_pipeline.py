@@ -140,7 +140,7 @@ class EnhancedChunk:
     def to_vector_doc(self) -> Dict[str, Any]:
         """Convert to AstraDB document format"""
         return {
-            "_id": self.chunk_id,
+            "id": self.chunk_id,  # Use "id" not "_id" for vector store
             "text": self.content,  # Map to existing schema
             "page": self.page_start,  # Map to existing schema
             "source_id": self.content_hash,  # Map to existing schema
@@ -631,7 +631,7 @@ class EnhancedIngestionPipeline:
             
             try:
                 # Use existing embedding service
-                embeddings = self.embedding_service.get_embeddings(texts)
+                embeddings = self.embedding_service.get_embeddings_batch(texts)
                 
                 # Assign embeddings to chunks
                 for chunk, embedding in zip(batch, embeddings):
