@@ -176,18 +176,27 @@ class EnhancedDocumentLoader:
     
     def __init__(self, pdf_parser: PDFParser):
         self.pdf_parser = pdf_parser
+        self.progress_callback = None
+        
+    def set_progress_callback(self, callback):
+        """Set progress callback for detailed progress reporting"""
+        self.progress_callback = callback
         
     def load(self, file_path: str) -> List[PageBlock]:
-        """Load document into page blocks"""
+        """Load document into page blocks with progress reporting"""
         path = Path(file_path)
         suffix = path.suffix.lower()
         
         if suffix == '.pdf':
             return self._load_pdf(path)
         elif suffix in ['.md', '.markdown']:
+            if self.progress_callback:
+                self.progress_callback("📄 Parsing", "Reading markdown file", 10.0)
             text = path.read_text(encoding="utf-8", errors="ignore")
             return self._text_to_pages(text, "markdown")
         elif suffix == '.txt':
+            if self.progress_callback:
+                self.progress_callback("📄 Parsing", "Reading text file", 10.0)
             text = path.read_text(encoding="utf-8", errors="ignore") 
             return self._text_to_pages(text, "text")
         else:
@@ -587,7 +596,8 @@ class EnhancedIngestionPipeline:
             
             # STAGE 4: Database Storage
             update_progress("💾 Storing", "Saving chunks to AstraDB vector store", 85.0)
-            self._persist_chunks(chunks)
+            stored_count = self._persist_chunks(chunks)
+            update_progress("💾 Storing", f"✅ Stored {stored_count} chunks to AstraDB successfully", 90.0)
             
             # STAGE 5: Dictionary & Metadata
             update_progress("📚 Dictionary", "Updating knowledge dictionary", 95.0)
@@ -628,109 +638,89 @@ class EnhancedIngestionPipeline:
             }
     
     def _add_embeddings(self, chunks: List[EnhancedChunk], update_progress: callable):
-        """Add embeddings to chunks using OpenAI service with timeout protection"""
+        """Add embeddings to chunks using OpenAI service with circuit breaker protection"""
         if not self.embedding_service:
             logger.info("No embedding service available, skipping embeddings")
             return
             
-        batch_size = 32  # Optimize for API limits
+        batch_size = 16  # Smaller batches for better error recovery
         total = len(chunks)
-        max_retries = 3
-        timeout_seconds = 30
-        circuit_breaker_failures = 0
-        circuit_breaker_threshold = 5
+        consecutive_failures = 0
+        max_consecutive_failures = 2  # Stop after 2 consecutive batch failures
+        total_embedded = 0
         
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             texts = [chunk.content for chunk in batch]
+            batch_num = i//batch_size + 1
+            total_batches = (total + batch_size - 1)//batch_size
             
-            # Circuit breaker - if too many failures, skip remaining batches
-            if circuit_breaker_failures >= circuit_breaker_threshold:
-                logger.warning(f"Circuit breaker activated: skipping remaining embeddings after {circuit_breaker_failures} failures")
-                break
+            # Circuit breaker - stop if too many consecutive failures
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(f"🚨 CIRCUIT BREAKER: Stopping after {consecutive_failures} consecutive embedding failures")
+                update_progress("❌ Error", f"Embedding failed - {consecutive_failures} consecutive batch failures", 65.0)
+                raise Exception(f"Embedding circuit breaker activated - too many API failures (OpenAI key may be invalid)")
             
-            retry_count = 0
-            success = False
-            
-            while retry_count < max_retries and not success:
-                try:
-                    batch_num = i//batch_size + 1
-                    total_batches = (total + batch_size - 1)//batch_size
-                    logger.info(f"Processing embedding batch {batch_num}/{total_batches} (attempt {retry_count + 1})")
-                    
-                    # Use existing embedding service with threading timeout
-                    import threading
-                    import queue
-                    
-                    result_queue = queue.Queue()
-                    error_queue = queue.Queue()
-                    
-                    def embed_worker():
-                        try:
-                            embeddings = self.embedding_service.get_embeddings_batch(texts)
-                            result_queue.put(embeddings)
-                        except Exception as e:
-                            error_queue.put(e)
-                    
-                    # Start embedding in a separate thread
-                    embed_thread = threading.Thread(target=embed_worker)
-                    embed_thread.daemon = True
-                    embed_thread.start()
-                    
-                    # Wait for result with timeout
-                    embed_thread.join(timeout=timeout_seconds)
-                    
-                    if embed_thread.is_alive():
-                        # Timeout occurred
-                        logger.warning(f"Embedding batch {i//batch_size + 1} timed out after {timeout_seconds} seconds")
-                        raise TimeoutError(f"Embedding timeout after {timeout_seconds} seconds")
-                    
-                    # Check for errors
-                    if not error_queue.empty():
-                        raise error_queue.get()
-                    
-                    # Get results
-                    if not result_queue.empty():
-                        embeddings = result_queue.get()
-                        
-                        # Assign embeddings to chunks
-                        for chunk, embedding in zip(batch, embeddings):
-                            chunk.embedding = embedding
-                        
-                        success = True
-                        circuit_breaker_failures = 0  # Reset on success
-                        
-                        progress = 60.0 + (25.0 * (i + len(batch)) / total)
-                        update_progress("🧠 AI Processing", f"Embedded batch {batch_num}/{total_batches} - {i + len(batch)}/{total} chunks complete", progress)
-                    else:
-                        raise Exception("No embeddings returned from service")
-                        
-                except (TimeoutError, Exception) as e:
-                    retry_count += 1
-                    circuit_breaker_failures += 1
-                    logger.warning(f"Embedding batch {i//batch_size + 1} failed (attempt {retry_count}): {e}")
-                    
-                    if retry_count < max_retries:
-                        wait_time = 2 ** retry_count  # Exponential backoff
-                        logger.info(f"Retrying in {wait_time} seconds...")
-                        import time
-                        time.sleep(wait_time)
-                    else:
-                        logger.error(f"Failed to embed batch {i//batch_size + 1} after {max_retries} attempts")
-                        # Continue without embeddings for this batch
+            try:
+                logger.info(f"🧠 Processing embedding batch {batch_num}/{total_batches}")
+                update_progress("🧠 AI Processing", f"Processing batch {batch_num}/{total_batches} - {total_embedded} chunks embedded so far", 60.0 + (25.0 * i / total))
+                
+                # Single attempt - let the embedding service handle its own retries
+                embeddings = self.embedding_service.get_embeddings_batch(texts)
+                
+                if not embeddings or len(embeddings) != len(texts):
+                    raise Exception(f"Invalid embeddings: expected {len(texts)}, got {len(embeddings) if embeddings else 0}")
+                
+                # Assign embeddings to chunks
+                for chunk, embedding in zip(batch, embeddings):
+                    if embedding and len(embedding) > 0:  # Only assign valid embeddings
+                        chunk.embedding = embedding
+                        total_embedded += 1
+                
+                consecutive_failures = 0  # Reset on success
+                progress = 60.0 + (25.0 * (i + len(batch)) / total)
+                update_progress("🧠 AI Processing", f"✅ Batch {batch_num}/{total_batches} complete - {total_embedded} chunks embedded", progress)
+                
+            except Exception as e:
+                consecutive_failures += 1
+                logger.error(f"❌ Embedding batch {batch_num} failed: {str(e)[:100]}...")
+                update_progress("🧠 AI Processing", f"❌ Batch {batch_num} failed - {consecutive_failures}/{max_consecutive_failures} failures", 60.0 + (25.0 * i / total))
+                
+                # Continue to next batch (circuit breaker will activate if too many failures)
+                continue
+        
+        logger.info(f"Embedding summary: {total_embedded}/{total} chunks successfully embedded")
+        
+        # Require at least some embeddings to proceed
+        if total_embedded == 0:
+            raise Exception("❌ CRITICAL: No chunks were successfully embedded - cannot store data without embeddings")
+        elif total_embedded < total * 0.5:  # Less than 50% success rate
+            raise Exception(f"❌ CRITICAL: Only {total_embedded}/{total} chunks embedded ({total_embedded/total*100:.1f}%) - insufficient success rate")
     
     def _persist_chunks(self, chunks: List[EnhancedChunk]):
-        """Persist chunks to vector store using existing infrastructure"""
+        """Persist chunks to vector store with verification"""
+        # Only persist chunks that have embeddings
+        chunks_with_embeddings = [chunk for chunk in chunks if hasattr(chunk, 'embedding') and chunk.embedding]
+        
+        if not chunks_with_embeddings:
+            raise Exception("❌ CRITICAL: No chunks have embeddings - cannot store to vector database")
+        
+        logger.info(f"Persisting {len(chunks_with_embeddings)} chunks with embeddings to AstraDB")
+        
         # Convert to format expected by existing vector store
-        docs = [chunk.to_vector_doc() for chunk in chunks]
+        docs = [chunk.to_vector_doc() for chunk in chunks_with_embeddings]
         
         # Use existing vector store's insert method
         result = self.vector_store.insert_chunks(docs)
         
-        if result.get("errors"):
-            logger.warning(f"Some chunks failed to persist: {result['errors']}")
+        # Verify the result
+        if not result or not result.get('success', False):
+            raise Exception(f"❌ CRITICAL: Failed to store chunks to database - {result}")
         
-        logger.info(f"Persisted {result.get('inserted', 0)} chunks to vector store")
+        stored_count = result.get('stored_count', len(docs))
+        logger.info(f"✅ Successfully stored {stored_count} chunks to AstraDB")
+        
+        return stored_count
     
     def _update_dictionary(self, chunks: List[EnhancedChunk]):
         """Update dictionary with terms from chunks"""
