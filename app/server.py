@@ -1000,7 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
 </html>
 """
             self._send_html(200, user_html)
-        elif path == "/admin":
+        elif path == "/admin" or path == "/admin/":
             # Redirect to the admin interface (same as root for now)
             cache_buster = int(time.time())
             admin_html = f"""
