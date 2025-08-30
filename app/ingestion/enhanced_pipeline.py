@@ -558,40 +558,43 @@ class EnhancedIngestionPipeline:
             
             chunker = EnhancedChunker(book_title, system, edition)
             
-            # PASS 1: Parse & Normalize
-            update_progress("Pass 1", "Loading document", 5.0)
+            # STAGE 1: Document Upload & Parsing
+            update_progress("📄 Parsing", "Loading and parsing document", 5.0)
             pages = self.loader.load(file_path)
             
-            update_progress("Pass 1", "Detecting sections", 15.0)
+            update_progress("📄 Parsing", f"Analyzing document structure - found {len(pages)} pages", 15.0)
             pages_with_sections = self.section_detector.detect(pages)
             
-            update_progress("Pass 1", "Parse complete", 25.0, {
+            sections_count = sum(len(secs) for _, secs in pages_with_sections)
+            update_progress("📄 Parsing", f"Document parsed successfully - {len(pages)} pages, {sections_count} sections detected", 25.0, {
                 "pages": len(pages),
-                "sections": sum(len(secs) for _, secs in pages_with_sections)
+                "sections": sections_count
             })
             
-            # PASS 2: Chunk & Annotate
-            update_progress("Pass 2", "Creating optimized chunks", 35.0)
+            # STAGE 2: Content Chunking
+            update_progress("✂️ Chunking", "Breaking content into optimized chunks", 35.0)
             chunks = chunker.chunk(file_path, pages_with_sections)
             
-            update_progress("Pass 2", "Chunk creation complete", 50.0, {
+            avg_tokens = sum(c.token_estimate for c in chunks) // len(chunks) if chunks else 0
+            update_progress("✂️ Chunking", f"Created {len(chunks)} chunks (avg {avg_tokens} tokens each)", 50.0, {
                 "chunks": len(chunks),
-                "avg_tokens": sum(c.token_estimate for c in chunks) // len(chunks) if chunks else 0
+                "avg_tokens": avg_tokens
             })
             
-            # PASS 3: Enrich, Embed & Persist
-            update_progress("Pass 3", "Generating embeddings", 60.0)
+            # STAGE 3: AI Processing & Embeddings
+            update_progress("🧠 AI Processing", "Generating embeddings with OpenAI", 60.0)
             self._add_embeddings(chunks, update_progress)
             
-            update_progress("Pass 3", "Persisting to vector store", 85.0)
+            # STAGE 4: Database Storage
+            update_progress("💾 Storing", "Saving chunks to AstraDB vector store", 85.0)
             self._persist_chunks(chunks)
             
-            # Update dictionary with extracted terms
-            update_progress("Pass 3", "Updating dictionary", 95.0)
+            # STAGE 5: Dictionary & Metadata
+            update_progress("📚 Dictionary", "Updating knowledge dictionary", 95.0)
             self._update_dictionary(chunks)
             
             duration = time.time() - start_time
-            update_progress("Complete", "Ingestion successful", 100.0)
+            update_progress("✅ Complete", f"Successfully processed {len(chunks)} chunks in {duration:.1f}s", 100.0)
             
             # Create manifest
             manifest = {
@@ -614,7 +617,7 @@ class EnhancedIngestionPipeline:
         except Exception as e:
             duration = time.time() - start_time
             logger.error(f"Enhanced ingestion {ingestion_id} failed: {e}")
-            update_progress("Error", f"Ingestion failed: {str(e)}", 0.0)
+            update_progress("❌ Error", f"Ingestion failed: {str(e)}", 0.0)
             
             return {
                 "ingestion_id": ingestion_id,
@@ -651,7 +654,9 @@ class EnhancedIngestionPipeline:
             
             while retry_count < max_retries and not success:
                 try:
-                    logger.info(f"Embedding batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size} (attempt {retry_count + 1})")
+                    batch_num = i//batch_size + 1
+                    total_batches = (total + batch_size - 1)//batch_size
+                    logger.info(f"Processing embedding batch {batch_num}/{total_batches} (attempt {retry_count + 1})")
                     
                     # Use existing embedding service with threading timeout
                     import threading
@@ -696,7 +701,7 @@ class EnhancedIngestionPipeline:
                         circuit_breaker_failures = 0  # Reset on success
                         
                         progress = 60.0 + (25.0 * (i + len(batch)) / total)
-                        update_progress("Pass 3", f"Embedded {i + len(batch)}/{total} chunks", progress)
+                        update_progress("🧠 AI Processing", f"Embedded batch {batch_num}/{total_batches} - {i + len(batch)}/{total} chunks complete", progress)
                     else:
                         raise Exception("No embeddings returned from service")
                         

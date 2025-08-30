@@ -2251,7 +2251,7 @@ class Handler(BaseHTTPRequestHandler):
                     "progress": 0.0,
                     "filename": file_item.filename,
                     "start_time": time.time(),
-                    "current_step": f"Starting ingestion ({i+1} of {len(files)})...",
+                    "current_step": f"🚀 Initializing ingestion ({i+1} of {len(files)})...",
                     "chunks_processed": 0,
                     "total_chunks": 0,
                     "errors": [],
