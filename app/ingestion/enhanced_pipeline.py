@@ -39,9 +39,11 @@ from contextlib import contextmanager
 # Import existing TTRPG Center infrastructure
 from .pdf_parser import PDFParser
 from .dictionary import get_dictionary
-from app.common.embeddings import get_embedding_service
 from app.common.astra_client import get_vector_store
 from app.common.config import load_config
+
+# Import existing TTRPG Center infrastructure
+from app.common.embeddings import get_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -517,9 +519,11 @@ class EnhancedIngestionPipeline:
         # Use existing infrastructure
         self.pdf_parser = PDFParser()
         self.dictionary = get_dictionary()
-        self.embedding_service = get_embedding_service()
         self.vector_store = get_vector_store()
         self.config = load_config()
+        
+        # Initialize OpenAI embedding service (as designed)
+        self.embedding_service = get_embedding_service()
         
         # Enhanced components
         self.loader = EnhancedDocumentLoader(self.pdf_parser)
@@ -621,28 +625,94 @@ class EnhancedIngestionPipeline:
             }
     
     def _add_embeddings(self, chunks: List[EnhancedChunk], update_progress: callable):
-        """Add embeddings to chunks using existing service"""
+        """Add embeddings to chunks using OpenAI service with timeout protection"""
+        if not self.embedding_service:
+            logger.info("No embedding service available, skipping embeddings")
+            return
+            
         batch_size = 32  # Optimize for API limits
         total = len(chunks)
+        max_retries = 3
+        timeout_seconds = 30
+        circuit_breaker_failures = 0
+        circuit_breaker_threshold = 5
         
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             texts = [chunk.content for chunk in batch]
             
-            try:
-                # Use existing embedding service
-                embeddings = self.embedding_service.get_embeddings_batch(texts)
-                
-                # Assign embeddings to chunks
-                for chunk, embedding in zip(batch, embeddings):
-                    chunk.embedding = embedding
+            # Circuit breaker - if too many failures, skip remaining batches
+            if circuit_breaker_failures >= circuit_breaker_threshold:
+                logger.warning(f"Circuit breaker activated: skipping remaining embeddings after {circuit_breaker_failures} failures")
+                break
+            
+            retry_count = 0
+            success = False
+            
+            while retry_count < max_retries and not success:
+                try:
+                    logger.info(f"Embedding batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size} (attempt {retry_count + 1})")
                     
-                progress = 60.0 + (25.0 * (i + len(batch)) / total)
-                update_progress("Pass 3", f"Embedded {i + len(batch)}/{total} chunks", progress)
-                
-            except Exception as e:
-                logger.warning(f"Embedding batch {i//batch_size + 1} failed: {e}")
-                # Continue without embeddings for this batch
+                    # Use existing embedding service with threading timeout
+                    import threading
+                    import queue
+                    
+                    result_queue = queue.Queue()
+                    error_queue = queue.Queue()
+                    
+                    def embed_worker():
+                        try:
+                            embeddings = self.embedding_service.get_embeddings_batch(texts)
+                            result_queue.put(embeddings)
+                        except Exception as e:
+                            error_queue.put(e)
+                    
+                    # Start embedding in a separate thread
+                    embed_thread = threading.Thread(target=embed_worker)
+                    embed_thread.daemon = True
+                    embed_thread.start()
+                    
+                    # Wait for result with timeout
+                    embed_thread.join(timeout=timeout_seconds)
+                    
+                    if embed_thread.is_alive():
+                        # Timeout occurred
+                        logger.warning(f"Embedding batch {i//batch_size + 1} timed out after {timeout_seconds} seconds")
+                        raise TimeoutError(f"Embedding timeout after {timeout_seconds} seconds")
+                    
+                    # Check for errors
+                    if not error_queue.empty():
+                        raise error_queue.get()
+                    
+                    # Get results
+                    if not result_queue.empty():
+                        embeddings = result_queue.get()
+                        
+                        # Assign embeddings to chunks
+                        for chunk, embedding in zip(batch, embeddings):
+                            chunk.embedding = embedding
+                        
+                        success = True
+                        circuit_breaker_failures = 0  # Reset on success
+                        
+                        progress = 60.0 + (25.0 * (i + len(batch)) / total)
+                        update_progress("Pass 3", f"Embedded {i + len(batch)}/{total} chunks", progress)
+                    else:
+                        raise Exception("No embeddings returned from service")
+                        
+                except (TimeoutError, Exception) as e:
+                    retry_count += 1
+                    circuit_breaker_failures += 1
+                    logger.warning(f"Embedding batch {i//batch_size + 1} failed (attempt {retry_count}): {e}")
+                    
+                    if retry_count < max_retries:
+                        wait_time = 2 ** retry_count  # Exponential backoff
+                        logger.info(f"Retrying in {wait_time} seconds...")
+                        import time
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Failed to embed batch {i//batch_size + 1} after {max_retries} attempts")
+                        # Continue without embeddings for this batch
     
     def _persist_chunks(self, chunks: List[EnhancedChunk]):
         """Persist chunks to vector store using existing infrastructure"""
