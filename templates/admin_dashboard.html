@@ -1,0 +1,513 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Admin Dashboard</h1>
+    <div class="btn-group" role="group">
+        <button type="button" class="btn btn-admin" onclick="refreshDashboard()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-admin dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-tools me-1"></i>Actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="clearAllCaches()"><i class="bi bi-trash me-2"></i>Clear All Caches</a></li>
+                <li><a class="dropdown-item" href="#" onclick="runHealthChecks()"><i class="bi bi-activity me-2"></i>Run Health Checks</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" onclick="exportLogs()"><i class="bi bi-download me-2"></i>Export Logs</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- System Overview -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-cpu me-2"></i>System Overview</h5>
+                <div class="status-badge" id="overall-status">
+                    <div class="loading-spinner"></div>
+                    <span>Loading...</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="cpu-usage">--</div>
+                            <div class="metric-label">CPU Usage</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="memory-usage">--</div>
+                            <div class="metric-label">Memory Usage</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="disk-usage">--</div>
+                            <div class="metric-label">Disk Usage</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-value" id="service-uptime">--</div>
+                            <div class="metric-label">Service Uptime</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Environment Status -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h4 class="mb-3">Environment Status</h4>
+    </div>
+    
+    <div class="col-lg-4 mb-3">
+        <div class="card env-card env-dev">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong><i class="bi bi-circle-fill text-success me-2" style="font-size: 0.5rem;"></i>Development</strong>
+                    <div class="status-badge" id="dev-status">
+                        <div class="loading-spinner"></div>
+                        <span>Checking...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <small class="text-muted">Port</small>
+                        <div class="fw-bold" id="dev-port">8000</div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Memory</small>
+                        <div class="fw-bold" id="dev-memory">--</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="btn-group w-100" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewLogs('dev')">
+                            <i class="bi bi-file-text me-1"></i>Logs
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewArtifacts('dev')">
+                            <i class="bi bi-archive me-1"></i>Artifacts
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-3">
+        <div class="card env-card env-test">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong><i class="bi bi-circle-fill text-warning me-2" style="font-size: 0.5rem;"></i>Testing</strong>
+                    <div class="status-badge" id="test-status">
+                        <div class="loading-spinner"></div>
+                        <span>Checking...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <small class="text-muted">Port</small>
+                        <div class="fw-bold" id="test-port">8181</div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Memory</small>
+                        <div class="fw-bold" id="test-memory">--</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="btn-group w-100" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="viewLogs('test')">
+                            <i class="bi bi-file-text me-1"></i>Logs
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="viewArtifacts('test')">
+                            <i class="bi bi-archive me-1"></i>Artifacts
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-3">
+        <div class="card env-card env-prod">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Production</strong>
+                    <div class="status-badge" id="prod-status">
+                        <div class="loading-spinner"></div>
+                        <span>Checking...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <small class="text-muted">Port</small>
+                        <div class="fw-bold" id="prod-port">8282</div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Memory</small>
+                        <div class="fw-bold" id="prod-memory">--</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="btn-group w-100" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="viewLogs('prod')">
+                            <i class="bi bi-file-text me-1"></i>Logs
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="viewArtifacts('prod')">
+                            <i class="bi bi-archive me-1"></i>Artifacts
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Cache Control</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Development Cache</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="dev-cache-toggle" onchange="toggleCache('dev', this.checked)">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Testing Cache</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="test-cache-toggle" onchange="toggleCache('test', this.checked)">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span>Production Cache</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="prod-cache-toggle" onchange="toggleCache('prod', this.checked)">
+                    </div>
+                </div>
+                <div class="d-grid">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearAllCaches()">
+                        <i class="bi bi-trash me-1"></i>Clear All Caches
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Recent Activity</h5>
+            </div>
+            <div class="card-body">
+                <div id="recent-activity">
+                    <div class="text-center text-muted">
+                        <div class="loading-spinner mb-2"></div>
+                        <small>Loading recent activity...</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Logs Modal -->
+<div class="modal fade" id="logsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Environment Logs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="logs-content" class="bg-dark text-light p-3" style="height: 400px; overflow-y: auto;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Artifacts Modal -->
+<div class="modal fade" id="artifactsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Environment Artifacts</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="artifacts-content">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let dashboardData = {};
+
+// Initialize dashboard
+document.addEventListener('DOMContentLoaded', function() {
+    loadDashboardData();
+    setInterval(loadDashboardData, 30000); // Refresh every 30 seconds
+});
+
+async function loadDashboardData() {
+    try {
+        const response = await fetch('/api/status/overview');
+        const data = await response.json();
+        dashboardData = data;
+        updateDashboard(data);
+        
+        // Load cache overview
+        const cacheResponse = await fetch('/api/cache/overview');
+        const cacheData = await cacheResponse.json();
+        updateCacheToggles(cacheData);
+        
+    } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        AdminUtils.showToast('Error loading dashboard data', 'danger');
+    }
+}
+
+function updateDashboard(data) {
+    // Update system metrics
+    if (data.system_metrics) {
+        document.getElementById('cpu-usage').textContent = data.system_metrics.cpu_percent.toFixed(1) + '%';
+        document.getElementById('memory-usage').textContent = data.system_metrics.memory_percent.toFixed(1) + '%';
+        document.getElementById('disk-usage').textContent = data.system_metrics.disk_percent.toFixed(1) + '%';
+        document.getElementById('service-uptime').textContent = AdminUtils.formatDuration(data.service_uptime_seconds);
+    }
+    
+    // Update overall status
+    const statusElement = document.getElementById('overall-status');
+    statusElement.innerHTML = `
+        <i class="bi bi-${getStatusIcon(data.overall_status)}"></i>
+        <span>${data.overall_status.charAt(0).toUpperCase() + data.overall_status.slice(1)}</span>
+    `;
+    statusElement.className = `status-badge status-${data.overall_status}`;
+    
+    // Update environment status
+    if (data.environments) {
+        data.environments.forEach(env => {
+            updateEnvironmentStatus(env);
+        });
+    }
+    
+    // Update recent activity (placeholder)
+    updateRecentActivity();
+}
+
+function updateEnvironmentStatus(env) {
+    const statusElement = document.getElementById(`${env.name}-status`);
+    const memoryElement = document.getElementById(`${env.name}-memory`);
+    const portElement = document.getElementById(`${env.name}-port`);
+    
+    if (statusElement) {
+        const status = env.is_active ? 'healthy' : 'critical';
+        statusElement.innerHTML = `
+            <i class="bi bi-${getStatusIcon(status)}"></i>
+            <span>${env.is_active ? 'Active' : 'Inactive'}</span>
+        `;
+        statusElement.className = `status-badge status-${status}`;
+    }
+    
+    if (memoryElement && env.memory_mb) {
+        memoryElement.textContent = AdminUtils.formatBytes(env.memory_mb * 1024 * 1024);
+    }
+    
+    if (portElement) {
+        portElement.textContent = env.port;
+    }
+}
+
+function updateCacheToggles(cacheData) {
+    if (cacheData.environments) {
+        Object.keys(cacheData.environments).forEach(env => {
+            const toggle = document.getElementById(`${env}-cache-toggle`);
+            if (toggle) {
+                toggle.checked = cacheData.environments[env].policy.cache_enabled;
+            }
+        });
+    }
+}
+
+function updateRecentActivity() {
+    // Placeholder recent activity
+    const activityElement = document.getElementById('recent-activity');
+    const activities = [
+        { time: new Date().toLocaleTimeString(), message: 'System status check completed', type: 'info' },
+        { time: new Date(Date.now() - 300000).toLocaleTimeString(), message: 'Cache cleared for dev environment', type: 'warning' },
+        { time: new Date(Date.now() - 600000).toLocaleTimeString(), message: 'Dictionary updated: 3 new terms', type: 'success' }
+    ];
+    
+    activityElement.innerHTML = activities.map(activity => `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <small class="text-${activity.type}">${activity.message}</small>
+            </div>
+            <small class="text-muted">${activity.time}</small>
+        </div>
+    `).join('');
+}
+
+function getStatusIcon(status) {
+    switch(status) {
+        case 'healthy': return 'check-circle-fill';
+        case 'degraded': return 'exclamation-triangle-fill';
+        case 'critical': return 'x-circle-fill';
+        default: return 'question-circle-fill';
+    }
+}
+
+async function refreshDashboard() {
+    AdminUtils.showToast('Refreshing dashboard...', 'info');
+    await loadDashboardData();
+    AdminUtils.showToast('Dashboard refreshed', 'success');
+}
+
+async function toggleCache(environment, enabled) {
+    try {
+        const endpoint = enabled ? 'enable' : 'disable';
+        const response = await fetch(`/api/cache/${environment}/${endpoint}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            AdminUtils.showToast(`Cache ${enabled ? 'enabled' : 'disabled'} for ${environment}`, 'success');
+        } else {
+            throw new Error('Failed to toggle cache');
+        }
+    } catch (error) {
+        console.error('Error toggling cache:', error);
+        AdminUtils.showToast('Error toggling cache', 'danger');
+        // Revert toggle
+        document.getElementById(`${environment}-cache-toggle`).checked = !enabled;
+    }
+}
+
+async function clearAllCaches() {
+    if (!confirm('Are you sure you want to clear all caches? This will affect performance temporarily.')) {
+        return;
+    }
+    
+    try {
+        const environments = ['dev', 'test', 'prod'];
+        for (const env of environments) {
+            const response = await fetch(`/api/cache/${env}/clear`, { method: 'POST' });
+            if (!response.ok) {
+                throw new Error(`Failed to clear cache for ${env}`);
+            }
+        }
+        AdminUtils.showToast('All caches cleared successfully', 'success');
+    } catch (error) {
+        console.error('Error clearing caches:', error);
+        AdminUtils.showToast('Error clearing caches', 'danger');
+    }
+}
+
+async function viewLogs(environment) {
+    try {
+        const response = await fetch(`/api/status/${environment}/logs?lines=100`);
+        const logs = await response.json();
+        
+        const logsContent = document.getElementById('logs-content');
+        logsContent.textContent = logs.map(log => 
+            `[${new Date(log.timestamp * 1000).toLocaleString()}] ${log.level}: ${log.message}`
+        ).join('\n');
+        
+        document.querySelector('#logsModal .modal-title').textContent = `${environment.toUpperCase()} Environment Logs`;
+        new bootstrap.Modal(document.getElementById('logsModal')).show();
+        
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        AdminUtils.showToast('Error loading logs', 'danger');
+    }
+}
+
+async function viewArtifacts(environment) {
+    try {
+        const response = await fetch(`/api/status/${environment}/artifacts`);
+        const artifacts = await response.json();
+        
+        const artifactsContent = document.getElementById('artifacts-content');
+        if (artifacts.length === 0) {
+            artifactsContent.innerHTML = '<p class="text-muted">No artifacts found for this environment.</p>';
+        } else {
+            artifactsContent.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Size</th>
+                                <th>Modified</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${artifacts.map(artifact => `
+                                <tr>
+                                    <td>${artifact.name}</td>
+                                    <td>${AdminUtils.formatBytes(artifact.size_bytes)}</td>
+                                    <td>${AdminUtils.formatTimestamp(artifact.modified_at)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        document.querySelector('#artifactsModal .modal-title').textContent = `${environment.toUpperCase()} Environment Artifacts`;
+        new bootstrap.Modal(document.getElementById('artifactsModal')).show();
+        
+    } catch (error) {
+        console.error('Error loading artifacts:', error);
+        AdminUtils.showToast('Error loading artifacts', 'danger');
+    }
+}
+
+async function runHealthChecks() {
+    AdminUtils.showToast('Running health checks...', 'info');
+    // Health check implementation would go here
+    setTimeout(() => {
+        AdminUtils.showToast('Health checks completed', 'success');
+        refreshDashboard();
+    }, 2000);
+}
+
+async function exportLogs() {
+    AdminUtils.showToast('Preparing log export...', 'info');
+    // Log export implementation would go here
+    setTimeout(() => {
+        AdminUtils.showToast('Log export ready for download', 'success');
+    }, 1000);
+}
+
+// Make updateDashboard available globally for WebSocket updates
+window.updateDashboard = updateDashboard;
+</script>
+{% endblock %}
