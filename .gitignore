@@ -1,0 +1,221 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Poetry
+poetry.lock
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments - CRITICAL: All .env files must be gitignored
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+# Environment-specific config files
+env/*/config/.env
+env/**/.env
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# TTRPG Center Project Exclusions
+# =================================
+
+# SECRETS AND CREDENTIALS - CRITICAL: Never commit sensitive data
+.env
+.env.*
+*.env
+env/*/config/.env
+env/**/.env
+*.key
+*.pem
+*.p12
+*.pfx
+api_keys.json
+credentials.json
+secrets.json
+
+# ENVIRONMENT DATA ISOLATION
+env/*/data/
+env/*/logs/
+env/*/cache/
+env/*/temp/
+
+# ARTIFACTS AND GENERATED CONTENT
+artifacts/
+artifacts/*/
+src_common/artifacts/
+test_artifacts/
+output/
+results/
+
+# DOCUMENT PROCESSING AND STORAGE
+uploads/
+documents/
+pdfs/
+chunks/
+embeddings/
+vectors/
+processed/
+ingestion/
+raw_documents/
+parsed_documents/
+chunked_documents/
+source_books/
+*.pdf
+
+# GRAPH AND INDEX STORAGE
+graphs/
+indexes/
+knowledge_base/
+vector_store/
+database/
+collections/
+
+# CACHE AND TEMPORARY PROCESSING
+cache/
+tmp/
+temp/
+processing/
+*.tmp
+*.temp
+*.log
+*.pid
+.cache/
+
+# BUILD AND DEPLOYMENT ARTIFACTS
+builds/
+releases/
+deploy/
+manifests/
+*.zip
+*.tar.gz
+*.tgz
+
+# DEVELOPMENT AND TESTING
+.coverage.*
+coverage_reports/
+test_reports/
+performance_reports/
+profiling_data/
+benchmarks/
+
+# LARGE DATA FILES
+*.db
+*.sqlite
+*.sqlite3
+data.json
+large_*.json
+*_chunks.json
+*_embeddings.json
+
+# BACKUP FILES
+*.bak
+*.backup
+*~
+*.orig
+
+# Security scanning reports
+security-report.json
+bandit-report.json
+
+# Test artifacts
+.coverage
+htmlcov/
+test-results/

@@ -1,0 +1,60 @@
+# Core Web Framework
+fastapi[standard]>=0.115.0
+uvicorn[standard]>=0.35.0
+
+# Database & Vector Storage
+langchain-astradb>=0.6.0,<0.7.0
+langchain-core>=0.3.52,<0.4.0
+astrapy>=2.0.1
+
+# Document Processing Pipeline
+unstructured[all-docs]>=0.17.2
+haystack-ai>=2.17.1
+llama-index>=0.13.3
+llama-index[propertyGraph]
+
+# AI Models & Embeddings
+openai>=1.0.0
+langchain-openai>=0.3.0
+sentence-transformers>=2.7.0
+
+# Graph Database
+neo4j>=5.24.0
+networkx>=3.0
+
+# Web Technologies
+websockets>=12.0
+httpx>=0.27.0
+jinja2>=3.1.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+pydantic>=2.9.0
+
+# Development & Testing
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+httpx>=0.27.0  # For FastAPI testing
+bandit>=1.7.9
+
+# Logging & Monitoring
+structlog>=24.4.0
+python-json-logger>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+click>=8.1.0
+rich>=13.0.0
+typer>=0.12.0
+
+# Security
+cryptography>=43.0.0
+passlib>=1.7.4
+
+# Optional: Development tools (commented out for production)
+# black>=24.0.0
+# isort>=5.13.0
+# mypy>=1.11.0
+# pre-commit>=3.8.0

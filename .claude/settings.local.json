@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebSearch",
+      "WebSearch",
+      "WebSearch",
+      "WebSearch",
+      "WebSearch",
+      "WebSearch",
+      "Bash(git init:*)",
+      "Bash(chmod:*)",
+      "Bash(dir:*)",
+      "Bash(mkdir:*)",
+      "Bash(pip install:*)",
+      "Bash(./scripts/preflight.sh:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Read(C:\\Users\\anzak\\Documents/**)",
+      "Read(\\tmp/**)",
+      "Bash(git remote add:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
