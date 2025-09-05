@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}TTRPG Center - Query Interface{% endblock %}
+
+{% block content %}
+<div class="interface-layout">
+    <!-- Left Panel: Query Input -->
+    <div class="left-panel">
+        <div class="panel-header">
+            <h2 class="panel-title">QUERY INTERFACE</h2>
+            <div class="panel-controls">
+                <button class="control-btn" id="memory-toggle" title="Toggle Memory">
+                    <span class="btn-text">MEMORY</span>
+                    <span class="btn-indicator active"></span>
+                </button>
+                <button class="control-btn" id="clear-session" title="Clear Session">
+                    <span class="btn-text">CLEAR</span>
+                </button>
+            </div>
+        </div>
+        
+        <div class="query-section">
+            <div class="input-container">
+                <label for="query-input" class="input-label">ENTER QUERY</label>
+                <textarea 
+                    id="query-input" 
+                    class="query-input" 
+                    placeholder="Ask about rules, feats, spells, monsters, or gameplay mechanics..."
+                    rows="4"
+                ></textarea>
+            </div>
+            
+            <div class="query-controls">
+                <button id="submit-query" class="primary-btn">
+                    <span class="btn-text">EXECUTE QUERY</span>
+                    <span class="btn-loading" style="display: none;">PROCESSING...</span>
+                </button>
+                <div class="query-options">
+                    <label class="option-label">
+                        <input type="checkbox" id="include-context" checked>
+                        <span class="option-text">USE CONTEXT</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Memory Panel -->
+        <div class="memory-panel" id="memory-panel">
+            <div class="memory-header">
+                <h3>SESSION MEMORY</h3>
+                <span class="memory-count" id="memory-count">0 ENTRIES</span>
+            </div>
+            <div class="memory-content" id="memory-content">
+                <div class="memory-empty">NO PREVIOUS QUERIES</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Response Display -->
+    <div class="right-panel">
+        <div class="panel-header">
+            <h2 class="panel-title">RESPONSE OUTPUT</h2>
+            <div class="panel-status" id="response-status">
+                <span class="status-text">READY</span>
+            </div>
+        </div>
+
+        <!-- Response Container -->
+        <div class="response-container" id="response-container">
+            <div class="response-placeholder">
+                <div class="placeholder-icon">⚡</div>
+                <div class="placeholder-text">READY FOR QUERY INPUT</div>
+                <div class="placeholder-subtext">Enter your question above and execute to begin</div>
+            </div>
+        </div>
+
+        <!-- Response Template (hidden) -->
+        <div class="response-template" id="response-template" style="display: none;">
+            <div class="response-header">
+                <div class="response-meta">
+                    <span class="meta-item" id="meta-model">MODEL: --</span>
+                    <span class="meta-item" id="meta-time">TIME: --ms</span>
+                    <span class="meta-item" id="meta-tokens">TOKENS: --</span>
+                </div>
+                <div class="response-timestamp" id="response-timestamp"></div>
+            </div>
+            
+            <div class="response-content">
+                <!-- Text Response Area -->
+                <div class="text-response" id="text-response">
+                    <div class="response-text" id="response-text-content"></div>
+                </div>
+                
+                <!-- Image Response Area (Future Ready) -->
+                <div class="image-response" id="image-response" style="display: none;">
+                    <div class="image-container">
+                        <img id="response-image" alt="Response Image" />
+                        <div class="image-placeholder">IMAGE WILL APPEAR HERE</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Retrieved Sources -->
+            <div class="sources-section" id="sources-section" style="display: none;">
+                <div class="sources-header">
+                    <h4>RETRIEVED SOURCES</h4>
+                </div>
+                <div class="sources-content" id="sources-content"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Session Info Panel (Bottom) -->
+<div class="session-info">
+    <div class="session-id">SESSION: <span id="current-session">{{ session_id }}</span></div>
+    <div class="connection-status">
+        <span class="status-indicator" id="ws-status"></span>
+        <span class="status-text" id="ws-status-text">CONNECTING...</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/query-interface.js"></script>
+<script>
+    // Initialize query interface with session ID
+    window.TTRPG_CONFIG = {
+        sessionId: '{{ session_id }}',
+        apiBase: '/api',
+        wsEndpoint: '/ws/{{ session_id }}'
+    };
+</script>
+{% endblock %}
