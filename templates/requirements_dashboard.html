@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTRPG Center - Requirements & Features Management</title>
+    <link rel="stylesheet" href="/static/requirements/css/requirements.css">
+</head>
+<body>
+    <header class="main-header">
+        <div class="header-container">
+            <h1 class="app-title">
+                <span class="phase-indicator">Phase 7</span>
+                TTRPG Center - Requirements & Features
+            </h1>
+            <div class="header-actions">
+                <button class="btn btn-primary" onclick="showRequirementsForm()">
+                    + New Requirements
+                </button>
+                <button class="btn btn-secondary" onclick="showFeatureForm()">
+                    + Feature Request
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="dashboard-container">
+        <!-- Status Overview -->
+        <div class="status-overview">
+            <div class="status-card">
+                <h3>Requirements Versions</h3>
+                <div class="stat-value">{{ req_versions|length }}</div>
+                <div class="stat-label">Total Versions</div>
+            </div>
+            <div class="status-card">
+                <h3>Pending Features</h3>
+                <div class="stat-value">{{ pending_features|length }}</div>
+                <div class="stat-label">Awaiting Review</div>
+            </div>
+            <div class="status-card">
+                <h3>Audit Entries</h3>
+                <div class="stat-value">{{ recent_audit|length }}</div>
+                <div class="stat-label">Recent Changes</div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Requirements Section -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Requirements Versions</h2>
+                    <button class="btn btn-outline" onclick="loadAllVersions()">View All</button>
+                </div>
+                <div class="panel-content">
+                    {% if req_versions %}
+                        <div class="requirements-list">
+                            {% for version in req_versions %}
+                            <div class="requirement-item">
+                                <div class="req-header">
+                                    <span class="version-id">Version {{ version.version_id }}</span>
+                                    <span class="timestamp">{{ version.timestamp }}</span>
+                                </div>
+                                <div class="req-details">
+                                    <span class="author">By: {{ version.author }}</span>
+                                    <button class="btn btn-sm btn-link" onclick="viewRequirements({{ version.version_id }})">
+                                        View Details
+                                    </button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-state">
+                            <p>No requirements versions found.</p>
+                            <button class="btn btn-primary" onclick="showRequirementsForm()">
+                                Create First Version
+                            </button>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Feature Requests Section -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Pending Feature Requests</h2>
+                    <button class="btn btn-outline" onclick="loadAllFeatures()">View All</button>
+                </div>
+                <div class="panel-content">
+                    {% if pending_features %}
+                        <div class="features-list">
+                            {% for feature in pending_features %}
+                            <div class="feature-item priority-{{ feature.priority }}">
+                                <div class="feature-header">
+                                    <span class="request-id">{{ feature.request_id }}</span>
+                                    <span class="priority">{{ feature.priority|upper }}</span>
+                                </div>
+                                <div class="feature-title">{{ feature.title }}</div>
+                                <div class="feature-meta">
+                                    <span class="requester">{{ feature.requester }}</span>
+                                    <span class="created-at">{{ feature.created_at }}</span>
+                                </div>
+                                <div class="feature-actions">
+                                    <button class="btn btn-sm btn-success" onclick="approveFeature('{{ feature.request_id }}')">
+                                        Approve
+                                    </button>
+                                    <button class="btn btn-sm btn-danger" onclick="rejectFeature('{{ feature.request_id }}')">
+                                        Reject
+                                    </button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-state">
+                            <p>No pending feature requests.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Audit Trail Section -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Recent Activity</h2>
+                    <button class="btn btn-outline" onclick="loadFullAudit()">Full Audit Trail</button>
+                </div>
+                <div class="panel-content">
+                    {% if recent_audit %}
+                        <div class="audit-list">
+                            {% for entry in recent_audit %}
+                            <div class="audit-item">
+                                <div class="audit-header">
+                                    <span class="request-id">{{ entry.request_id }}</span>
+                                    <span class="timestamp">{{ entry.timestamp }}</span>
+                                </div>
+                                <div class="audit-details">
+                                    <span class="status-change">
+                                        {{ entry.old_status }} → {{ entry.new_status }}
+                                    </span>
+                                    <span class="admin">by {{ entry.admin }}</span>
+                                </div>
+                                {% if entry.reason %}
+                                <div class="audit-reason">{{ entry.reason }}</div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty-state">
+                            <p>No audit entries found.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Validation Status -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Schema Validation</h2>
+                    <button class="btn btn-outline" onclick="runValidation()">Run Validation</button>
+                </div>
+                <div class="panel-content">
+                    <div id="validation-status" class="validation-status">
+                        <div class="status-item">
+                            <span class="status-label">Requirements Schema:</span>
+                            <span class="status-value" id="req-schema-status">Ready</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Features Schema:</span>
+                            <span class="status-value" id="feature-schema-status">Ready</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Audit Integrity:</span>
+                            <span class="status-value" id="audit-integrity-status">Ready</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Requirements Form Modal -->
+    <div id="requirementsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Submit New Requirements</h3>
+                <button class="modal-close" onclick="closeModal('requirementsModal')">&times;</button>
+            </div>
+            <form id="requirementsForm" class="modal-form">
+                <div class="form-group">
+                    <label for="reqTitle">Title:</label>
+                    <input type="text" id="reqTitle" name="title" required maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label for="reqVersion">Version:</label>
+                    <input type="text" id="reqVersion" name="version" pattern="^\d+\.\d+\.\d+$" placeholder="1.0.0" required>
+                </div>
+                <div class="form-group">
+                    <label for="reqDescription">Description:</label>
+                    <textarea id="reqDescription" name="description" required maxlength="2000" rows="4"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="reqAuthor">Author:</label>
+                    <input type="text" id="reqAuthor" name="author" required maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label for="reqData">Requirements JSON:</label>
+                    <textarea id="reqData" name="requirements" rows="10" placeholder='{"functional": [], "non_functional": []}'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('requirementsModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Requirements</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Feature Request Form Modal -->
+    <div id="featureModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Submit Feature Request</h3>
+                <button class="modal-close" onclick="closeModal('featureModal')">&times;</button>
+            </div>
+            <form id="featureForm" class="modal-form">
+                <div class="form-group">
+                    <label for="featureTitle">Title:</label>
+                    <input type="text" id="featureTitle" name="title" required maxlength="200" minlength="5">
+                </div>
+                <div class="form-group">
+                    <label for="featureDescription">Description:</label>
+                    <textarea id="featureDescription" name="description" required maxlength="5000" minlength="10" rows="4"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="featurePriority">Priority:</label>
+                        <select id="featurePriority" name="priority" required>
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="featureCategory">Category:</label>
+                        <select id="featureCategory" name="category">
+                            <option value="ui">UI</option>
+                            <option value="api">API</option>
+                            <option value="database">Database</option>
+                            <option value="security">Security</option>
+                            <option value="performance">Performance</option>
+                            <option value="integration">Integration</option>
+                            <option value="documentation">Documentation</option>
+                            <option value="testing">Testing</option>
+                            <option value="other" selected>Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="featureRequester">Your Username:</label>
+                    <input type="text" id="featureRequester" name="requester" required maxlength="100">
+                </div>
+                <div class="form-group">
+                    <label for="featureUserStory">User Story (optional):</label>
+                    <textarea id="featureUserStory" name="user_story" maxlength="1000" rows="2" 
+                             placeholder="As a [user] I want [goal] so that [benefit]"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('featureModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Feature Request</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Approval Modal -->
+    <div id="approvalModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="approvalTitle">Approve/Reject Feature</h3>
+                <button class="modal-close" onclick="closeModal('approvalModal')">&times;</button>
+            </div>
+            <form id="approvalForm" class="modal-form">
+                <input type="hidden" id="approvalRequestId" name="request_id">
+                <input type="hidden" id="approvalAction" name="action">
+                <div class="form-group">
+                    <label for="approvalAdmin">Admin Username:</label>
+                    <input type="text" id="approvalAdmin" name="admin" required maxlength="100" value="admin">
+                </div>
+                <div class="form-group">
+                    <label for="approvalReason">Reason (optional):</label>
+                    <textarea id="approvalReason" name="reason" maxlength="1000" rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('approvalModal')">Cancel</button>
+                    <button type="submit" class="btn" id="approvalSubmit">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/requirements/js/requirements.js"></script>
+</body>
+</html>
