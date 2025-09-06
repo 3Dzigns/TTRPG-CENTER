@@ -13,6 +13,7 @@ Provides:
 """
 
 import asyncio
+import os
 import time
 import uuid
 from datetime import datetime
@@ -29,6 +30,24 @@ from pydantic import BaseModel
 
 # Import Phase 2 RAG functionality
 from src_common.ttrpg_logging import get_logger
+from src_common.cors_security import (
+    setup_secure_cors,
+    validate_cors_startup,
+    get_cors_health_status,
+)
+from src_common.tls_security import (
+    create_app_with_tls,
+    validate_tls_startup,
+    get_tls_health_status,
+    run_with_tls,
+)
+# OAuth integration
+from src_common.oauth_endpoints import oauth_router
+# Authentication
+from src_common.auth_models import AuthUser
+from src_common.auth_database import auth_db
+from src_common.jwt_service import auth_service
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 logger = get_logger(__name__)
 
@@ -39,14 +58,43 @@ app = FastAPI(
     version="5.0.0"
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Security configuration - FR-SEC-402 & FR-SEC-403
+try:
+    # Validate security configurations on startup
+    validate_cors_startup()
+    validate_tls_startup()
+    
+    # Setup secure CORS instead of wildcard configuration
+    setup_secure_cors(app)
+    
+    logger.info("Security configuration initialized successfully")
+except Exception as e:
+    logger.error(f"Security configuration failed: {e}")
+    if os.getenv("ENVIRONMENT") == "prod":
+        raise  # Fail hard in production
+    else:
+        logger.warning("Continuing with basic CORS for development")
+        # Fallback CORS for development only
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With"]
+        )
+
+# Include OAuth router
+app.include_router(oauth_router)
+
+# Direct OAuth test endpoint for debugging
+@app.get("/test-oauth-redirect")
+async def test_oauth_redirect():
+    """Test direct OAuth redirect without router"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://google.com", status_code=302)
+
+# Authentication setup
+bearer_scheme = HTTPBearer(auto_error=False)
 
 # Templates and static files
 templates = Jinja2Templates(directory="templates/user")
@@ -186,25 +234,132 @@ memory_manager = MemoryManager()
 cache_manager = CachePolicyManager()
 
 
-# Mock RAG function (would integrate with Phase 2)
-async def mock_rag_query(query: str, context: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Mock RAG query - would integrate with actual Phase 2 implementation"""
-    await asyncio.sleep(0.5)  # Simulate processing time
-    
-    return {
-        "answer": f"This is a mock answer for: {query}",
-        "metadata": {
-            "model": "mock-model",
-            "tokens": 42,
-            "processing_time_ms": 500,
-            "intent": "question",
-            "domain": "general"
-        },
-        "retrieved_chunks": [
-            {"source": "Mock Source", "score": 0.95, "text": "Mock retrieved text..."}
-        ],
-        "image_url": None  # Future multimodal support
-    }
+# Real RAG function using existing infrastructure
+async def real_rag_query(query: str, context: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Real RAG query using AstraDB and OpenAI"""
+    try:
+        # Load environment for AstraDB and OpenAI
+        from pathlib import Path
+        from dotenv import load_dotenv
+        
+        # Load environment variables
+        env_file = Path("env/dev/config/.env")
+        if env_file.exists():
+            load_dotenv(env_file)
+        
+        # Import the existing RAG infrastructure
+        from fastapi.testclient import TestClient
+        from src_common.app import app as rag_app
+        
+        start_time = time.time()
+        
+        # Use the existing RAG endpoint
+        with TestClient(rag_app) as client:
+            response = client.post("/rag/ask", json={"query": query})
+            
+            if response.status_code == 200:
+                data = response.json()
+                processing_time = (time.time() - start_time) * 1000
+                
+                # Import RAG script functions for OpenAI integration
+                import sys
+                sys.path.append(str(Path(__file__).parent / "scripts"))
+                
+                from scripts.rag_openai import openai_chat
+                from src_common.orchestrator.prompts import load_prompt, render_prompt
+                
+                cls = data.get("classification", {})
+                chunks = data.get("retrieved", [])
+                model_cfg = data.get("model", {"model": "gpt-4o-mini", "max_tokens": 3000, "temperature": 0.2})
+                
+                if chunks:
+                    # Build prompt using existing infrastructure
+                    tmpl = load_prompt(cls.get("intent", "question"), cls.get("domain", "general"))
+                    system_prompt = render_prompt(
+                        tmpl,
+                        {
+                            "TASK_BRIEF": query,
+                            "STYLE": "concise, cite sources in [id] format",
+                            "POLICY_SNIPPET": "Use only the provided context. If insufficient, say so. Include citations [id] for each claim.",
+                        },
+                    )
+                    
+                    # Assemble context from retrieved chunks
+                    context_lines = []
+                    for i, c in enumerate(chunks, 1):
+                        snippet = (c.get("text") or "")[:1500]  # Truncate long snippets
+                        if len(c.get("text", "")) > 1500:
+                            snippet += "…"
+                        context_lines.append(f"[{i}] {snippet}\nSource: {c.get('source')}")
+                    
+                    user_prompt = f"Context:\n\n" + "\n\n".join(context_lines) + f"\n\nQuestion: {query}\nAnswer concisely with [n] citations."
+                    
+                    # Call OpenAI
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if not api_key:
+                        raise RuntimeError("OPENAI_API_KEY not set in environment")
+                    
+                    answer = openai_chat(model_cfg["model"], system_prompt, user_prompt, api_key)
+                    
+                    return {
+                        "answer": answer,
+                        "metadata": {
+                            "model": model_cfg["model"],
+                            "tokens": model_cfg.get("max_tokens", 3000),
+                            "processing_time_ms": processing_time,
+                            "intent": cls.get("intent", "question"),
+                            "domain": cls.get("domain", "general")
+                        },
+                        "retrieved_chunks": [
+                            {"source": c.get("source"), "score": c.get("score", 0.0), "text": c.get("text", "")}
+                            for c in chunks
+                        ],
+                        "image_url": None  # Future multimodal support
+                    }
+                else:
+                    # No chunks retrieved
+                    return {
+                        "answer": "I couldn't find relevant information in the knowledge base to answer your question. Please try rephrasing or asking about a different topic.",
+                        "metadata": {
+                            "model": "no-retrieval",
+                            "tokens": 0,
+                            "processing_time_ms": processing_time,
+                            "intent": cls.get("intent", "question"),
+                            "domain": cls.get("domain", "general")
+                        },
+                        "retrieved_chunks": [],
+                        "image_url": None
+                    }
+            else:
+                # RAG service error
+                logger.error(f"RAG service error: {response.status_code} - {response.text}")
+                return {
+                    "answer": f"I encountered an error while processing your query. Please try again.",
+                    "metadata": {
+                        "model": "error",
+                        "tokens": 0,
+                        "processing_time_ms": (time.time() - start_time) * 1000,
+                        "intent": "error",
+                        "domain": "system"
+                    },
+                    "retrieved_chunks": [],
+                    "image_url": None
+                }
+                
+    except Exception as e:
+        logger.error(f"RAG query error: {e}")
+        return {
+            "answer": f"I encountered a technical error: {str(e)}. Please try again.",
+            "metadata": {
+                "model": "error",
+                "tokens": 0,
+                "processing_time_ms": 0,
+                "intent": "error",
+                "domain": "system"
+            },
+            "retrieved_chunks": [],
+            "image_url": None
+        }
 
 
 # WebSocket for real-time updates
@@ -235,12 +390,40 @@ manager = ConnectionManager()
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
     return {
         "status": "ok",
         "service": "user-ui",
         "timestamp": time.time(),
-        "phase": "5"
+        "phase": "5",
+        "cors": get_cors_health_status(env),
+        "tls": get_tls_health_status(env),
     }
+
+
+@app.get("/api/auth/verify")
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    """Verify JWT token and return user info"""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="No token provided")
+    
+    try:
+        claims = auth_service.jwt_service.verify_token(credentials.credentials, "access")
+        auth_database = auth_db
+        user = auth_database.get_user_by_id(claims.user_id)
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value
+        }
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -279,7 +462,7 @@ async def process_query(query_request: QueryRequest):
             pass
         
         # Process query (integrate with Phase 2 RAG)
-        rag_result = await mock_rag_query(query_request.query, context)
+        rag_result = await real_rag_query(query_request.query, context)
         
         # Create response
         response = QueryResponse(
@@ -430,4 +613,20 @@ async def cache_control_middleware(request: Request, call_next):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    import asyncio
+
+    async def main():
+        env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
+        port = int(os.getenv("USER_PORT", 8080))
+
+        try:
+            app_with_tls, cert_path, key_path = await create_app_with_tls(app, env)
+            if cert_path and key_path:
+                run_with_tls(app_with_tls, cert_path, key_path, port)
+            else:
+                uvicorn.run(app_with_tls, host="0.0.0.0", port=port, reload=(env == "dev"))
+        except Exception as e:
+            logger.error(f"TLS setup failed: {e}")
+            uvicorn.run(app, host="0.0.0.0", port=port, reload=(env == "dev"))
+
+    asyncio.run(main())

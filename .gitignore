@@ -205,6 +205,16 @@ large_*.json
 *_chunks.json
 *_embeddings.json
 
+# COPYRIGHT PROTECTED CONTENT - CRITICAL: Never commit protected material
+Personas/
+personas/
+images/
+Images/
+uploads/
+Uploads/
+data_storage/
+data/storage/
+
 # BACKUP FILES
 *.bak
 *.backup

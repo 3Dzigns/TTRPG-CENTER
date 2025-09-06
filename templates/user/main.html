@@ -9,6 +9,17 @@
         <div class="panel-header">
             <h2 class="panel-title">QUERY INTERFACE</h2>
             <div class="panel-controls">
+                <div class="auth-controls" id="auth-controls">
+                    <div class="user-status" id="user-status" style="display: none;">
+                        <span class="user-name" id="user-name"></span>
+                        <button class="control-btn" id="logout-btn" title="Logout">
+                            <span class="btn-text">LOGOUT</span>
+                        </button>
+                    </div>
+                    <button class="control-btn" id="login-btn" title="Login with Google">
+                        <span class="btn-text">LOGIN</span>
+                    </button>
+                </div>
                 <button class="control-btn" id="memory-toggle" title="Toggle Memory">
                     <span class="btn-text">MEMORY</span>
                     <span class="btn-indicator active"></span>
@@ -124,11 +135,88 @@
 {% block extra_scripts %}
 <script src="/static/js/query-interface.js"></script>
 <script>
-    // Initialize query interface with session ID
+    // Initialize query interface with session ID and OAuth config
     window.TTRPG_CONFIG = {
         sessionId: '{{ session_id }}',
         apiBase: '/api',
-        wsEndpoint: '/ws/{{ session_id }}'
+        wsEndpoint: '/ws/{{ session_id }}',
+        oauthBase: '/auth/oauth'
     };
+
+    // OAuth Authentication handling
+    document.addEventListener('DOMContentLoaded', function() {
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const userStatus = document.getElementById('user-status');
+        const userName = document.getElementById('user-name');
+
+        // Check if user is already logged in (check for JWT token)
+        const token = localStorage.getItem('jwt_token');
+        if (token) {
+            // Verify token is still valid
+            fetch('/api/auth/verify', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(response => {
+                if (response.ok) {
+                    return response.json();
+                }
+                throw new Error('Token invalid');
+            }).then(user => {
+                showUserLoggedIn(user.username || user.full_name || 'User');
+            }).catch(() => {
+                localStorage.removeItem('jwt_token');
+                showUserLoggedOut();
+            });
+        } else {
+            showUserLoggedOut();
+        }
+
+        // Login button handler
+        loginBtn.addEventListener('click', function() {
+            window.location.href = '/auth/oauth/login/google';
+        });
+
+        // Logout button handler
+        logoutBtn.addEventListener('click', function() {
+            localStorage.removeItem('jwt_token');
+            fetch('/auth/oauth/logout', { method: 'POST' })
+                .finally(() => {
+                    showUserLoggedOut();
+                });
+        });
+
+        function showUserLoggedIn(name) {
+            userStatus.style.display = 'flex';
+            loginBtn.style.display = 'none';
+            userName.textContent = name;
+        }
+
+        function showUserLoggedOut() {
+            userStatus.style.display = 'none';
+            loginBtn.style.display = 'block';
+        }
+
+        // Handle OAuth callback (if we're on the callback page)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('code')) {
+            // We're in OAuth callback - extract JWT token from URL or make callback request
+            const code = urlParams.get('code');
+            const state = urlParams.get('state');
+            
+            fetch('/auth/callback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, state })
+            }).then(response => response.json())
+              .then(data => {
+                if (data.access_token) {
+                    localStorage.setItem('jwt_token', data.access_token);
+                    showUserLoggedIn(data.user?.full_name || 'User');
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, '/');
+                }
+            }).catch(console.error);
+        }
+    });
 </script>
 {% endblock %}
