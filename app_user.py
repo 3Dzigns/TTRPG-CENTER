@@ -43,6 +43,10 @@ from src_common.tls_security import (
 )
 # OAuth integration
 from src_common.oauth_endpoints import oauth_router
+from src_common.oauth_endpoints import oauth_callback as oauth_callback_handler
+from src_common.auth_models import OAuthLoginResult
+from typing import Optional
+from urllib.parse import quote
 # Authentication
 from src_common.auth_models import AuthUser
 from src_common.auth_database import auth_db
@@ -85,6 +89,83 @@ except Exception as e:
 
 # Include OAuth router
 app.include_router(oauth_router)
+
+# Alias: support /auth/callback to match GOOGLE_CLIENT_REDIRECT_URL
+@app.get("/auth/callback")
+async def oauth_callback_alias(code: str, state: str, error: Optional[str] = None, error_description: Optional[str] = None):
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    # If provider returned an error, send to error page
+    if error:
+        return RedirectResponse(url=f"/oauth/error?error={quote(error)}&description={quote(error_description or '')}", status_code=302)
+
+    # Serve a tiny auto-post page to avoid query params in the URL bar
+    # This page will:
+    # 1) Remove the query string from history immediately
+    # 2) POST code+state to /auth/callback to complete auth
+    # 3) Store the JWT and navigate to the main UI
+    html = f"""
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset=\"utf-8\" />
+    <title>Signing you in…</title>
+    <meta name=\"robots\" content=\"noindex,nofollow\" />
+    <style>
+      body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; color: #eee; background: #111; }}
+      .box {{ max-width: 480px; margin: 15vh auto; padding: 1.25rem 1.5rem; border: 1px solid #333; border-radius: 8px; background: #1a1a1a; }}
+      h1 {{ font-size: 1.1rem; margin: 0 0 .5rem 0; }}
+      p {{ margin: .25rem 0; color: #bbb; }}
+    </style>
+  </head>
+  <body>
+    <div class=\"box\">
+      <h1>Signing you in…</h1>
+      <p>Please wait a moment.</p>
+      <noscript>JavaScript is required to complete sign-in.</noscript>
+    </div>
+    <script>
+      (function() {{
+        try {{
+          // Immediately hide the query string from the URL bar
+          if (typeof history.replaceState === 'function') {{
+            history.replaceState({{}}, document.title, '/');
+          }}
+        }} catch (e) {{ /* ignore */ }}
+
+        const payload = {{ code: {code!r}, state: {state!r} }};
+        fetch('/auth/callback', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload),
+          credentials: 'same-origin'
+        }})
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Auth failed')))
+        .then(data => {{
+          if (data && data.access_token) {{
+            try {{ localStorage.setItem('jwt_token', data.access_token); }} catch (e) {{ }}
+            const dest = (data.return_url && typeof data.return_url === 'string') ? data.return_url : '/';
+            location.replace(dest);
+          }} else {{
+            location.replace('/oauth/error?error=auth_failed');
+          }}
+        }})
+        .catch(() => {{ location.replace('/oauth/error?error=auth_failed'); }});
+      }})();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html, status_code=200)
+
+
+class OAuthCallbackBody(BaseModel):
+    code: str
+    state: str
+
+
+@app.post("/auth/callback", response_model=OAuthLoginResult)
+async def oauth_callback_alias_post(payload: OAuthCallbackBody):
+    return await oauth_callback_handler(code=payload.code, state=payload.state, error=None, error_description=None)
 
 # Direct OAuth test endpoint for debugging
 @app.get("/test-oauth-redirect")

@@ -30,6 +30,17 @@ from pydantic import BaseModel, Field
 
 # Import logging and other common utilities
 from src_common.ttrpg_logging import get_logger
+from src_common.cors_security import (
+    setup_secure_cors,
+    validate_cors_startup,
+    get_cors_health_status,
+)
+from src_common.tls_security import (
+    create_app_with_tls,
+    validate_tls_startup,
+    get_tls_health_status,
+    run_with_tls,
+)
 
 logger = get_logger(__name__)
 
@@ -40,14 +51,30 @@ app = FastAPI(
     version="6.0.0"
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Security configuration - FR-SEC-402 & FR-SEC-403
+try:
+    # Validate security configurations on startup
+    validate_cors_startup()
+    validate_tls_startup()
+    
+    # Setup secure CORS instead of wildcard configuration
+    setup_secure_cors(app)
+    
+    logger.info("Security configuration initialized successfully")
+except Exception as e:
+    logger.error(f"Security configuration failed: {e}")
+    if os.getenv("ENVIRONMENT") == "prod":
+        raise  # Fail hard in production
+    else:
+        logger.warning("Continuing with basic CORS for development")
+        # Fallback CORS for development only
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With"]
+        )
 
 # Templates and static files
 templates = Jinja2Templates(directory="templates/feedback")
@@ -445,11 +472,14 @@ def check_rate_limit(request: Request) -> bool:
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
     return {
         "status": "ok",
         "service": "feedback-testing",
         "timestamp": time.time(),
-        "phase": "6"
+        "phase": "6",
+        "cors": get_cors_health_status(env),
+        "tls": get_tls_health_status(env),
     }
 
 
@@ -599,4 +629,20 @@ async def feedback_cache_bypass_middleware(request: Request, call_next):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8060)
+    import asyncio
+
+    async def main():
+        env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
+        port = int(os.getenv("FEEDBACK_PORT", 8060))
+
+        try:
+            app_with_tls, cert_path, key_path = await create_app_with_tls(app, env)
+            if cert_path and key_path:
+                run_with_tls(app_with_tls, cert_path, key_path, port)
+            else:
+                uvicorn.run(app_with_tls, host="0.0.0.0", port=port, reload=(env == "dev"))
+        except Exception as e:
+            logger.error(f"TLS setup failed: {e}")
+            uvicorn.run(app, host="0.0.0.0", port=port, reload=(env == "dev"))
+
+    asyncio.run(main())

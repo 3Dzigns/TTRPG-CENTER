@@ -12,9 +12,11 @@ from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from ttrpg_logging import setup_logging, get_logger, LogContext
+from .logging import setup_logging, get_logger, LogContext
+from .orchestrator.service import rag_router
 
 
 # Initialize logging
@@ -58,7 +60,7 @@ class TTRPGApp:
                 logger.info(f"Request started: {request.method} {request.url.path}")
                 
                 response = await call_next(request)
-                
+
                 duration_ms = (time.time() - start_time) * 1000
                 logger.info(
                     f"Request completed: {request.method} {request.url.path}",
@@ -67,12 +69,39 @@ class TTRPGApp:
                         'duration_ms': duration_ms
                     }
                 )
+                # Apply simple Cache-Control policy (Phase 0 cache-control)
+                try:
+                    ttl = int(os.getenv('CACHE_TTL_SECONDS', '0') or '0')
+                except Exception:
+                    ttl = 0
+                if ttl <= 0:
+                    response.headers['Cache-Control'] = 'no-store'
+                else:
+                    response.headers['Cache-Control'] = f'private, max-age={ttl}'
                 
             return response
-    
+
     def setup_routes(self):
         """Configure application routes."""
-        
+
+        # Phase 2: RAG endpoints
+        self.app.include_router(rag_router, prefix="/rag")
+
+        # Phase 3: Workflow endpoints
+        try:
+            from app_workflow import workflow_router
+            from app_plan_run import plan_router
+            self.app.include_router(workflow_router, prefix="/api")
+            self.app.include_router(plan_router, prefix="/api")
+            logger.info("Phase 3 workflow routes loaded")
+        except ImportError as e:
+            logger.warning(f"Phase 3 routes not available: {e}")
+
+        # Minimal WebUI: static assets under /ui
+        static_dir = Path("static")
+        if static_dir.exists():
+            self.app.mount("/ui", StaticFiles(directory=str(static_dir), html=True), name="ui")
+
         @self.app.get("/healthz")
         async def health_check():
             """Health check endpoint."""

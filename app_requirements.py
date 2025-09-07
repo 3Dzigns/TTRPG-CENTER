@@ -22,8 +22,21 @@ from pydantic import BaseModel, Field, validator
 import uvicorn
 
 from src_common.logging import get_logger, setup_logging
+from src_common.cors_security import (
+    setup_secure_cors,
+    validate_cors_startup,
+    get_cors_health_status,
+)
+from src_common.tls_security import (
+    create_app_with_tls,
+    validate_tls_startup,
+    get_tls_health_status,
+)
 from src_common.requirements_manager import RequirementsManager, FeatureRequestManager
 from src_common.schema_validator import SchemaValidator, SchemaSecurityValidator
+from src_common.auth_endpoints import auth_router
+from src_common.auth_middleware import require_admin, require_auth, get_auth_health
+from src_common.auth_database import auth_db
 
 # Initialize logging
 logger = setup_logging()
@@ -33,6 +46,16 @@ requirements_manager = RequirementsManager()
 feature_manager = FeatureRequestManager()
 schema_validator = SchemaValidator()
 
+# Initialize authentication database
+try:
+    auth_db.create_tables()
+    auth_db.create_default_admin()  # Create default admin user
+    logger.info("Authentication system initialized")
+except Exception as e:
+    logger.error(f"Authentication initialization failed: {e}")
+    if os.getenv("ENVIRONMENT") == "prod":
+        raise
+
 # FastAPI app
 app = FastAPI(
     title="TTRPG Center - Requirements & Features",
@@ -40,14 +63,33 @@ app = FastAPI(
     version="7.0.0"
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+# Security configuration - FR-SEC-402 & FR-SEC-403
+try:
+    # Validate security configurations on startup
+    validate_cors_startup()
+    validate_tls_startup()
+    
+    # Setup secure CORS instead of wildcard configuration
+    setup_secure_cors(app)
+    
+    logger.info("Security configuration initialized successfully")
+except Exception as e:
+    logger.error(f"Security configuration failed: {e}")
+    if os.getenv("ENVIRONMENT") == "prod":
+        raise  # Fail hard in production
+    else:
+        logger.warning("Continuing with basic CORS for development")
+        # Fallback CORS for development only
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With"]
+        )
+
+# Include authentication router
+app.include_router(auth_router)
 
 # Static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -89,7 +131,7 @@ class FeatureRequestSubmission(BaseModel):
 class RequirementApprovalRequest(BaseModel):
     """Requirement approval/rejection model"""
     action: str = Field(..., pattern="^(approve|reject)$")
-    admin: str = Field(..., min_length=1, max_length=100)
+    admin: str = Field(..., min_length=1, max_length=100)  # Will be replaced by JWT user context
     reason: Optional[str] = Field(None, max_length=1000)
 
 
@@ -99,25 +141,8 @@ class SchemaValidationRequest(BaseModel):
     data: Dict[str, Any]
 
 
-# Security dependency
-def get_current_admin(request: Request) -> str:
-    """
-    Get current admin user from request
-    In production, this would integrate with actual authentication
-    """
-    # Mock admin authentication - replace with real auth
-    admin = request.headers.get("X-Admin-User", "admin")
-    if not admin:
-        raise HTTPException(status_code=401, detail="Admin authentication required")
-    return admin
-
-
-def validate_admin_permissions(admin: str = Depends(get_current_admin)):
-    """Validate admin has required permissions"""
-    # In production, check actual permissions
-    if not admin:
-        raise HTTPException(status_code=403, detail="Admin permissions required")
-    return admin
+# Security has been replaced with JWT authentication
+# Legacy mock authentication functions removed - use require_admin, require_auth instead
 
 
 # Routes
@@ -208,7 +233,7 @@ async def get_latest_requirements():
 @app.post("/api/requirements/submit")
 async def submit_requirements(
     req_data: RequirementsSubmission,
-    admin: str = Depends(validate_admin_permissions)
+    current_user = Depends(require_admin)
 ):
     """Submit new requirements version (Admin only)"""
     try:
@@ -236,9 +261,9 @@ async def submit_requirements(
             )
         
         # Save requirements
-        version_id = requirements_manager.save_requirements(sanitized_data, admin)
+        version_id = requirements_manager.save_requirements(sanitized_data, current_user.username)
         
-        logger.info(f"Requirements version {version_id} submitted by {admin}")
+        logger.info(f"Requirements version {version_id} submitted by {current_user.username}")
         
         return {
             "success": True,
@@ -385,7 +410,7 @@ async def submit_feature_request(req_data: FeatureRequestSubmission):
 async def approve_feature_request(
     request_id: str,
     approval_data: RequirementApprovalRequest,
-    admin: str = Depends(validate_admin_permissions)
+    current_user = Depends(require_admin)
 ):
     """Approve feature request (US-703)"""
     try:
@@ -452,7 +477,7 @@ async def get_feature_audit_trail(
 
 
 @app.get("/api/audit/integrity")
-async def validate_audit_integrity(admin: str = Depends(validate_admin_permissions)):
+async def validate_audit_integrity(current_user = Depends(require_admin)):
     """Validate audit log integrity (Admin only)"""
     try:
         compromised_entries = feature_manager.validate_audit_integrity()
@@ -530,7 +555,7 @@ async def get_available_schemas():
 
 
 @app.get("/api/validation/report")
-async def get_validation_report(admin: str = Depends(validate_admin_permissions)):
+async def get_validation_report(current_user = Depends(require_admin)):
     """Get comprehensive validation report for all files"""
     try:
         # Validate requirements directory
@@ -565,26 +590,51 @@ async def get_validation_report(admin: str = Depends(validate_admin_permissions)
 @app.get("/health")
 async def health_check():
     """Requirements service health check"""
+    env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
+    auth_health = await get_auth_health()
     return {
         "status": "ok",
         "service": "requirements",
         "timestamp": time.time(),
         "phase": "7",
-        "version": "7.0.0"
+        "version": "7.0.0",
+        "cors": get_cors_health_status(env),
+        "tls": get_tls_health_status(env),
+        **auth_health,
     }
 
 
 if __name__ == "__main__":
-    # Get port from environment
-    port = int(os.getenv("REQUIREMENTS_PORT", 8070))
-    env = os.getenv("APP_ENV", "dev")
-    
-    logger.info(f"Starting TTRPG Center Requirements Management on port {port} ({env})")
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-        reload=env == "dev"
-    )
+    import asyncio
+
+    async def main():
+        # Get port from environment
+        port = int(os.getenv("REQUIREMENTS_PORT", 8070))
+        env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
+
+        logger.info(f"Starting TTRPG Center Requirements Management on port {port} ({env})")
+
+        try:
+            app_with_tls, cert_path, key_path = await create_app_with_tls(app, env)
+            if cert_path and key_path:
+                from src_common.tls_security import run_with_tls
+                run_with_tls(app_with_tls, cert_path, key_path, port)
+            else:
+                uvicorn.run(
+                    app_with_tls,
+                    host="0.0.0.0",
+                    port=port,
+                    log_level="info",
+                    reload=env == "dev"
+                )
+        except Exception as e:
+            logger.error(f"TLS setup failed: {e}")
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=port,
+                log_level="info",
+                reload=env == "dev"
+            )
+
+    asyncio.run(main())

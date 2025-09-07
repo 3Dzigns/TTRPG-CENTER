@@ -1,0 +1,300 @@
+<mxfile host="app.diagrams.net" modified="2025-09-06T00:00:00.000Z" agent="Mozilla/5.0" version="22.0.3">
+  <diagram id="flow1" name="Architecture Flow">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <!-- Clients -->
+        <mxCell id="10" value="Browser - User UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="180" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="11" value="Browser - Admin UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="180" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="12" value="Browser - Feedback UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="40" y="180" width="180" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="13" value="Browser - Requirements UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="180" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="14" value="API Clients" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Applications -->
+        <mxCell id="20" value="app_user.py (User UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="280" y="60" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="21" value="app_admin.py (Admin UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="280" y="120" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="22" value="app_feedback.py (Feedback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="280" y="180" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="23" value="app_requirements.py (Requirements)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="280" y="240" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="24" value="src_common/app.py (Core API)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="280" y="300" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Core RAG Services -->
+        <mxCell id="30" value="/rag/* (orchestrator.service)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="560" y="60" width="260" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="31" value="classifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="560" y="120" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="32" value="policies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="700" y="120" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="33" value="model router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="560" y="180" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="34" value="prompts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="700" y="180" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="35" value="retriever" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="560" y="240" width="260" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Plan/Workflow Routers -->
+        <mxCell id="40" value="/api/plan|run (app_plan_run.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="560" y="620" width="260" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="41" value="/api/workflow/* (app_workflow.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="560" y="680" width="260" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="42" value="planner.plan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="840" y="620" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="43" value="planner.budget" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="840" y="660" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="44" value="graph.store" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="840" y="700" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="45" value="runtime.state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="840" y="740" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="46" value="runtime.execute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="840" y="780" width="200" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Admin Services -->
+        <mxCell id="50" value="admin.status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="560" y="840" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="51" value="admin.ingestion" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="560" y="880" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="52" value="admin.dictionary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="560" y="920" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="53" value="admin.testing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="560" y="960" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="54" value="admin.cache_control" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="560" y="1000" width="200" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Auth & Security -->
+        <mxCell id="60" value="/auth/* endpoints" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="500" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="61" value="oauth_service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="540" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="62" value="jwt_service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="580" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="63" value="auth.db (SQLite)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="620" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="64" value="CORS policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="660" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="65" value="TLS (HTTPS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="280" y="700" width="220" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Data & External -->
+        <mxCell id="70" value="Templates (templates/*)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" vertex="1" parent="1">
+          <mxGeometry x="1050" y="60" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="71" value="Static (static/*)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" vertex="1" parent="1">
+          <mxGeometry x="1050" y="120" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="72" value="AstraDB (optional)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" vertex="1" parent="1">
+          <mxGeometry x="1050" y="500" width="220" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="73" value="Artifacts (artifacts/{env})" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" vertex="1" parent="1">
+          <mxGeometry x="1050" y="560" width="220" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges: Clients -> Apps -->
+        <mxCell id="200" edge="1" parent="1" source="10" target="20" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="201" edge="1" parent="1" source="11" target="21" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="202" edge="1" parent="1" source="12" target="22" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="203" edge="1" parent="1" source="13" target="23" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="204" edge="1" parent="1" source="14" target="24" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- App -> RAG and assets -->
+        <mxCell id="210" edge="1" parent="1" source="20" target="30" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="211" edge="1" parent="1" source="20" target="70" style="endArrow=block;dashed=1;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="212" edge="1" parent="1" source="20" target="71" style="endArrow=block;dashed=1;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- RAG pipeline edges -->
+        <mxCell id="220" edge="1" parent="1" source="30" target="31" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="221" edge="1" parent="1" source="31" target="32" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="222" edge="1" parent="1" source="32" target="33" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="223" edge="1" parent="1" source="33" target="34" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="224" edge="1" parent="1" source="34" target="35" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Retriever -> Data -->
+        <mxCell id="230" edge="1" parent="1" source="35" target="72" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="231" edge="1" parent="1" source="35" target="73" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- RAG -> App return path -->
+        <mxCell id="232" edge="1" parent="1" source="30" target="20" style="endArrow=block;dashed=1;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Core app -> Plan/Workflow routers -->
+        <mxCell id="240" edge="1" parent="1" source="24" target="40" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="241" edge="1" parent="1" source="24" target="41" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Plan router -> planner/budget/store -->
+        <mxCell id="242" edge="1" parent="1" source="40" target="42" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="243" edge="1" parent="1" source="40" target="43" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="244" edge="1" parent="1" source="40" target="44" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Workflow router -> state/executor -->
+        <mxCell id="245" edge="1" parent="1" source="41" target="45" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="246" edge="1" parent="1" source="41" target="46" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="247" edge="1" parent="1" source="46" target="45" style="endArrow=block;dashed=1;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="248" edge="1" parent="1" source="46" target="73" style="endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Admin app -> admin services -->
+        <mxCell id="250" edge="1" parent="1" source="21" target="50" style="endArrow=block;html=1;"/>
+        <mxCell id="251" edge="1" parent="1" source="21" target="51" style="endArrow=block;html=1;"/>
+        <mxCell id="252" edge="1" parent="1" source="21" target="52" style="endArrow=block;html=1;"/>
+        <mxCell id="253" edge="1" parent="1" source="21" target="53" style="endArrow=block;html=1;"/>
+        <mxCell id="254" edge="1" parent="1" source="21" target="54" style="endArrow=block;html=1;"/>
+        <mxCell id="255" edge="1" parent="1" source="51" target="73" style="endArrow=block;html=1;"/>
+
+        <!-- Requirements app -->
+        <mxCell id="260" edge="1" parent="1" source="23" target="70" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="261" edge="1" parent="1" source="23" target="71" style="endArrow=block;dashed=1;html=1;"/>
+
+        <!-- Feedback app -->
+        <mxCell id="262" edge="1" parent="1" source="22" target="70" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="263" edge="1" parent="1" source="22" target="71" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="264" edge="1" parent="1" source="22" target="73" style="endArrow=block;html=1;"/>
+
+        <!-- OAuth/Auth flows -->
+        <mxCell id="270" edge="1" parent="1" source="20" target="60" style="endArrow=block;html=1;"/>
+        <mxCell id="271" edge="1" parent="1" source="21" target="60" style="endArrow=block;html=1;"/>
+        <mxCell id="272" edge="1" parent="1" source="23" target="60" style="endArrow=block;html=1;"/>
+        <mxCell id="273" edge="1" parent="1" source="60" target="61" style="endArrow=block;html=1;"/>
+        <mxCell id="274" edge="1" parent="1" source="60" target="62" style="endArrow=block;html=1;"/>
+        <mxCell id="275" edge="1" parent="1" source="62" target="63" style="endArrow=block;html=1;"/>
+        <mxCell id="276" edge="1" parent="1" source="61" target="63" style="endArrow=block;html=1;"/>
+
+        <!-- Security usage (subset to avoid clutter) -->
+        <mxCell id="280" edge="1" parent="1" source="20" target="64" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="281" edge="1" parent="1" source="21" target="64" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="282" edge="1" parent="1" source="23" target="64" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="283" edge="1" parent="1" source="22" target="64" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="284" edge="1" parent="1" source="20" target="65" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="285" edge="1" parent="1" source="21" target="65" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="286" edge="1" parent="1" source="23" target="65" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="287" edge="1" parent="1" source="22" target="65" style="endArrow=block;dashed=1;html=1;"/>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="arch2" name="System Architecture">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="100" value="Presentation Layer&#10;(User UI, Admin UI, Feedback, Requirements)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="60" y="60" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="101" value="APIs / Core&#10;(Core API, /rag, /api/plan|run, /api/workflow)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="460" y="60" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="102" value="Orchestrator&#10;(classifier, policies, router, prompts, retriever)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="460" y="200" width="360" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="103" value="Workflow Engine&#10;(planner, budget, executor, state, graph store)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366" vertex="1" parent="1">
+          <mxGeometry x="460" y="340" width="360" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="104" value="Security&#10;(OAuth endpoints/service, JWT, CORS, TLS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d89f9" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="360" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="105" value="Data Stores&#10;(AstraDB, artifacts/{env}, auth.db)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" vertex="1" parent="1">
+          <mxGeometry x="860" y="220" width="320" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="300" edge="1" parent="1" source="100" target="101" style="endArrow=block;html=1;"/>
+        <mxCell id="301" edge="1" parent="1" source="101" target="102" style="endArrow=block;html=1;"/>
+        <mxCell id="302" edge="1" parent="1" source="101" target="103" style="endArrow=block;html=1;"/>
+        <mxCell id="303" edge="1" parent="1" source="102" target="105" style="endArrow=block;html=1;"/>
+        <mxCell id="304" edge="1" parent="1" source="103" target="105" style="endArrow=block;html=1;"/>
+        <mxCell id="305" edge="1" parent="1" source="100" target="104" style="endArrow=block;dashed=1;html=1;"/>
+        <mxCell id="306" edge="1" parent="1" source="101" target="104" style="endArrow=block;dashed=1;html=1;"/>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

@@ -18,7 +18,7 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.extractors import KeywordExtractor
 from llama_index.core.schema import BaseNode, TextNode
 
-from ttrpg_logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 

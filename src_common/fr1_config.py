@@ -6,7 +6,7 @@ FR1 Configuration Module - Environment-specific settings for FR1 enhancements
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional
-from ttrpg_logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -28,10 +28,12 @@ class FR1Config:
         # Default configuration
         config = {
             "preprocessor": {
-                "size_threshold_mb": 40.0,  # Default 40MB threshold
+                "size_threshold_mb": 40.0,  # Default 40MB threshold (override via FR1_SIZE_THRESHOLD_MB)
                 "semantic_split_preferred": True,  # Prefer chapter/ToC over page windows
                 "fallback_to_pages": True,  # Fall back to page windows if no structure
+                "max_pages_per_part": 40,  # Safety ceiling per extracted part
                 "max_split_parts": 50,  # Safety limit on number of parts
+                "enable_ocr": True,  # Enable OCR for low/zero-text pages (unstructured hi_res)
             },
             "concurrency": {
                 "pass_a": 4,  # Pass A concurrency
@@ -56,16 +58,16 @@ class FR1Config:
         # Environment-specific overrides
         env_overrides = {
             "dev": {
-                "preprocessor": {"size_threshold_mb": 30.0},  # Lower threshold for dev
+                "preprocessor": {"size_threshold_mb": 30.0, "enable_ocr": True},  # Lower threshold for dev
                 "concurrency": {"pass_a": 2, "pass_b": 3, "pass_c": 1},  # Conservative dev settings
             },
             "test": {
-                "preprocessor": {"size_threshold_mb": 25.0},  # Even lower for test fixtures
+                "preprocessor": {"size_threshold_mb": 25.0, "enable_ocr": True},  # Even lower for test fixtures
                 "concurrency": {"pass_a": 1, "pass_b": 1, "pass_c": 1},  # Single-threaded for determinism
                 "quality": {"procedure_extraction_enabled": False},  # Disable experimental features
             },
             "prod": {
-                "preprocessor": {"size_threshold_mb": 50.0},  # Higher threshold for production
+                "preprocessor": {"size_threshold_mb": 50.0, "enable_ocr": True},  # Higher threshold for production
                 "concurrency": {"pass_a": 8, "pass_b": 12, "pass_c": 4},  # More aggressive prod settings
                 "quality": {"procedure_extraction_enabled": True},  # Enable all features in prod
             }
@@ -97,6 +99,8 @@ class FR1Config:
         """Apply environment variable overrides with FR1_ prefix"""
         env_mappings = {
             "FR1_SIZE_THRESHOLD_MB": ("preprocessor", "size_threshold_mb", float),
+            "FR1_ENABLE_OCR": ("preprocessor", "enable_ocr", lambda x: x.lower() == "true"),
+            "FR1_MAX_PAGES_PER_PART": ("preprocessor", "max_pages_per_part", int),
             "FR1_PASS_A_CONCURRENCY": ("concurrency", "pass_a", int),
             "FR1_PASS_B_CONCURRENCY": ("concurrency", "pass_b", int),
             "FR1_PASS_C_CONCURRENCY": ("concurrency", "pass_c", int),

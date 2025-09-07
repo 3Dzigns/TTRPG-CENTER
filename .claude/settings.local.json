@@ -22,7 +22,21 @@
       "Bash(git config:*)",
       "Bash(git add:*)",
       "Bash(git push:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git branch:*)",
+      "Bash(pip check)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(export APP_ENV=dev)",
+      "Bash(uvicorn:*)",
+      "Bash(echo:*)",
+      "Bash(openssl req:*)",
+      "Bash(taskkill:*)",
+      "Bash(./scripts/run-https-dev.sh:*)",
+      "Bash(alembic init:*)",
+      "Bash(alembic revision:*)",
+      "Bash(alembic upgrade:*)"
     ],
     "deny": [],
     "ask": []

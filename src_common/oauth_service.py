@@ -9,11 +9,12 @@ import secrets
 import time
 from typing import Dict, Optional, Tuple, Any
 from urllib.parse import urlencode
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+import jwt
 from authlib.common.errors import AuthlibBaseError
 
 from src_common.ttrpg_logging import get_logger
@@ -53,43 +54,58 @@ class OAuthStateManager:
     
     def __init__(self):
         self._states: Dict[str, Dict[str, Any]] = {}
+        # Use a stable secret so validation works across processes
+        self._secret = os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET") or secrets.token_urlsafe(32)
+        self._alg = "HS256"
     
     def generate_state(self, provider: str, return_url: Optional[str] = None) -> str:
-        """Generate secure state token for OAuth flow"""
-        state_token = secrets.token_urlsafe(32)
-        self._states[state_token] = {
+        """Generate secure state token for OAuth flow
+        Uses signed JWT so it works across reloads/processes.
+        """
+        now = datetime.now(timezone.utc)
+        payload = {
             "provider": provider,
             "return_url": return_url,
-            "created_at": time.time(),
-            "expires_at": time.time() + 600  # 10 minutes
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=10)).timestamp()),
+            "nonce": secrets.token_urlsafe(8),
         }
-        logger.debug(f"Generated OAuth state for {provider}: {state_token[:8]}...")
-        return state_token
+        token = jwt.encode(payload, self._secret, algorithm=self._alg)
+        logger.debug(f"Generated OAuth state for {provider} (jwt)")
+        return token
     
     def validate_state(self, state_token: str, provider: str) -> Tuple[bool, Optional[str]]:
         """Validate state token and return return_url if valid"""
-        if state_token not in self._states:
-            logger.warning(f"Invalid OAuth state token: {state_token[:8]}...")
+        # Prefer stateless validation first (JWT state)
+        try:
+            data = jwt.decode(state_token, self._secret, algorithms=[self._alg])
+            if data.get("provider") != provider:
+                logger.warning(
+                    f"Provider mismatch for state token: expected {provider}, got {data.get('provider')}"
+                )
+                return False, None
+            logger.debug(f"Validated OAuth state (jwt) for {provider}")
+            return True, data.get("return_url")
+        except jwt.ExpiredSignatureError:
+            logger.warning("Expired OAuth state token (jwt)")
             return False, None
-        
-        state_data = self._states[state_token]
-        
-        # Check expiration
-        if time.time() > state_data["expires_at"]:
-            logger.warning(f"Expired OAuth state token: {state_token[:8]}...")
+        except Exception:
+            # Fallback to in-memory state for backward compatibility
+            if state_token not in self._states:
+                logger.warning("Invalid OAuth state token (not found)")
+                return False, None
+            state_data = self._states[state_token]
+            if time.time() > state_data["expires_at"]:
+                logger.warning("Expired OAuth state token (memory)")
+                del self._states[state_token]
+                return False, None
+            if state_data["provider"] != provider:
+                logger.warning("Provider mismatch for state token (memory)")
+                return False, None
+            return_url = state_data.get("return_url")
             del self._states[state_token]
-            return False, None
-        
-        # Check provider match
-        if state_data["provider"] != provider:
-            logger.warning(f"Provider mismatch for state token: expected {provider}, got {state_data['provider']}")
-            return False, None
-        
-        return_url = state_data.get("return_url")
-        del self._states[state_token]  # One-time use
-        
-        logger.debug(f"Validated OAuth state for {provider}")
-        return True, return_url
+            logger.debug(f"Validated OAuth state (memory) for {provider}")
+            return True, return_url
     
     def cleanup_expired_states(self):
         """Clean up expired state tokens"""
@@ -173,10 +189,12 @@ class GoogleOAuthService:
                 client_id=self.client_id,
                 client_secret=self.client_secret
             ) as client:
+                # Explicitly specify authorization_code grant type
                 token_response = await client.fetch_token(
                     self.config["token_url"],
-                    authorization_response_url=f"{self.redirect_url}?code={code}&state={state}",
-                    redirect_uri=self.redirect_url
+                    code=code,
+                    redirect_uri=self.redirect_url,
+                    grant_type="authorization_code"
                 )
                 
                 logger.info("Successfully exchanged OAuth code for token")
@@ -312,10 +330,10 @@ class OAuthUserManager:
                 counter += 1
             
             # Create user (OAuth users don't have passwords)
-            user_id = self.db_manager.create_user(
+            user = self.db_manager.create_user(
                 username=username,
                 email=email,
-                password_hash="",  # No password for OAuth users
+                password=None,  # No password for OAuth users
                 role=UserRole.USER,
                 full_name=name,
                 oauth_provider=provider,
@@ -323,7 +341,7 @@ class OAuthUserManager:
                 is_oauth_user=True
             )
             
-            return user_id
+            return str(user.id)
             
         except Exception as e:
             logger.error(f"Error creating OAuth user: {e}")
@@ -353,6 +371,12 @@ class OAuthAuthenticationService:
         # Initialize database manager
         db_url = os.getenv("AUTH_DATABASE_URL", "sqlite:///./auth.db")
         self.db_manager = AuthDatabaseManager(db_url)
+        # Ensure tables exist for first-time runs
+        try:
+            self.db_manager.create_tables()
+        except Exception:
+            # Non-fatal here; downstream operations will surface specifics
+            pass
         self.user_manager = OAuthUserManager(self.db_manager)
         
         logger.info("OAuth authentication service initialized")

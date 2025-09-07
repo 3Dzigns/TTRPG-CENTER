@@ -68,6 +68,10 @@ class AuthDatabaseManager:
         """Get database session"""
         return self.SessionLocal()
     
+    def get_db_session(self) -> Session:
+        """Get database session (alias for compatibility)"""
+        return self.get_session()
+    
     def create_user(self, username: str, email: str, password: str = None, 
                    role: UserRole = UserRole.USER, full_name: str = None,
                    oauth_provider: str = None, oauth_id: str = None, 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import logging
 
-from ttrpg_logging import get_logger
+from .logging import get_logger
 
 
 logger = get_logger(__name__)
@@ -247,6 +247,29 @@ def get_all_config() -> Dict[str, Any]:
     })
     
     return config
+
+
+def sanitize_config_for_logging(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produce a redacted copy of config suitable for logging.
+    Any key containing common secret indicators will have its value replaced.
+    """
+    def _sanitize(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            out: Dict[str, Any] = {}
+            for k, v in obj.items():
+                k_lower = str(k).lower()
+                if any(s in k_lower for s in ["password", "token", "secret", "api_key", "key"]):
+                    out[k] = "***REDACTED***"
+                else:
+                    out[k] = _sanitize(v)
+            return out
+        elif isinstance(obj, list):
+            return [_sanitize(x) for x in obj]
+        else:
+            return obj
+
+    return _sanitize(config)
 
 
 def sanitize_config_for_logging(config: Dict[str, Any]) -> Dict[str, Any]:

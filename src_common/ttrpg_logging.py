@@ -81,6 +81,9 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
         Configured logger instance
     """
     env = os.getenv('APP_ENV', 'dev')
+    # Respect LOG_LEVEL if provided
+    level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+    level_value = getattr(_logging, level_name, _logging.INFO)
     
     # Default logging configuration
     default_config = {
@@ -100,19 +103,20 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
             'console': {
                 'class': 'logging.StreamHandler',
                 'formatter': 'json' if env != 'dev' else 'console',
-                'level': 'INFO',
+                'level': level_name,
                 'stream': 'ext://sys.stdout'
             }
         },
         'root': {
-            'level': 'INFO',
+            'level': level_name,
             'handlers': ['console']
         },
         'loggers': {
             'ttrpg': {
                 'level': 'DEBUG' if env == 'dev' else 'INFO',
-                'handlers': ['console'],
-                'propagate': False
+                # Let records propagate to root so test caplog can capture
+                'handlers': [],
+                'propagate': True
             },
             'uvicorn': {
                 'level': 'INFO',
@@ -150,6 +154,9 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
                         logger_config['handlers'].append('file')
                 file_config['root']['handlers'].append('file')
                 
+            # Ensure ttrpg logger propagates to root for test capture
+            if 'loggers' in file_config and 'ttrpg' in file_config['loggers']:
+                file_config['loggers']['ttrpg']['propagate'] = True
             _logging_config.dictConfig(file_config)
         except Exception as e:
             print(f"Warning: Failed to load logging config from {config_path}: {e}")
@@ -171,6 +178,7 @@ def get_logger(name: str) -> _logging.Logger:
         Logger instance configured with TTRPG formatting
     """
     logger = _logging.getLogger(f"ttrpg.{name}")
+    # Make sure a handler exists via root; explicit handlers not bound here
     return logger
 
 
@@ -266,9 +274,11 @@ def sanitize_for_logging(data: Any) -> Any:
         return sanitized
     elif isinstance(data, list):
         return [sanitize_for_logging(item) for item in data]
-    elif isinstance(data, str) and len(data) > 50:
-        # Truncate very long strings that might contain secrets
-        if any(keyword in data.lower() for keyword in ['bearer ', 'token', 'key=', 'password=']):
+    elif isinstance(data, str):
+        s = data.lower()
+        # Redact common bearer/API key patterns regardless of length
+        sensitive_markers = ['authorization:', 'bearer ', 'token', 'key=', 'password=', 'sk-', 'pk-']
+        if any(marker in s for marker in sensitive_markers):
             return '***REDACTED***'
     
     return data

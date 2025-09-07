@@ -214,7 +214,7 @@ class UserProfile(BaseModel):
     email: str = Field(description="Email address")
     role: UserRole = Field(description="User role")
     is_active: bool = Field(description="User active status")
-    created_at: datetime = Field(description="Account creation date")
+    created_at: Optional[datetime] = Field(default=None, description="Account creation date")
     last_login: Optional[datetime] = Field(default=None, description="Last login time")
 
 

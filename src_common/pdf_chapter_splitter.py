@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
 import pypdf
-from ttrpg_logging import get_logger
-from fr1_config import get_fr1_config
+from .logging import get_logger
+from .fr1_config import get_fr1_config
 
 logger = get_logger(__name__)
 
@@ -67,6 +67,13 @@ class PDFChapterSplitter:
         # FR1-E6: Load configuration for size-based splitting
         self.config = get_fr1_config(env)
         self.preprocessor_config = self.config.get_preprocessor_config()
+        # Apply page ceiling from config if present
+        try:
+            cfg_max = int(self.preprocessor_config.get("max_pages_per_part", self.max_chapter_pages))
+            if cfg_max > 0:
+                self.max_chapter_pages = cfg_max
+        except Exception:
+            pass
         
         # TTRPG-specific chapter patterns
         self.chapter_patterns = [
@@ -141,6 +148,12 @@ class PDFChapterSplitter:
         manifest.processing_time_ms = 0  # Will be updated at the end
         
         try:
+            # Optional: load primer to enhance splitting cues
+            try:
+                from .ingestion_primer import load_or_create_primer
+            except Exception:
+                load_or_create_primer = None  # type: ignore
+
             with open(pdf_path, 'rb') as file:
                 pdf_reader = pypdf.PdfReader(file)
                 total_pages = len(pdf_reader.pages)
@@ -152,7 +165,7 @@ class PDFChapterSplitter:
                 # Extract text from first 20 pages to find chapter patterns (optimized)
                 max_scan_pages = min(20, total_pages)
                 logger.info(f"Scanning first {max_scan_pages} pages for chapter markers")
-                
+
                 for page_num in range(max_scan_pages):
                     try:
                         page = pdf_reader.pages[page_num]
@@ -161,6 +174,24 @@ class PDFChapterSplitter:
                     except Exception as e:
                         logger.warning(f"Error extracting text from page {page_num + 1}: {e}")
                         page_texts.append((page_num + 1, ""))
+
+                # Primer pass: infer additional cues from title/ToC/sample text
+                try:
+                    if load_or_create_primer:
+                        title = pdf_path.stem
+                        toc_text = "\n".join(t or "" for _, t in page_texts[:4])
+                        primer = load_or_create_primer(self.config._config.get('environment', 'dev'), title, toc_text, [])  # type: ignore
+                        cues = []
+                        if isinstance(primer, dict):
+                            cues = primer.get('procedures', {}).get('cues', []) if primer.get('procedures') else []
+                        # Convert cues to regex-ish patterns (simple upper-case headings)
+                        for cue in (cues or []):
+                            pat = rf'^({re.escape(cue)})[:\s]'
+                            if pat not in self.chapter_patterns:
+                                self.chapter_patterns.append(pat)
+                        logger.info(f"Primer cues applied: {len(cues) if cues else 0}")
+                except Exception as e:
+                    logger.debug(f"Primer step skipped/failed: {e}")
                 
                 # Find chapter boundaries
                 chapter_pages = []
@@ -349,24 +380,29 @@ class PDFChapterSplitter:
                 )
         except Exception as e:
             logger.error(f"Fallback split failed: {e}")
-            # Create empty manifest for error case
-            empty_manifest = SplitManifest(
-                original_file=str(pdf_path),
-                original_size_bytes=0,
-                original_size_mb=0.0,
-                threshold_mb=40.0,
-                split_strategy="error",
-                split_triggered=False,
-                num_parts=0,
-                processing_time_ms=100
-            )
+            # Preserve measured size info from should_auto_split, but mark error
+            try:
+                manifest.split_strategy = "error"  # type: ignore[name-defined]
+                manifest.processing_time_ms = 100  # type: ignore[name-defined]
+                manifest.num_parts = 0  # type: ignore[name-defined]
+            except Exception:
+                manifest = SplitManifest(
+                    original_file=str(pdf_path),
+                    original_size_bytes=0,
+                    original_size_mb=0.0,
+                    threshold_mb=40.0,
+                    split_strategy="error",
+                    split_triggered=False,
+                    num_parts=0,
+                    processing_time_ms=100,
+                )
             return ChapterSplit(
                 chapters=[],
                 total_pages=0,
                 split_successful=False,
                 fallback_used=True,
                 processing_time_ms=100,
-                manifest=empty_manifest
+                manifest=manifest
             )
     
     def extract_chapter_pages(self, pdf_path: Path, chapter: Chapter, output_path: Path) -> bool:

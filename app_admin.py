@@ -17,6 +17,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src_common.logging import get_logger, setup_logging
+from src_common.cors_security import (
+    setup_secure_cors,
+    validate_cors_startup,
+    get_cors_health_status,
+)
+from src_common.tls_security import (
+    create_app_with_tls,
+    validate_tls_startup,
+    get_tls_health_status,
+)
+from src_common.jwt_service import auth_service
 from src_common.admin import (
     AdminStatusService,
     AdminIngestionService,
@@ -24,6 +35,8 @@ from src_common.admin import (
     AdminTestingService,
     AdminCacheService
 )
+# OAuth integration
+from src_common.oauth_endpoints import oauth_router
 
 
 # Initialize logging
@@ -44,14 +57,33 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+# Security configuration - FR-SEC-402 & FR-SEC-403
+try:
+    # Validate security configurations on startup
+    validate_cors_startup()
+    validate_tls_startup()
+    
+    # Setup secure CORS instead of wildcard configuration
+    setup_secure_cors(app)
+    
+    logger.info("Security configuration initialized successfully")
+except Exception as e:
+    logger.error(f"Security configuration failed: {e}")
+    if os.getenv("ENVIRONMENT") == "prod":
+        raise  # Fail hard in production
+    else:
+        logger.warning("Continuing with basic CORS for development")
+        # Fallback CORS for development only
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With"]
+        )
+
+# Include OAuth router
+app.include_router(oauth_router)
 
 # Static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -167,6 +199,32 @@ async def admin_dashboard(request: Request):
     except Exception as e:
         logger.error(f"Error loading admin dashboard: {e}")
         raise HTTPException(status_code=500, detail="Error loading dashboard")
+
+
+# Security (JWT) enforcement middleware for admin APIs in production
+@app.middleware("http")
+async def admin_auth_middleware(request: Request, call_next):
+    try:
+        # Only enforce on API routes in production
+        env = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "dev")).lower()
+        if env == "prod" and request.url.path.startswith("/api/") and request.method != "OPTIONS":
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return JSONResponse({"detail": "Authentication required"}, status_code=401)
+            token = auth_header[7:]
+            # Verify token and require admin role
+            try:
+                user_ctx = auth_service.jwt_service.get_user_context(token)
+                if not getattr(user_ctx, "is_admin", False):
+                    return JSONResponse({"detail": "Admin privileges required"}, status_code=403)
+            except Exception:
+                return JSONResponse({"detail": "Invalid or expired token"}, status_code=401)
+
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        logger.error(f"Admin auth middleware error: {e}")
+        return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
 # System Status API
@@ -512,27 +570,53 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/health")
 async def health_check():
     """Admin service health check"""
+    env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
     return {
         "status": "ok",
         "service": "admin",
         "timestamp": time.time(),
-        "environment": os.getenv("APP_ENV", "dev")
+        "environment": env,
+        "cors": get_cors_health_status(env),
+        "tls": get_tls_health_status(env),
     }
 
 
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
+    from src_common.tls_security import run_with_tls
     
-    # Get port from environment
-    port = int(os.getenv("ADMIN_PORT", 8090))
-    env = os.getenv("APP_ENV", "dev")
+    async def main():
+        # Get port from environment
+        port = int(os.getenv("ADMIN_PORT", 8090))
+        env = os.getenv("APP_ENV", "dev")
+        
+        logger.info(f"Starting TTRPG Center Admin Console on port {port} ({env})")
+        
+        # Configure TLS if available
+        try:
+            app_with_tls, cert_path, key_path = await create_app_with_tls(app, env)
+            if cert_path and key_path:
+                logger.info("Starting with TLS/HTTPS support")
+                run_with_tls(app_with_tls, cert_path, key_path, port)
+            else:
+                logger.info("Starting without TLS (development mode)")
+                uvicorn.run(
+                    app_with_tls,
+                    host="0.0.0.0",
+                    port=port,
+                    log_level="info",
+                    reload=env == "dev"
+                )
+        except Exception as e:
+            logger.error(f"TLS setup failed: {e}")
+            logger.info("Falling back to basic HTTP server")
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=port,
+                log_level="info",
+                reload=env == "dev"
+            )
     
-    logger.info(f"Starting TTRPG Center Admin Console on port {port} ({env})")
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-        reload=env == "dev"
-    )
+    asyncio.run(main())

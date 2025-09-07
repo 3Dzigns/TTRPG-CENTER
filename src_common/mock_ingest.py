@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 
-from ttrpg_logging import get_logger, jlog
+from .logging import get_logger, jlog
 
 
 logger = get_logger(__name__)
@@ -49,49 +49,54 @@ async def run_mock_job(job_id: str, websocket_broadcast: Optional[Callable] = No
         "logs": []
     }
     
-    def log_and_broadcast(message: str, phase: str, status: str):
-        """Log message and broadcast to WebSocket clients."""
+    async def log_and_broadcast(message: str, phase: str, status: str):
+        """Log message and broadcast to WebSocket clients (awaited)."""
         log_entry = {
             "timestamp": time.time(),
             "job_id": job_id,
             "phase": phase,
             "status": status,
-            "message": message
+            "message": message,
         }
-        
+
         manifest["logs"].append(log_entry)
-        
+
         # Structured logging
-        logger.info(message, extra={
-            'job_id': job_id,
-            'phase': phase,
-            'status': status,
-            'component': 'mock_ingest'
-        })
-        
-        # Legacy jlog for compatibility
-        jlog('INFO', message, job_id=job_id, phase=phase, status=status)
-        
-        # WebSocket broadcast
-        if websocket_broadcast:
-            asyncio.create_task(websocket_broadcast({
-                "type": "ingestion_update",
+        logger.info(
+            message,
+            extra={
                 "job_id": job_id,
                 "phase": phase,
                 "status": status,
-                "message": message,
-                "timestamp": time.time()
-            }))
+                "component": "mock_ingest",
+            },
+        )
+
+        # Legacy jlog for compatibility
+        jlog("INFO", message, job_id=job_id, phase=phase, status=status)
+
+        # WebSocket broadcast
+        if websocket_broadcast:
+            await websocket_broadcast(
+                {
+                    "type": "ingestion_update",
+                    "job_id": job_id,
+                    "phase": phase,
+                    "status": status,
+                    "message": message,
+                    "timestamp": time.time(),
+                }
+            )
     
     try:
-        log_and_broadcast("Starting mock ingestion job", "init", "started")
+        await log_and_broadcast("Starting mock ingestion job", "init", "started")
         
         # Phase 1: Parse/Chunk (Mock unstructured.io)
         phase_name = "parse_chunk"
         manifest["phases"][phase_name]["started_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "running"
         
-        log_and_broadcast("Starting PDF parse and chunk phase", phase_name, "running")
+        await log_and_broadcast("Starting PDF parse and chunk phase", phase_name, "running")
         await asyncio.sleep(0.5)  # Simulate processing time
         
         # Create mock output
@@ -131,15 +136,18 @@ async def run_mock_job(job_id: str, websocket_broadcast: Optional[Callable] = No
         manifest["phases"][phase_name]["completed_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "completed"
         
-        log_and_broadcast(f"Parse/chunk phase completed: {len(chunks_data['chunks'])} chunks created", 
-                         phase_name, "completed")
+        await log_and_broadcast(
+            f"Parse/chunk phase completed: {len(chunks_data['chunks'])} chunks created",
+            phase_name,
+            "completed",
+        )
         
         # Phase 2: Enrich (Mock Haystack)
         phase_name = "enrich"
         manifest["phases"][phase_name]["started_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "running"
         
-        log_and_broadcast("Starting content enrichment phase", phase_name, "running")
+        await log_and_broadcast("Starting content enrichment phase", phase_name, "running")
         await asyncio.sleep(0.7)  # Simulate processing time
         
         # Create mock enriched data
@@ -190,15 +198,18 @@ async def run_mock_job(job_id: str, websocket_broadcast: Optional[Callable] = No
         manifest["phases"][phase_name]["completed_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "completed"
         
-        log_and_broadcast(f"Enrichment phase completed: {len(enriched_data['dictionary_updates'])} dictionary entries added",
-                         phase_name, "completed")
+        await log_and_broadcast(
+            f"Enrichment phase completed: {len(enriched_data['dictionary_updates'])} dictionary entries added",
+            phase_name,
+            "completed",
+        )
         
         # Phase 3: Graph Compile (Mock LlamaIndex)
         phase_name = "graph_compile"
         manifest["phases"][phase_name]["started_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "running"
         
-        log_and_broadcast("Starting graph compilation phase", phase_name, "running")
+        await log_and_broadcast("Starting graph compilation phase", phase_name, "running")
         await asyncio.sleep(0.3)  # Simulate processing time
         
         # Create mock graph data
@@ -255,8 +266,11 @@ async def run_mock_job(job_id: str, websocket_broadcast: Optional[Callable] = No
         manifest["phases"][phase_name]["completed_at"] = time.time()
         manifest["phases"][phase_name]["status"] = "completed"
         
-        log_and_broadcast(f"Graph compilation completed: {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges",
-                         phase_name, "completed")
+        await log_and_broadcast(
+            f"Graph compilation completed: {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges",
+            phase_name,
+            "completed",
+        )
         
         # Finalize job
         manifest["status"] = "completed"
@@ -268,7 +282,7 @@ async def run_mock_job(job_id: str, websocket_broadcast: Optional[Callable] = No
         with open(manifest_file, 'w') as f:
             json.dump(manifest, f, indent=2)
         
-        log_and_broadcast("Mock ingestion job completed successfully", "finalize", "completed")
+        await log_and_broadcast("Mock ingestion job completed successfully", "finalize", "completed")
         
         return {
             "job_id": job_id,

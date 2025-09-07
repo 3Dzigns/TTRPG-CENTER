@@ -11,8 +11,8 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import uuid
 
-from ttrpg_logging import get_logger
-from ttrpg_secrets import get_all_config, validate_database_config, load_env
+from .logging import get_logger
+from .secrets import get_all_config, validate_database_config, load_env
 from pathlib import Path
 import os
 
@@ -45,7 +45,7 @@ class AstraLoader:
         root_env = project_root / ".env"
         if root_env.exists():
             logger.info(f"Loading credentials from root .env: {root_env}")
-            from ttrpg_secrets import _load_env_file
+            from .ttrpg_secrets import _load_env_file
             _load_env_file(root_env)
         
         self.config = get_all_config()
@@ -183,17 +183,56 @@ class AstraLoader:
             # Get or create collection
             collection = self.client.get_collection(self.collection_name)
             
-            # Prepare documents for AstraDB
+            # Prepare documents for AstraDB; enforce content size limits (<= ~8000 bytes)
             documents = []
+            MAX_BYTES = 7900
             for chunk in chunks:
-                doc = {
-                    'chunk_id': chunk['id'],
-                    'content': chunk['content'],
-                    'metadata': chunk['metadata'],
-                    'environment': self.env,
-                    'loaded_at': time.time()
-                }
-                documents.append(doc)
+                content = chunk['content']
+                meta = chunk['metadata']
+                base_id = chunk['id']
+                b = content.encode('utf-8')
+                if len(b) <= MAX_BYTES:
+                    documents.append({
+                        'chunk_id': base_id,
+                        'content': content,
+                        'metadata': meta,
+                        'environment': self.env,
+                        'loaded_at': time.time()
+                    })
+                else:
+                    # Split content into safe byte-sized pieces
+                    parts: list[str] = []
+                    # First try paragraphs
+                    current = ''
+                    for para in content.split('\n\n'):
+                        test = (current + ('\n\n' if current else '') + para)
+                        if len(test.encode('utf-8')) > MAX_BYTES and current:
+                            parts.append(current)
+                            current = para
+                        else:
+                            current = test
+                    if current:
+                        parts.append(current)
+                    # Now enforce byte slicing for any oversized part
+                    safe_parts: list[str] = []
+                    for p in parts:
+                        b2 = p.encode('utf-8')
+                        if len(b2) <= MAX_BYTES:
+                            safe_parts.append(p)
+                        else:
+                            start = 0
+                            while start < len(b2):
+                                seg = b2[start:start+MAX_BYTES]
+                                safe_parts.append(seg.decode('utf-8', errors='ignore'))
+                                start += MAX_BYTES
+                    for pi, part in enumerate(safe_parts, 1):
+                        documents.append({
+                            'chunk_id': f"{base_id}-part{pi}",
+                            'content': part,
+                            'metadata': meta,
+                            'environment': self.env,
+                            'loaded_at': time.time()
+                        })
             
             # Batch insert to AstraDB (insert_many for large batches)
             logger.info(f"Inserting {len(documents)} documents to collection {self.collection_name}")

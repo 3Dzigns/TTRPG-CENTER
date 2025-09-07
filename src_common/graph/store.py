@@ -296,9 +296,11 @@ class GraphStore:
                     logger.warning(f"Neighbor search truncated at {self.MAX_NEIGHBORS} nodes")
                     break
 
-            # Materialize discovered neighbors
+            # Materialize discovered neighbors, enforce MAX_NEIGHBORS cap
             neighbors: List[Dict[str, Any]] = []
             for neighbor_id in discovered:
+                if len(neighbors) >= self.MAX_NEIGHBORS:
+                    break
                 node = self.nodes.get(neighbor_id)
                 if node:
                     neighbors.append(asdict(node))

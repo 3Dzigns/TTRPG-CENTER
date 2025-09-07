@@ -22,9 +22,11 @@ except ImportError:
     
 import pypdf
 
-from ttrpg_logging import get_logger
-from fr1_config import get_fr1_config
-from toc_parser import TocParser, DocumentOutline
+from .logging import get_logger
+from .fr1_config import get_fr1_config
+from .toc_parser import TocParser, DocumentOutline
+from .pdf_chapter_splitter import PDFChapterSplitter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = get_logger(__name__)
 
@@ -110,11 +112,14 @@ class PassAParser:
             else:
                 self.document_outline = None
             
-            # Check if PDF is large and needs chapter-based processing
+            # Check if PDF is large and needs pre-processing per FR1-E6 (size-based splitting)
             file_size_mb = pdf_path.stat().st_size / (1024 * 1024)
-            if file_size_mb > 50:  # Large PDFs (>50MB) use chapter-based processing
-                logger.info(f"Large PDF detected ({file_size_mb:.1f}MB), using chapter-based processing")
-                chunks = self._parse_with_chapters(pdf_path)
+            threshold = self.fr1_config.get_preprocessor_config().get("size_threshold_mb", 40.0)
+            if file_size_mb >= threshold:
+                logger.info(
+                    f"Large PDF detected ({file_size_mb:.1f}MB >= {threshold}MB), using FR1-E6 pre-processor"
+                )
+                chunks = self._parse_with_chapters_fr1(pdf_path, output_dir)
             elif UNSTRUCTURED_AVAILABLE:
                 chunks = self._parse_with_unstructured(pdf_path)
             else:
@@ -184,14 +189,27 @@ class PassAParser:
     def _parse_with_unstructured(self, pdf_path: Path) -> List[Dict[str, Any]]:
         """Parse PDF using unstructured.io"""
         logger.debug(f"Partitioning PDF with unstructured.io: {pdf_path}")
-        elements = partition_pdf(
-            filename=str(pdf_path),
-            strategy="auto",
-            infer_table_structure=True,
-            extract_images_in_pdf=False,
-            include_page_breaks=True,
-            languages=["eng"],
-        )
+        # Choose strategy based on FR1 config (enable_ocr)
+        strategy = "hi_res" if self.fr1_config.get_preprocessor_config().get("enable_ocr", True) else "auto"
+        try:
+            elements = partition_pdf(
+                filename=str(pdf_path),
+                strategy=strategy,
+                infer_table_structure=True,
+                extract_images_in_pdf=False,
+                include_page_breaks=True,
+                languages=["eng"],
+            )
+        except Exception as e:
+            logger.warning(f"unstructured {strategy} failed ({e}), retrying with auto")
+            elements = partition_pdf(
+                filename=str(pdf_path),
+                strategy="auto",
+                infer_table_structure=True,
+                extract_images_in_pdf=False,
+                include_page_breaks=True,
+                languages=["eng"],
+            )
         
         logger.info(f"Extracted {len(elements)} elements from PDF")
         
@@ -212,10 +230,12 @@ class PassAParser:
             chunk_id = f"{self.job_id}_chunk_{i:03d}"
             
             # Extract metadata from unstructured element
+            category = str(getattr(element, 'category', 'text'))
+            chunk_type = category.lower() if category else 'text'
             metadata = ChunkMetadata(
                 page=getattr(element.metadata, 'page_number', 1),
                 section=self._extract_section_name_unstructured(element),
-                chunk_type=str(element.category) if hasattr(element, 'category') else 'text',
+                chunk_type=chunk_type,
                 element_id=getattr(element.metadata, 'element_id', f'element_{i}'),
                 coordinates=self._extract_coordinates(element),
                 confidence=getattr(element.metadata, 'detection_confidence', None)
@@ -247,7 +267,133 @@ class PassAParser:
                 full_text += f"\n--- PAGE {page_num} ---\n" + page_text
         
         logger.info(f"Extracted text from {len(pdf_reader.pages)} pages")
-        
+
+        # Create simple one-chunk-per-page output as fallback
+        chunks: List[Dict[str, Any]] = []
+        for (page_num, page_text) in page_texts:
+            if not page_text:
+                continue
+            metadata = ChunkMetadata(
+                page=page_num,
+                section="unknown",
+                chunk_type="text",
+                element_id=f"page_{page_num}",
+            )
+            chunk = DocumentChunk(
+                id=f"{self.job_id}_p{page_num:04d}",
+                content=page_text.strip(),
+                metadata=metadata,
+            )
+            chunks.append(asdict(chunk))
+
+        return chunks
+
+    def _parse_with_chapters(self, pdf_path: Path, output_dir: Path) -> List[Dict[str, Any]]:
+        """Use FR1-E6 pre-processor to split and parse chapters concurrently."""
+        splitter = PDFChapterSplitter(env=self.fr1_config.env)
+        result = splitter.detect_chapters(pdf_path)
+        chapters = result.chapters
+        if not chapters:
+            logger.warning("No chapters detected; falling back to pypdf parsing")
+            return self._parse_with_pypdf(pdf_path)
+
+        # Extract chapter PDFs into a temp folder under output_dir
+        chapter_dir = output_dir / "chapters"
+        chapter_dir.mkdir(parents=True, exist_ok=True)
+
+        jobs = []
+        for i, ch in enumerate(chapters, 1):
+            out_pdf = chapter_dir / f"chapter_{i:03d}.pdf"
+            ok = splitter.extract_chapter_pages(pdf_path, ch, out_pdf)
+            if ok:
+                jobs.append((ch, out_pdf))
+
+        if not jobs:
+            logger.warning("Chapter extraction failed; falling back to pypdf")
+            return self._parse_with_pypdf(pdf_path)
+
+        # Concurrency settings from FR1 config
+        max_workers = int(self.fr1_config.get_concurrency_config().get("pass_a", 2))
+        logger.info(f"Parsing {len(jobs)} chapter parts with {max_workers} workers")
+
+        parsed_chunks: List[Dict[str, Any]] = []
+
+        def parse_part(idx: int, ch_pdf: Path) -> List[Dict[str, Any]]:
+            try:
+                if UNSTRUCTURED_AVAILABLE:
+                    return self._parse_with_unstructured(ch_pdf)
+                else:
+                    return self._parse_with_pypdf(ch_pdf)
+            except Exception as e:
+                logger.error(f"Error parsing part {idx}: {e}")
+                return []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(parse_part, i, p): (i, p) for i, (_, p) in enumerate(jobs, 1)}
+            for fut in as_completed(futures):
+                idx, part_path = futures[fut]
+                try:
+                    part_chunks = fut.result()
+                    # Tag section_title from chapter metadata when available
+                    if part_chunks:
+                        for c in part_chunks:
+                            md = c.get("metadata", {})
+                            if isinstance(md, dict) and result.manifest:
+                                md.setdefault("section", md.get("section", "unknown"))
+                        parsed_chunks.extend(part_chunks)
+                except Exception as e:
+                    logger.error(f"Part {idx} failed: {e}")
+
+        logger.info(f"Parsed {len(parsed_chunks)} chunks across {len(jobs)} parts")
+        return parsed_chunks
+
+    def _parse_with_chapters_fr1(self, pdf_path: Path, output_dir: Path) -> List[Dict[str, Any]]:
+        """Alternate FR1-E6 chapter parsing to avoid conflicts with legacy method."""
+        splitter = PDFChapterSplitter(env=self.fr1_config.env)
+        result = splitter.detect_chapters(pdf_path)
+        chapters = result.chapters
+        if not chapters:
+            logger.warning("No chapters detected; falling back to pypdf parsing")
+            return self._parse_with_pypdf(pdf_path)
+
+        chapter_dir = output_dir / "chapters"
+        chapter_dir.mkdir(parents=True, exist_ok=True)
+
+        jobs = []
+        for i, ch in enumerate(chapters, 1):
+            out_pdf = chapter_dir / f"chapter_{i:03d}.pdf"
+            ok = splitter.extract_chapter_pages(pdf_path, ch, out_pdf)
+            if ok:
+                jobs.append((ch, out_pdf))
+
+        if not jobs:
+            logger.warning("Chapter extraction failed; falling back to pypdf")
+            return self._parse_with_pypdf(pdf_path)
+
+        max_workers = int(self.fr1_config.get_concurrency_config().get("pass_a", 2))
+
+        parsed_chunks: List[Dict[str, Any]] = []
+        def parse_part(idx: int, part_pdf: Path) -> List[Dict[str, Any]]:
+            try:
+                if UNSTRUCTURED_AVAILABLE:
+                    return self._parse_with_unstructured(part_pdf)
+                else:
+                    return self._parse_with_pypdf(part_pdf)
+            except Exception as e:
+                logger.error(f"Error parsing part {idx}: {e}")
+                return []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(parse_part, i, p): (i, p) for i, (_, p) in enumerate(jobs, 1)}
+            for fut in as_completed(futures):
+                idx, part_path = futures[fut]
+                try:
+                    parsed_chunks.extend(fut.result())
+                except Exception as e:
+                    logger.error(f"Part {idx} failed: {e}")
+
+        logger.info(f"Parsed {len(parsed_chunks)} chunks across {len(jobs)} parts")
+        return parsed_chunks
         # Simple chunking based on content structure
         chunks = self._chunk_text_simple(full_text, page_texts)
         

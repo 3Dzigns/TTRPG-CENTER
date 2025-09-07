@@ -252,17 +252,20 @@ class TestSecretsHandlingSecurity:
     def test_missing_required_secrets_fail_securely(self):
         """Test that missing required secrets fail with secure error messages."""
         from src_common.secrets import get_required_secret, SecretsError
-        
+
         with pytest.raises(SecretsError) as excinfo:
             get_required_secret('NONEXISTENT_SECRET_KEY')
-        
+
         error_message = str(excinfo.value)
-        
-        # Error message should not contain any actual secret values
+
+        # Error message should include the exact missing key name for diagnostics
         assert 'NONEXISTENT_SECRET_KEY' in error_message
+
+        # When scanning for sensitive markers, ignore the explicit key string itself
+        sanitized_msg = error_message.lower().replace('nonexistent_secret_key'.lower(), '')
         # Should not contain hints about other secrets that might exist
-        assert 'sk-' not in error_message
-        assert 'secret_' not in error_message.lower()
+        assert 'sk-' not in sanitized_msg
+        assert 'secret_' not in sanitized_msg
     
     def test_production_secrets_validation(self, monkeypatch):
         """Test that production environment enforces required secrets."""

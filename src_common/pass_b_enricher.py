@@ -18,7 +18,7 @@ from haystack.components.preprocessors import DocumentSplitter
 from haystack.components.writers import DocumentWriter
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 
-from ttrpg_logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -284,12 +284,13 @@ class PassBEnricher:
         
         # Define category keywords
         category_keywords = {
-            'character-creation': ['character', 'race', 'class', 'ability score', 'background', 'feat'],
+            'character-creation': ['character', 'race', 'class', 'ability score', 'background'],
             'combat': ['combat', 'attack', 'damage', 'initiative', 'armor class', 'hit points', 'weapon'],
             'spells': ['spell', 'magic', 'cast', 'concentration', 'spell slot', 'verbal', 'somatic'],
             'mechanics': ['roll', 'dice', 'check', 'saving throw', 'proficiency', 'modifier'],
             'equipment': ['weapon', 'armor', 'shield', 'item', 'equipment', 'gear'],
             'exploration': ['adventure', 'dungeon', 'encounter', 'travel', 'rest'],
+            'feats': ['feat', 'prerequisite', 'benefit', 'feat description', 'feat descriptions'],
             'social': ['charisma', 'persuasion', 'deception', 'intimidation', 'npc']
         }
         
@@ -381,6 +382,7 @@ class PassBEnricher:
         """Extract dictionary updates from enriched chunk"""
         updates = []
         content = enriched_chunk.enhanced_content
+        lower = content.lower()
         
         # Extract definitions from content patterns
         definition_patterns = [
@@ -408,7 +410,7 @@ class PassBEnricher:
                     category=category,
                     source_chunk=enriched_chunk.chunk_id
                 ))
-        
+
         # Add entity-based updates for important terms
         for entity in enriched_chunk.entities:
             if len(entity) > 3 and entity not in [update.term.lower() for update in updates]:
@@ -423,6 +425,40 @@ class PassBEnricher:
                     ))
         
         return updates[:10]  # Limit to top 10 updates per chunk
+
+        # Feat-specific extraction (Benefit/Prerequisites blocks)
+        # Try to detect feat blocks and create/update entries
+        # Example patterns: "Benefit : ...", "Prerequisites : ..."
+        feat_match = re.search(r"(benefit\s*:.*?)(?=\n[A-Z]|$)", lower, re.DOTALL)
+        if 'feat' in lower or feat_match:
+            # Guess a term by taking the first line if it looks like a title
+            first_line = content.split('\n', 1)[0].strip()
+            if 3 <= len(first_line) <= 80 and first_line[0].isupper():
+                term = first_line
+            else:
+                term = 'Feat'
+            benefit = None
+            prereq = None
+            m_b = re.search(r"benefit\s*:\s*(.+)", lower)
+            m_p = re.search(r"prereq[a-z]*\s*:\s*(.+)", lower)
+            if m_b:
+                benefit = m_b.group(1).strip()
+            if m_p:
+                prereq = m_p.group(1).strip()
+            if benefit or prereq:
+                definition = ''
+                if prereq:
+                    definition += f"Prerequisites: {prereq}. "
+                if benefit:
+                    definition += f"Benefit: {benefit}."
+                updates.append(DictionaryUpdate(
+                    term=term,
+                    definition=definition.strip(),
+                    category='feats',
+                    source_chunk=enriched_chunk.chunk_id
+                ))
+        
+        return updates[:10]
     
     def _determine_term_category(self, term: str, definition: str, content_categories: List[str]) -> str:
         """Determine the category for a dictionary term"""
@@ -434,6 +470,8 @@ class PassBEnricher:
             return 'mechanics'
         elif any(stat in term_lower for stat in ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']):
             return 'character-stats'
+        elif 'feat' in term_lower or ' feat' in def_lower or 'benefit' in def_lower or 'prerequisite' in def_lower:
+            return 'feats'
         elif any(spell_word in def_lower for spell_word in ['spell', 'magic', 'cast']):
             return 'spells'
         elif any(combat_word in def_lower for combat_word in ['attack', 'damage', 'combat', 'weapon']):

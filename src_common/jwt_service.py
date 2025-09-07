@@ -14,6 +14,21 @@ from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from passlib.context import CryptContext
 from passlib.hash import argon2
 import logging
+from pathlib import Path
+
+# Ensure environment variables from env/{APP_ENV}/config/.env are loaded early
+def _load_env_config_early():
+    try:
+        env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "dev"))
+        env_file = Path(f"env/{env}/config/.env")
+        if env_file.exists():
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+    except Exception:
+        # Non-fatal; continue with existing environment
+        pass
+
+_load_env_config_early()
 
 from .auth_models import UserRole, TokenClaims, UserContext
 from .logging import get_logger
@@ -92,15 +107,28 @@ class JWTService:
         logger.info(f"JWT service initialized with algorithm: {algorithm}")
     
     def _get_secret_key(self) -> str:
-        """Get JWT secret key from environment or generate new one"""
+        """Get JWT secret key from environment or generate new one
+
+        Priority:
+        1) JWT_SECRET_KEY (preferred)
+        2) JWT_SECRET (legacy fallback)
+        3) Generated dev secret (dev only)
+        """
+        # Preferred variable
         secret = os.getenv("JWT_SECRET_KEY")
         if not secret:
-            if os.getenv("ENVIRONMENT", "dev") == "dev":
+            # Backward-compatibility with older env files
+            legacy = os.getenv("JWT_SECRET")
+            if legacy:
+                secret = legacy
+                logger.warning("Using legacy JWT_SECRET env var; set JWT_SECRET_KEY to silence this warning")
+        if not secret:
+            if os.getenv("ENVIRONMENT", "dev") == "dev" or os.getenv("APP_ENV", "dev") == "dev":
                 # Generate a development secret
                 secret = secrets.token_urlsafe(32)
                 logger.warning("Using generated JWT secret - not suitable for production")
             else:
-                raise ValueError("JWT_SECRET_KEY environment variable required for production")
+                raise ValueError("JWT secret not configured (set JWT_SECRET_KEY)")
         return secret
     
     def create_access_token(self, user_id: str, username: str, role: UserRole, 
