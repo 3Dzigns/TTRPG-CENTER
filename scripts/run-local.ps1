@@ -54,8 +54,10 @@ Write-Host ("WebSocket Port: {0}" -f $ports.websocket_port) -ForegroundColor Cya
 Write-Host ("Environment Root: {0}" -f $envRoot) -ForegroundColor Cyan
 Write-Host ""
 
-# Change to project root
-Set-Location $root
+# Change to environment-specific code directory
+$codeDir = Join-Path $envRoot "code"
+Set-Location $codeDir
+Write-Host "Working directory: $codeDir" -ForegroundColor Cyan
 
 # Check Python availability
 try {
@@ -95,9 +97,9 @@ if ($Env -eq 'dev') {
     # Free port 8000 (Dev contract)
     Stop-PortListeners -Port $ports.http_port
 
-    Write-Host "Starting User UI with TLS on port $($ports.http_port)..." -ForegroundColor Green
+    Write-Host "Starting Consolidated TTRPG Center on port $($ports.http_port)..." -ForegroundColor Green
     try {
-        $args = @('-m','uvicorn','app_user:app','--host','0.0.0.0','--port',"$($ports.http_port)",'--ssl-keyfile','certs/dev/key.pem','--ssl-certfile','certs/dev/cert.pem','--reload')
+        $args = @('-m','uvicorn','app_main:app','--host','0.0.0.0','--port',"$($ports.http_port)",'--ssl-keyfile','certs/dev/key.pem','--ssl-certfile','certs/dev/cert.pem','--reload')
         if ($Background) {
             $p = Start-Process -FilePath $pythonExe -ArgumentList $args -PassThru -WindowStyle Hidden
             Write-Host ("Dev UI started in background. PID: {0}" -f $p.Id) -ForegroundColor Green
@@ -105,7 +107,7 @@ if ($Env -eq 'dev') {
             & $pythonExe @args
         }
     } catch {
-        Write-Error "Failed to start User UI with TLS."
+        Write-Error "Failed to start Consolidated TTRPG Center with TLS."
         exit 1
     }
 } elseif ($Env -eq 'test') {
