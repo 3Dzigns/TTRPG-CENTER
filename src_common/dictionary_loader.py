@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 
 from .logging import get_logger
 
@@ -24,7 +25,7 @@ class DictionaryLoader:
         self.client = None
         try:
             from astrapy import DataAPIClient  # type: ignore
-            from .secrets import get_all_config, validate_database_config
+            from .ttrpg_secrets import get_all_config, validate_database_config
 
             cfg = validate_database_config()
             if not all([cfg.get('ASTRA_DB_API_ENDPOINT'), cfg.get('ASTRA_DB_APPLICATION_TOKEN'), cfg.get('ASTRA_DB_ID')]):
@@ -40,14 +41,26 @@ class DictionaryLoader:
     def upsert_entries(self, entries: List[DictEntry]) -> int:
         if not entries:
             return 0
+            
+        # Deduplicate entries by term (keep last occurrence)
+        deduped_entries = self._deduplicate_entries(entries)
+        original_count = len(entries)
+        deduped_count = len(deduped_entries)
+        
+        if original_count > deduped_count:
+            logger.info(f"Deduplicated {original_count} entries to {deduped_count} ({original_count - deduped_count} duplicates removed)")
+        
         if self.client is None:
-            logger.info(f"SIMULATION: would upsert {len(entries)} dictionary entries into {self.collection_name}")
-            return len(entries)
+            logger.info(f"SIMULATION: would upsert {deduped_count} dictionary entries into {self.collection_name}")
+            return deduped_count
+            
         try:
             col = self.client.get_collection(self.collection_name)
+            
+            # Convert to documents with normalized IDs
             docs = []
-            for e in entries:
-                doc_id = e.term.strip().lower().replace(' ', '_')
+            for e in deduped_entries:
+                doc_id = self._normalize_term_id(e.term)
                 docs.append({
                     "_id": doc_id,
                     "term": e.term,
@@ -56,17 +69,50 @@ class DictionaryLoader:
                     "sources": e.sources,
                     "updated_at": time.time(),
                 })
-            # Upsert via insert_many with ordered=False; duplicates overwrite via replace
-            # Data API lacks upsert-many; do individual upserts
+            
+            # Process in batches to reduce individual API calls
+            batch_size = 20  # Reasonable batch size for individual upserts
             upserted = 0
-            for d in docs:
-                try:
-                    col.find_one_and_replace({"_id": d["_id"]}, d, upsert=True)
-                    upserted += 1
-                except Exception as e:
-                    logger.warning(f"Dictionary upsert failed for {d['_id']}: {e}")
+            
+            for i in range(0, len(docs), batch_size):
+                batch = docs[i:i + batch_size]
+                batch_upserted = self._upsert_batch(col, batch)
+                upserted += batch_upserted
+                
+                # Small delay between batches to avoid rate limiting
+                if i + batch_size < len(docs):
+                    time.sleep(0.1)
+            
+            logger.info(f"Dictionary upsert completed: {upserted}/{deduped_count} entries processed")
             return upserted
+            
         except Exception as e:
             logger.error(f"Dictionary upsert error: {e}")
             return 0
-
+    
+    def _deduplicate_entries(self, entries: List[DictEntry]) -> List[DictEntry]:
+        """Deduplicate entries by normalized term, keeping the last occurrence."""
+        term_map = {}
+        
+        for entry in entries:
+            normalized_term = self._normalize_term_id(entry.term)
+            term_map[normalized_term] = entry
+        
+        return list(term_map.values())
+    
+    def _normalize_term_id(self, term: str) -> str:
+        """Normalize a term to create a consistent document ID."""
+        return term.strip().lower().replace(' ', '_').replace('-', '_').replace("'", "")
+    
+    def _upsert_batch(self, collection, batch_docs: List[Dict[str, Any]]) -> int:
+        """Upsert a batch of documents individually with error handling."""
+        upserted = 0
+        
+        for doc in batch_docs:
+            try:
+                collection.find_one_and_replace({"_id": doc["_id"]}, doc, upsert=True)
+                upserted += 1
+            except Exception as e:
+                logger.warning(f"Dictionary upsert failed for {doc['_id']}: {e}")
+        
+        return upserted

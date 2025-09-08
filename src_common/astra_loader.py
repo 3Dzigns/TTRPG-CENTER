@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import uuid
 
 from .logging import get_logger
-from .secrets import get_all_config, validate_database_config, load_env
+from .ttrpg_secrets import get_all_config, validate_database_config, load_env
 from pathlib import Path
 import os
 
@@ -61,6 +61,27 @@ class AstraLoader:
     def _init_client(self):
         """Initialize AstraDB client connection"""
         try:
+            # Optional simulation override (disabled by default)
+            if os.getenv('ASTRA_SIMULATE', '').strip().lower() in ('1', 'true', 'yes'):
+                logger.warning("ASTRA_SIMULATE enabled; running loader in simulation mode")
+                self.client = None
+                return
+
+            # SSL bypass configuration for development
+            from .ssl_bypass import configure_ssl_bypass_for_development, get_httpx_verify_setting
+            ssl_bypass_active = configure_ssl_bypass_for_development()
+            
+            # Configure Astra client SSL verification
+            insecure = os.getenv('ASTRA_INSECURE', '').strip().lower() in ('1', 'true', 'yes') or ssl_bypass_active
+            if insecure:
+                try:
+                    import httpx  # type: ignore
+                    from astrapy.utils import api_commander as _ac  # type: ignore
+                    _ac.APICommander.client = httpx.Client(verify=get_httpx_verify_setting())
+                    logger.warning("SSL verification bypass enabled for AstraDB client (development only)")
+                except Exception as e:
+                    logger.warning(f"Failed to configure SSL bypass for astrapy httpx client: {e}")
+
             # Check if we have valid database configuration
             if not all([
                 self.db_config.get('ASTRA_DB_API_ENDPOINT'),
@@ -290,8 +311,20 @@ class AstraLoader:
             collection = self.client.get_collection(self.collection_name)
             delete_result = collection.delete_many({})
             
-            deleted_count = delete_result.deleted_count if hasattr(delete_result, 'deleted_count') else 0
-            logger.info(f"Collection {self.collection_name} emptied successfully (deleted {deleted_count} documents)")
+            # Handle various possible return formats for deleted count
+            deleted_count = None
+            if hasattr(delete_result, 'deleted_count'):
+                deleted_count = delete_result.deleted_count
+            elif hasattr(delete_result, 'deletedCount'):
+                deleted_count = delete_result.deletedCount
+            elif isinstance(delete_result, dict):
+                deleted_count = delete_result.get('deletedCount') or delete_result.get('deleted_count')
+            
+            if deleted_count is not None and deleted_count >= 0:
+                logger.info(f"Collection {self.collection_name} emptied successfully (deleted {deleted_count} documents)")
+            else:
+                logger.info(f"Collection {self.collection_name} emptied successfully (deletion count unavailable)")
+            
             return True
             
         except Exception as e:
