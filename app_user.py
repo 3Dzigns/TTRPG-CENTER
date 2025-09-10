@@ -542,8 +542,67 @@ async def process_query(query_request: QueryRequest):
             # Would integrate with user memory in production
             pass
         
-        # Process query (integrate with Phase 2 RAG)
-        rag_result = await real_rag_query(query_request.query, context)
+        # Check if this is a sources query and handle specially
+        query_lower = query_request.query.lower().strip()
+        if any(phrase in query_lower for phrase in ["what sources", "list sources", "available sources", "sources do you have"]):
+            # Get sources information
+            from fastapi.testclient import TestClient
+            with TestClient(app) as client:
+                sources_response = client.get("/api/sources")
+                if sources_response.status_code == 200:
+                    sources_data = sources_response.json()
+                    
+                    # Format response for user
+                    answer_parts = [f"I have access to the following sources in the {sources_data['environment']} environment:"]
+                    
+                    if sources_data.get("chunks"):
+                        answer_parts.append("\\n**Document Sources:**")
+                        if isinstance(sources_data["chunks"], dict) and not sources_data["chunks"].get("error"):
+                            for source, count in sources_data["chunks"].items():
+                                if isinstance(count, int):
+                                    answer_parts.append(f"- {source}: {count} chunks")
+                        answer_parts.append(f"Total chunks: {sources_data['total_chunks']}")
+                    
+                    if sources_data.get("dictionary", {}).get("total_terms"):
+                        answer_parts.append(f"\\n**Dictionary Terms:** {sources_data['total_terms']} terms available")
+                        
+                        sample_terms = sources_data.get("dictionary", {}).get("sample_terms", [])
+                        if sample_terms:
+                            answer_parts.append("Sample terms:")
+                            for term_info in sample_terms[:5]:
+                                answer_parts.append(f"- {term_info['term']} ({term_info['category']})")
+                    
+                    if sources_data["total_chunks"] == 0 and sources_data["total_terms"] == 0:
+                        answer_parts = ["No sources are currently available. You may need to run the bulk ingestion process to load PDF documents into the system."]
+                    
+                    rag_result = {
+                        "answer": "\\n".join(answer_parts),
+                        "metadata": {
+                            "model": "sources-list",
+                            "tokens": 0,
+                            "processing_time_ms": (time.time() - start_time) * 1000,
+                            "intent": "sources",
+                            "domain": "system"
+                        },
+                        "retrieved_chunks": [],
+                        "image_url": None
+                    }
+                else:
+                    rag_result = {
+                        "answer": "I encountered an error while retrieving source information. Please try again.",
+                        "metadata": {
+                            "model": "error",
+                            "tokens": 0,
+                            "processing_time_ms": (time.time() - start_time) * 1000,
+                            "intent": "sources",
+                            "domain": "system"
+                        },
+                        "retrieved_chunks": [],
+                        "image_url": None
+                    }
+        else:
+            # Process query (integrate with Phase 2 RAG)
+            rag_result = await real_rag_query(query_request.query, context)
         
         # Create response
         response = QueryResponse(
@@ -628,6 +687,79 @@ async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Error updating user preferences: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user preferences")
+
+
+@app.get("/api/sources")
+async def get_available_sources():
+    """Get list of available sources from AstraDB and dictionary"""
+    try:
+        from src_common.astra_loader import AstraLoader
+        from src_common.dictionary_loader import DictionaryLoader
+        
+        # Load environment configuration
+        env = os.getenv("TTRPG_ENV", "dev")
+        
+        # Initialize loaders
+        astra_loader = AstraLoader(env)
+        dict_loader = DictionaryLoader(env)
+        
+        sources_info = {
+            "chunks": {},
+            "dictionary": {},
+            "total_chunks": 0,
+            "total_terms": 0,
+            "status": "available"
+        }
+        
+        # Get chunk sources and counts
+        if astra_loader.client:
+            try:
+                collection = astra_loader.client.get_collection(astra_loader.collection_name)
+                
+                # Get distinct sources from chunks
+                distinct_sources = collection.distinct("source")
+                for source in distinct_sources:
+                    # Count chunks per source
+                    count = collection.count_documents({"source": source})
+                    sources_info["chunks"][source] = count
+                    sources_info["total_chunks"] += count
+                    
+            except Exception as e:
+                logger.warning(f"Could not retrieve chunk sources: {e}")
+                sources_info["chunks"] = {"error": "Could not retrieve chunk sources"}
+        else:
+            sources_info["chunks"] = {"simulation": "AstraDB not configured"}
+        
+        # Get dictionary term count
+        if dict_loader.client:
+            try:
+                term_count = dict_loader.get_term_count()
+                sources_info["dictionary"]["total_terms"] = term_count
+                sources_info["total_terms"] = term_count
+                
+                # Get sample terms to show dictionary is populated
+                collection = dict_loader.client.get_collection(dict_loader.collection_name)
+                sample_terms = collection.find({}, {"term": 1, "category": 1}).limit(10)
+                sources_info["dictionary"]["sample_terms"] = [
+                    {"term": doc.get("term", ""), "category": doc.get("category", "general")}
+                    for doc in sample_terms
+                ]
+                
+            except Exception as e:
+                logger.warning(f"Could not retrieve dictionary info: {e}")
+                sources_info["dictionary"] = {"error": "Could not retrieve dictionary info"}
+        else:
+            sources_info["dictionary"] = {"simulation": "AstraDB not configured"}
+        
+        # Add metadata
+        sources_info["timestamp"] = time.time()
+        sources_info["environment"] = env
+        
+        return sources_info
+        
+    except Exception as e:
+        logger.error(f"Error retrieving sources: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve sources: {e}")
 
 
 @app.get("/api/themes")

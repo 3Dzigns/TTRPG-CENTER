@@ -1,0 +1,41 @@
+{
+  "title": "Test Requirements Document",
+  "version": "1.0.0",
+  "description": "Comprehensive test requirements for TTRPG Center",
+  "requirements": {
+    "functional": [
+      {
+        "id": "FR-001",
+        "title": "User Authentication",
+        "description": "Users must be able to authenticate securely",
+        "priority": "high",
+        "category": "security"
+      }
+    ],
+    "non_functional": [
+      {
+        "id": "NFR-001",
+        "title": "Response Time",
+        "description": "API responses must be under 2 seconds",
+        "priority": "medium",
+        "category": "performance"
+      }
+    ]
+  },
+  "stakeholders": [
+    {
+      "name": "Product Owner",
+      "role": "Requirements Owner",
+      "involvement": "primary"
+    }
+  ],
+  "acceptance_criteria": [],
+  "author": "test_architect",
+  "metadata": {
+    "version_id": 1757214466449,
+    "author": "test_admin",
+    "timestamp": "2025-09-06T22:07:46.449599",
+    "created_at": 1757214466.4495995,
+    "checksum": "ef1bff2faccb9e1c0dd4aae1237cc6ff712873e3124cb37e6598d2c497fe4c4f"
+  }
+}

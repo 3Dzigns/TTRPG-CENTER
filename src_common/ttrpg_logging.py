@@ -70,12 +70,13 @@ class TTRPGJsonFormatter(jsonlogger.JsonFormatter):
             log_record['model'] = record.model
 
 
-def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
+def setup_logging(config_path: Optional[Path] = None, log_file: Optional[Path] = None) -> _logging.Logger:
     """
     Set up logging configuration for the TTRPG Center application.
     
     Args:
         config_path: Path to logging configuration file. If None, uses default config.
+        log_file: Path to log file. If None, logs only to console.
         
     Returns:
         Configured logger instance
@@ -85,6 +86,32 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
     level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
     level_value = getattr(_logging, level_name, _logging.INFO)
     
+    # Prepare handlers list
+    handlers_list = ['console']
+    handlers_config = {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'json' if env != 'dev' else 'console',
+            'level': level_name,
+            'stream': 'ext://sys.stdout'
+        }
+    }
+    
+    # Add file handler if log_file is specified
+    if log_file:
+        # Ensure parent directory exists
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        handlers_config['file'] = {
+            'class': 'logging.FileHandler',
+            'filename': str(log_file),
+            'formatter': 'json' if env != 'dev' else 'console',
+            'level': level_name,
+            'mode': 'a',
+            'encoding': 'utf-8'
+        }
+        handlers_list.append('file')
+
     # Default logging configuration
     default_config = {
         'version': 1,
@@ -99,17 +126,10 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
                 'datefmt': '%Y-%m-%d %H:%M:%S'
             }
         },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'formatter': 'json' if env != 'dev' else 'console',
-                'level': level_name,
-                'stream': 'ext://sys.stdout'
-            }
-        },
+        'handlers': handlers_config,
         'root': {
             'level': level_name,
-            'handlers': ['console']
+            'handlers': handlers_list
         },
         'loggers': {
             'ttrpg': {
@@ -120,12 +140,12 @@ def setup_logging(config_path: Optional[Path] = None) -> _logging.Logger:
             },
             'uvicorn': {
                 'level': 'INFO',
-                'handlers': ['console'],
+                'handlers': handlers_list,
                 'propagate': False
             },
             'fastapi': {
                 'level': 'INFO',
-                'handlers': ['console'], 
+                'handlers': handlers_list, 
                 'propagate': False
             }
         }

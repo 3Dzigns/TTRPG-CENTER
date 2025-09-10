@@ -70,7 +70,8 @@ def validate_json_artifact(file_path: Path, expected_schema_keys: Optional[set] 
     return True
 
 
-def load_json_with_retry(file_path: Path, max_retries: int = 3, retry_delay_ms: int = 250) -> Dict[str, Any]:
+def load_json_with_retry(file_path: Path, max_retries: int = 3, retry_delay_ms: int = 250, 
+                         expected_schema_keys: Optional[set] = None) -> Dict[str, Any]:
     """
     Load JSON with retry logic to handle race conditions and transient failures.
     
@@ -78,6 +79,7 @@ def load_json_with_retry(file_path: Path, max_retries: int = 3, retry_delay_ms: 
         file_path: Path to JSON file
         max_retries: Maximum number of retry attempts
         retry_delay_ms: Delay between retries in milliseconds
+        expected_schema_keys: Optional set of top-level keys that must be present
         
     Returns:
         Loaded JSON data as dictionary
@@ -90,7 +92,7 @@ def load_json_with_retry(file_path: Path, max_retries: int = 3, retry_delay_ms: 
     for attempt in range(max_retries + 1):
         try:
             # Validate before loading
-            validate_json_artifact(file_path, expected_schema_keys={'chunks'})
+            validate_json_artifact(file_path, expected_schema_keys=expected_schema_keys)
             
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)

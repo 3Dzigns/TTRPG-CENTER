@@ -1,0 +1,12 @@
+{
+  "request_id": "FR-17572141034552950",
+  "title": "Enhanced User Profile Management",
+  "description": "Users should be able to manage their profiles with advanced customization options including avatar upload, bio, and preferences",
+  "priority": "medium",
+  "requester": "product_team",
+  "status": "pending",
+  "created_at": "2025-09-06T22:01:43.455366",
+  "updated_at": null,
+  "approved_by": null,
+  "rejection_reason": null
+}

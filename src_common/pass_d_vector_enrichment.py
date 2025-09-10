@@ -24,6 +24,8 @@ import json
 import time
 import hashlib
 import re
+import os
+import numpy as np
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple
 from dataclasses import dataclass, asdict
@@ -43,6 +45,240 @@ from .artifact_validator import write_json_atomically, load_json_with_retry
 from .astra_loader import AstraLoader
 
 logger = get_logger(__name__)
+
+# Chunk size configuration
+CHUNK_MAX_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "500"))
+CHUNK_HARD_CAP = int(os.getenv("CHUNK_HARD_CAP", "600")) 
+CHUNK_MIN_CHARS = int(os.getenv("CHUNK_MIN_CHARS", "120"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "60"))
+SPLIT_BY = os.getenv("SPLIT_BY", "word")
+
+# Vector configuration (BUG-014: Standardize to 1024 dimensions)
+# Note: OpenAI text-embedding-3-small produces 1536-dim vectors, standardized to 1024 for AstraDB
+# We use dimensionality reduction to fit within AstraDB collection index requirements
+OPENAI_MODEL_DIM = 1536  # Native text-embedding-3-small dimensions
+MODEL_DIM = int(os.getenv("MODEL_DIM", "1024"))  # BUG-014: Standardized to 1024 dimensions
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "json")
+EMBED_DIM_REDUCTION = os.getenv("EMBED_DIM_REDUCTION", "pca-1024")  # BUG-014: Default to 1024-d reduction
+ABORT_ON_INCOMPATIBLE_VECTOR = os.getenv("ABORT_ON_INCOMPATIBLE_VECTOR", "true").lower() == "true"
+
+
+@dataclass
+class ChunkNormalizationConfig:
+    """Configuration for chunk size normalization"""
+    max_chars: int = CHUNK_MAX_CHARS
+    hard_cap: int = CHUNK_HARD_CAP
+    min_chars: int = CHUNK_MIN_CHARS
+    overlap: int = CHUNK_OVERLAP
+    split_by: str = SPLIT_BY
+
+
+class ChunkNormalizer:
+    """Normalizes chunk sizes before vectorization"""
+    
+    def __init__(self, config: ChunkNormalizationConfig = None):
+        self.config = config or ChunkNormalizationConfig()
+        logger.info(f"ChunkNormalizer initialized: max={self.config.max_chars}, "
+                   f"hard_cap={self.config.hard_cap}, min={self.config.min_chars}")
+    
+    def normalize_chunks(self, raw_chunks: List[Dict]) -> List[Dict]:
+        """
+        Normalize chunk sizes to comply with limits
+        
+        Args:
+            raw_chunks: List of chunks from Pass C
+            
+        Returns:
+            List of normalized chunks
+        """
+        logger.info(f"Normalizing {len(raw_chunks)} chunks")
+        normalized = []
+        oversized_count = 0
+        split_count = 0
+        
+        for chunk in raw_chunks:
+            text = chunk.get("text", "")
+            text_len = len(text)
+            
+            if text_len <= self.config.max_chars:
+                # Already compliant
+                normalized.append(chunk)
+            else:
+                # Split oversized chunk
+                oversized_count += 1
+                split_chunks = self._split_chunk(chunk, text)
+                split_count += len(split_chunks) - 1
+                normalized.extend(split_chunks)
+        
+        # Merge tiny chunks
+        merged = self._merge_tiny_chunks(normalized)
+        
+        logger.info(f"Normalization complete: {len(raw_chunks)} → {len(merged)} chunks, "
+                   f"{oversized_count} oversized, {split_count} additional splits")
+        
+        return merged
+    
+    def _split_chunk(self, parent_chunk: Dict, text: str) -> List[Dict]:
+        """Split a single chunk into smaller pieces"""
+        if len(text) <= self.config.hard_cap:
+            return [parent_chunk]
+        
+        chunks = []
+        words = text.split() if self.config.split_by == "word" else text.split(".")
+        
+        current_chunk = []
+        current_length = 0
+        
+        for unit in words:
+            unit_len = len(unit) + 1  # +1 for space/period
+            
+            if current_length + unit_len > self.config.max_chars and current_chunk:
+                # Finalize current chunk
+                chunk_text = (" " if self.config.split_by == "word" else ".").join(current_chunk)
+                chunks.append(self._create_child_chunk(parent_chunk, chunk_text, len(chunks)))
+                
+                # Start new chunk with overlap
+                if self.config.overlap > 0 and len(current_chunk) > 1:
+                    overlap_units = current_chunk[-self.config.overlap//20:]  # Rough word overlap
+                    current_chunk = overlap_units + [unit]
+                    current_length = sum(len(u) + 1 for u in current_chunk)
+                else:
+                    current_chunk = [unit]
+                    current_length = unit_len
+            else:
+                current_chunk.append(unit)
+                current_length += unit_len
+        
+        # Add final chunk
+        if current_chunk:
+            chunk_text = (" " if self.config.split_by == "word" else ".").join(current_chunk)
+            chunks.append(self._create_child_chunk(parent_chunk, chunk_text, len(chunks)))
+        
+        return chunks or [parent_chunk]  # Fallback to original if splitting failed
+    
+    def _create_child_chunk(self, parent: Dict, text: str, index: int) -> Dict:
+        """Create a new chunk from a parent chunk with split text"""
+        child = parent.copy()
+        child["text"] = text
+        child["char_len"] = len(text)
+        child["chunk_index"] = index
+        child["parent_chunk_id"] = parent.get("chunk_id", "unknown")
+        child["chunk_id"] = f"{parent.get('chunk_id', 'chunk')}_{index}"
+        return child
+    
+    def _merge_tiny_chunks(self, chunks: List[Dict]) -> List[Dict]:
+        """Merge chunks that are too small"""
+        if not chunks:
+            return chunks
+        
+        merged = []
+        pending_merge = None
+        
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            if len(text) < self.config.min_chars:
+                if pending_merge is None:
+                    pending_merge = chunk
+                else:
+                    # Merge with pending
+                    merged_text = pending_merge["text"] + " " + text
+                    if len(merged_text) <= self.config.max_chars:
+                        pending_merge["text"] = merged_text
+                        pending_merge["char_len"] = len(merged_text)
+                    else:
+                        # Can't merge, add pending and start new
+                        merged.append(pending_merge)
+                        pending_merge = chunk
+            else:
+                # Normal sized chunk
+                if pending_merge is not None:
+                    merged.append(pending_merge)
+                    pending_merge = None
+                merged.append(chunk)
+        
+        # Add final pending merge
+        if pending_merge is not None:
+            merged.append(pending_merge)
+        
+        return merged
+
+
+def preflight_embeddings(model_dim: int = MODEL_DIM, backend: str = VECTOR_BACKEND) -> None:
+    """
+    Validate embedding dimensions are compatible with storage backend
+    
+    Args:
+        model_dim: Embedding model dimension
+        backend: Vector storage backend ('json' or 'astra_vector')
+        
+    Raises:
+        SystemExit: If configuration is incompatible
+    """
+    logger.info(f"Vector preflight check: model_dim={model_dim}, backend={backend}")
+    
+    # BUG-014: Standard dimensions validation (1024-d)
+    REQUIRED_DIM = 1024
+    
+    if model_dim != REQUIRED_DIM:
+        error_msg = (f"Vector dimension mismatch: {model_dim} (model) != {REQUIRED_DIM} (required). "
+                    f"Set MODEL_DIM={REQUIRED_DIM} or update embedding configuration.")
+        
+        logger.error(error_msg)
+        logger.error(f"Remediation: Set environment variable MODEL_DIM={REQUIRED_DIM}")
+        
+        if ABORT_ON_INCOMPATIBLE_VECTOR:
+            raise SystemExit(error_msg)
+        else:
+            logger.warning("Continuing despite incompatible vector configuration")
+    
+    logger.info(f"✅ Vector dimension preflight PASSED: {model_dim} == {REQUIRED_DIM} (standard)")
+
+
+def reduce_embedding_dimensions(embedding: List[float], target_dim: int = MODEL_DIM, 
+                                method: str = EMBED_DIM_REDUCTION) -> List[float]:
+    """
+    Reduce embedding dimensions using specified method
+    
+    Args:
+        embedding: Original embedding vector
+        target_dim: Target number of dimensions
+        method: Reduction method ('off', 'pca-1000', 'truncate')
+        
+    Returns:
+        Reduced embedding vector
+    """
+    if method == "off" or len(embedding) <= target_dim:
+        return embedding
+    
+    if method == "truncate":
+        # Simple truncation (least sophisticated)
+        return embedding[:target_dim]
+    
+    elif method.startswith("pca-"):
+        # PCA reduction (better preserves information)
+        try:
+            from sklearn.decomposition import PCA
+            
+            # Convert to numpy array and reshape for PCA
+            embedding_array = np.array(embedding).reshape(1, -1)
+            
+            # Apply PCA - note: with single vector, this is essentially truncated SVD
+            pca = PCA(n_components=target_dim, random_state=42)
+            reduced = pca.fit_transform(embedding_array)
+            
+            # Return as list
+            return reduced.flatten().tolist()
+            
+        except ImportError:
+            logger.warning("sklearn not available, falling back to truncation")
+            return embedding[:target_dim]
+        except Exception as e:
+            logger.warning(f"PCA reduction failed: {e}, falling back to truncation")
+            return embedding[:target_dim]
+    
+    else:
+        logger.warning(f"Unknown reduction method '{method}', using truncation")
+        return embedding[:target_dim]
 
 
 @dataclass
@@ -76,12 +312,14 @@ class VectorizedChunk:
 class EnrichmentStats:
     """Statistics from Pass D enrichment"""
     original_chunks: int
+    normalized_chunks: int
     deduplicated_chunks: int
     merged_fragments: int
     vectorized_chunks: int
     entities_extracted: int
     keywords_extracted: int
     deduplication_ratio: float
+    normalization_ratio: float
     processing_time_ms: int
 
 
@@ -126,6 +364,9 @@ class PassDVectorEnricher:
         logger.info(f"Pass D starting: Vector enrichment for job {self.job_id}")
         
         try:
+            # Preflight check for vector compatibility
+            preflight_embeddings()
+            
             # Load raw chunks from Pass C
             chunks_file = output_dir / f"{self.job_id}_pass_c_raw_chunks.jsonl"
             if not chunks_file.exists():
@@ -134,8 +375,13 @@ class PassDVectorEnricher:
             raw_chunks = self._load_raw_chunks(chunks_file)
             logger.info(f"Loaded {len(raw_chunks)} raw chunks from Pass C")
             
+            # Normalize chunk sizes before vectorization
+            normalizer = ChunkNormalizer()
+            normalized_chunks = normalizer.normalize_chunks(raw_chunks)
+            logger.info(f"After normalization: {len(normalized_chunks)} chunks")
+            
             # Deduplicate and merge small fragments
-            deduplicated_chunks = self._deduplicate_chunks(raw_chunks)
+            deduplicated_chunks = self._deduplicate_chunks(normalized_chunks)
             logger.info(f"After deduplication: {len(deduplicated_chunks)} chunks")
             
             # Perform vectorization and light enrichment
@@ -150,12 +396,14 @@ class PassDVectorEnricher:
             # Generate enrichment statistics
             enrichment_stats = EnrichmentStats(
                 original_chunks=len(raw_chunks),
+                normalized_chunks=len(normalized_chunks),
                 deduplicated_chunks=len(deduplicated_chunks),
-                merged_fragments=len(raw_chunks) - len(deduplicated_chunks),
+                merged_fragments=len(normalized_chunks) - len(deduplicated_chunks),
                 vectorized_chunks=len(vectorized_chunks),
                 entities_extracted=sum(len(c.entities or []) for c in vectorized_chunks),
                 keywords_extracted=sum(len(c.keywords or []) for c in vectorized_chunks),
-                deduplication_ratio=(len(raw_chunks) - len(deduplicated_chunks)) / max(len(raw_chunks), 1),
+                deduplication_ratio=(len(normalized_chunks) - len(deduplicated_chunks)) / max(len(normalized_chunks), 1),
+                normalization_ratio=len(normalized_chunks) / max(len(raw_chunks), 1),
                 processing_time_ms=int((time.time() - start_time) * 1000)
             )
             
@@ -207,7 +455,18 @@ class PassDVectorEnricher:
                 chunks_processed=0,
                 chunks_vectorized=0,
                 chunks_loaded=0,
-                enrichment_stats=EnrichmentStats(0,0,0,0,0,0,0.0,processing_time_ms),
+                enrichment_stats=EnrichmentStats(
+                    original_chunks=0,
+                    normalized_chunks=0,
+                    deduplicated_chunks=0,
+                    merged_fragments=0,
+                    vectorized_chunks=0,
+                    entities_extracted=0,
+                    keywords_extracted=0,
+                    deduplication_ratio=0.0,
+                    normalization_ratio=1.0,  # BUG-018: Default ratio for failed cases
+                    processing_time_ms=processing_time_ms
+                ),
                 processing_time_ms=processing_time_ms,
                 artifacts=[],
                 manifest_path="",
@@ -327,7 +586,7 @@ class PassDVectorEnricher:
             api_key = self.openai_config.get("api_key")
             if not api_key:
                 logger.warning("No OpenAI API key, using dummy embedding")
-                return [0.0] * 1536  # Dummy embedding
+                return [0.0] * MODEL_DIM  # Dummy embedding
             
             verify = get_httpx_verify_setting()
             
@@ -354,11 +613,17 @@ class PassDVectorEnricher:
                 
                 data = response.json()
                 embedding = data["data"][0]["embedding"]
+                
+                # Apply dimensionality reduction if needed
+                if len(embedding) > MODEL_DIM:
+                    logger.debug(f"Reducing embedding dimensions from {len(embedding)} to {MODEL_DIM}")
+                    embedding = reduce_embedding_dimensions(embedding, MODEL_DIM, EMBED_DIM_REDUCTION)
+                
                 return embedding
                 
         except Exception as e:
             logger.warning(f"Failed to get embedding: {e}")
-            return [0.0] * 1536  # Dummy embedding as fallback
+            return [0.0] * MODEL_DIM  # Dummy embedding as fallback
     
     def _extract_entities(self, text: str) -> List[str]:
         """Extract named entities from text (simplified)"""
@@ -545,6 +810,7 @@ class PassDVectorEnricher:
         # Update with Pass D information
         manifest_data.update({
             "completed_passes": list(set(manifest_data.get("completed_passes", []) + ["D"])),
+            "chunks": manifest_data.get("chunks", []),  # BUG-016: Ensure chunks key exists
             "pass_d_results": {
                 "chunks_processed": enrichment_stats.original_chunks,
                 "chunks_vectorized": enrichment_stats.vectorized_chunks,

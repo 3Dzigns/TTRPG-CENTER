@@ -105,14 +105,73 @@ class DictionaryLoader:
         return term.strip().lower().replace(' ', '_').replace('-', '_').replace("'", "")
     
     def _upsert_batch(self, collection, batch_docs: List[Dict[str, Any]]) -> int:
-        """Upsert a batch of documents individually with error handling."""
+        """Upsert a batch of documents using two-step pattern for AstraDB compatibility (BUG-013 fix)."""
         upserted = 0
         
         for doc in batch_docs:
             try:
-                collection.find_one_and_replace({"_id": doc["_id"]}, doc, upsert=True)
+                # Step 1: Ensure document exists with base fields
+                collection.update_one(
+                    {"_id": doc["_id"]}, 
+                    {
+                        "$setOnInsert": {
+                            "_id": doc["_id"],
+                            "created_at": doc["updated_at"],
+                            "sources": []
+                        },
+                        "$set": {
+                            "term": doc["term"],
+                            "definition": doc["definition"],
+                            "category": doc["category"],
+                            "updated_at": doc["updated_at"]
+                        }
+                    },
+                    upsert=True
+                )
+                
+                # Step 2: Add sources using separate operation
+                if doc["sources"]:
+                    collection.update_one(
+                        {"_id": doc["_id"]},
+                        {
+                            "$addToSet": {
+                                "sources": {"$each": doc["sources"]}
+                            }
+                        }
+                    )
+                
                 upserted += 1
+                
+                # Log audit trail for dictionary changes
+                logger.debug(f"Dictionary term upserted: {doc['term']} with {len(doc['sources'])} sources")
+                
             except Exception as e:
                 logger.warning(f"Dictionary upsert failed for {doc['_id']}: {e}")
         
         return upserted
+
+    def get_term_count(self) -> int:
+        """Get total count of dictionary terms."""
+        if self.client is None:
+            return 0
+            
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            return collection.estimated_document_count()
+        except Exception as e:
+            logger.warning(f"Failed to get term count: {e}")
+            return 0
+    
+    def get_term_details(self, term: str) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a specific term."""
+        if self.client is None:
+            return None
+            
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            normalized_id = self._normalize_term_id(term)
+            doc = collection.find_one({"_id": normalized_id})
+            return doc
+        except Exception as e:
+            logger.warning(f"Failed to get term details for {term}: {e}")
+            return None

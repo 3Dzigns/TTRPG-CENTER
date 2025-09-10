@@ -1,0 +1,12 @@
+{
+  "request_id": "FR-17572144666281616",
+  "title": "Feature 1",
+  "description": "Feature request specifically for testing audit trail functionality",
+  "priority": "medium",
+  "requester": "test_user",
+  "status": "approved",
+  "created_at": "2025-09-06T22:07:46.628174",
+  "updated_at": "2025-09-06T22:07:46.636171",
+  "approved_by": "admin",
+  "rejection_reason": "Good"
+}

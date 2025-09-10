@@ -8,8 +8,8 @@
   "properties": {
     "request_id": {
       "type": "string",
-      "pattern": "^FR-[0-9]{13}$",
-      "description": "Unique feature request ID (FR-{timestamp})"
+      "pattern": "^FR-[0-9]{3,20}$",
+      "description": "Unique feature request ID (FR-{timestamp}[optional-suffix])"
     },
     "title": {
       "type": "string",

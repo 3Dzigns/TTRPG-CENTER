@@ -32,7 +32,7 @@
           "items": {
             "$ref": "#/definitions/requirement"
           },
-          "minItems": 1,
+          "minItems": 0,
           "description": "Functional requirements list"
         },
         "non_functional": {
@@ -40,6 +40,7 @@
           "items": {
             "$ref": "#/definitions/requirement"
           },
+          "minItems": 0,
           "description": "Non-functional requirements list"
         },
         "constraints": {

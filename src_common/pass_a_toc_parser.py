@@ -251,6 +251,7 @@ class PassATocParser:
             "completed_passes": ["A"],
             "environment": self.env,
             "created_at": time.time(),
+            "chunks": [],  # BUG-016: Always include chunks key for schema validation
             "source_info": {
                 "file_size": pdf_path.stat().st_size if pdf_path.exists() else 0,
                 "file_mtime": pdf_path.stat().st_mtime if pdf_path.exists() else 0,

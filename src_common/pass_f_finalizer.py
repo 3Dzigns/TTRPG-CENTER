@@ -293,6 +293,7 @@ class PassFFinalizer:
         # Update manifest
         manifest_data.update({
             "completed_passes": completed_passes,
+            "chunks": manifest_data.get("chunks", []),  # BUG-016: Ensure chunks key exists
             "finalized_at": time.time(),
             "pass_f_results": {
                 "artifacts_validated": len(final_artifacts),

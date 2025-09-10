@@ -337,6 +337,7 @@ class PassBLogicalSplitter:
             "created_at": time.time(),
             "parts_count": len(split_parts),
             "total_pages": sum(part.page_end - part.page_start + 1 for part in split_parts),
+            "chunks": [],  # BUG-016: Always include chunks key for schema validation
             "parts": [
                 {
                     "part_name": part.part_name,
@@ -380,6 +381,7 @@ class PassBLogicalSplitter:
         # Update with Pass B information
         manifest_data.update({
             "completed_passes": list(set(manifest_data.get("completed_passes", []) + ["B"])),
+            "chunks": manifest_data.get("chunks", []),  # BUG-016: Ensure chunks key exists
             "pass_b_results": {
                 "split_performed": len(split_parts) > 0,
                 "parts_created": len(split_parts),

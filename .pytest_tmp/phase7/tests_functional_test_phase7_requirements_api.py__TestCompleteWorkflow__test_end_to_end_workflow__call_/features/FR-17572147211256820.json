@@ -1,0 +1,12 @@
+{
+  "request_id": "FR-17572147211256820",
+  "title": "Implement Feature Management (FR-001)",
+  "description": "Implement the feature request management system as specified in requirement FR-001",
+  "priority": "high",
+  "requester": "development_team",
+  "status": "approved",
+  "created_at": "2025-09-06T22:12:01.125840",
+  "updated_at": "2025-09-06T22:12:01.132836",
+  "approved_by": "product_owner",
+  "rejection_reason": "Aligns with requirement FR-001 from version 1757214721120"
+}

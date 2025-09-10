@@ -204,49 +204,29 @@ class AstraLoader:
             # Get or create collection
             collection = self.client.get_collection(self.collection_name)
             
-            # Prepare documents for AstraDB; enforce content size limits (<= ~8000 bytes)
+            # Prepare documents for AstraDB; enforce content size limits (BUG-017)
             documents = []
-            MAX_BYTES = 7900
+            MAX_BYTES = 7000  # BUG-017: Hard byte cap at 7000 bytes
+            TARGET_CHARS = 400  # BUG-017: Target 300-500 characters (using middle)
             for chunk in chunks:
                 content = chunk['content']
                 meta = chunk['metadata']
                 base_id = chunk['id']
-                b = content.encode('utf-8')
-                if len(b) <= MAX_BYTES:
+                # BUG-017: Enhanced chunk size validation and splitting
+                split_parts = self._enforce_chunk_size_limits(content, TARGET_CHARS, MAX_BYTES)
+                
+                if len(split_parts) == 1 and len(split_parts[0].encode('utf-8')) <= MAX_BYTES:
+                    # Single chunk within limits
                     documents.append({
                         'chunk_id': base_id,
-                        'content': content,
+                        'content': split_parts[0],
                         'metadata': meta,
                         'environment': self.env,
                         'loaded_at': time.time()
                     })
                 else:
-                    # Split content into safe byte-sized pieces
-                    parts: list[str] = []
-                    # First try paragraphs
-                    current = ''
-                    for para in content.split('\n\n'):
-                        test = (current + ('\n\n' if current else '') + para)
-                        if len(test.encode('utf-8')) > MAX_BYTES and current:
-                            parts.append(current)
-                            current = para
-                        else:
-                            current = test
-                    if current:
-                        parts.append(current)
-                    # Now enforce byte slicing for any oversized part
-                    safe_parts: list[str] = []
-                    for p in parts:
-                        b2 = p.encode('utf-8')
-                        if len(b2) <= MAX_BYTES:
-                            safe_parts.append(p)
-                        else:
-                            start = 0
-                            while start < len(b2):
-                                seg = b2[start:start+MAX_BYTES]
-                                safe_parts.append(seg.decode('utf-8', errors='ignore'))
-                                start += MAX_BYTES
-                    for pi, part in enumerate(safe_parts, 1):
+                    # Multiple parts needed
+                    for pi, part in enumerate(split_parts, 1):
                         documents.append({
                             'chunk_id': f"{base_id}-part{pi}",
                             'content': part,
@@ -370,6 +350,62 @@ class AstraLoader:
                 'status': 'error',
                 'error': str(e)
             }
+
+    def _enforce_chunk_size_limits(self, content: str, target_chars: int, max_bytes: int) -> List[str]:
+        """
+        Enforce chunk size limits as per BUG-017: 300-500 chars target, 7KB hard cap
+        
+        Args:
+            content: Original content to split
+            target_chars: Target character count (300-500 range)
+            max_bytes: Maximum bytes allowed per chunk
+            
+        Returns:
+            List of content parts that meet size requirements
+        """
+        # First check if content is within limits
+        if len(content) <= target_chars * 1.5 and len(content.encode('utf-8')) <= max_bytes:
+            return [content]
+        
+        parts = []
+        
+        # Try splitting by sentences first (better semantic boundaries)
+        sentences = content.replace('!', '.').replace('?', '.').split('.')
+        current = ''
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            test_content = (current + ('. ' if current else '') + sentence).strip()
+            
+            # Check both character and byte limits
+            if (len(test_content) > target_chars * 1.5 or 
+                len(test_content.encode('utf-8')) > max_bytes) and current:
+                parts.append(current)
+                current = sentence
+            else:
+                current = test_content
+        
+        if current:
+            parts.append(current)
+        
+        # Final pass: ensure no part exceeds hard byte limit
+        final_parts = []
+        for part in parts:
+            part_bytes = part.encode('utf-8')
+            if len(part_bytes) <= max_bytes:
+                final_parts.append(part)
+            else:
+                # Force byte splitting as last resort
+                start = 0
+                while start < len(part_bytes):
+                    segment = part_bytes[start:start + max_bytes]
+                    final_parts.append(segment.decode('utf-8', errors='ignore'))
+                    start += max_bytes
+        
+        return final_parts
 
 
 def load_chunks_to_astra(chunks_file: Path, env: str = "dev") -> LoadResult:

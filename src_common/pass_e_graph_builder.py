@@ -666,6 +666,7 @@ class PassEGraphBuilder:
         # Update with Pass E information
         manifest_data.update({
             "completed_passes": list(set(manifest_data.get("completed_passes", []) + ["E"])),
+            "chunks": manifest_data.get("chunks", []),  # BUG-016: Ensure chunks key exists
             "pass_e_results": {
                 "chunks_processed": chunks_processed,
                 "chunks_updated": chunks_updated,

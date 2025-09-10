@@ -29,7 +29,7 @@ import concurrent.futures as cf
 import json
 import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -84,6 +84,12 @@ class Source6PassResult:
     failure_reason: Optional[str] = None
     failed_pass: Optional[str] = None
     aborted_after_pass: Optional[str] = None
+    # BUG-022: Integrity failure metadata
+    integrity_failed: bool = False
+    integrity_failures: List[str] = field(default_factory=list)
+    toc_entries: int = 0
+    raw_chunks: int = 0
+    vectors: int = 0
     
     def to_dict(self) -> Dict:
         return {
@@ -94,6 +100,11 @@ class Source6PassResult:
             "failure_reason": self.failure_reason,
             "failed_pass": self.failed_pass,
             "aborted_after_pass": self.aborted_after_pass,
+            "integrity_failed": self.integrity_failed,
+            "integrity_failures": self.integrity_failures,
+            "toc_entries": self.toc_entries,
+            "raw_chunks": self.raw_chunks,
+            "vectors": self.vectors,
             "timings": [
                 {
                     "step": t.name, 
@@ -494,14 +505,18 @@ def check_chunk_dictionary_consistency(env: str, results: List[Source6PassResult
             ratio = consistency_report["chunk_count"] / consistency_report["dictionary_count"]
             consistency_report["chunk_to_dict_ratio"] = ratio
             
-            # Heuristic warnings based on expected ratios
-            if ratio < 0.5:
+            # BUG-022: Enhanced thresholds for integrity validation
+            if ratio < 0.05:
                 consistency_report["warnings"].append(
-                    f"Low chunk-to-dictionary ratio ({ratio:.2f}) - possible chunk loss"
+                    f"CRITICAL: chunk-to-dictionary ratio ({ratio:.3f}) < 0.05 - pipeline integrity failure"
+                )
+            elif ratio < 0.20:
+                consistency_report["warnings"].append(
+                    f"WARNING: chunk-to-dictionary ratio ({ratio:.3f}) < 0.20 - possible chunk loss"
                 )
             elif ratio > 10.0:
                 consistency_report["warnings"].append(
-                    f"High chunk-to-dictionary ratio ({ratio:.2f}) - possible over-chunking"
+                    f"WARNING: High chunk-to-dictionary ratio ({ratio:.2f}) - possible over-chunking"
                 )
         else:
             consistency_report["warnings"].append("Dictionary is empty - this should not happen after ingestion")
@@ -510,6 +525,129 @@ def check_chunk_dictionary_consistency(env: str, results: List[Source6PassResult
         consistency_report["warnings"].append(f"Consistency check failed: {e}")
     
     return consistency_report
+
+
+def validate_source_success_criteria(result: 'Source6PassResult', consistency_report: Dict) -> Dict:
+    """
+    Validate source meets success criteria for BUG-022.
+    
+    Success requires:
+    - ToC entries >= 1 (Pass A output)
+    - Raw chunks >= 1 (Pass C output) 
+    - Vectors >= 1 (Pass D output)
+    - chunk_to_dict_ratio >= 0.05 (critical threshold)
+    
+    Args:
+        result: Source processing result
+        consistency_report: Dictionary consistency analysis
+        
+    Returns:
+        Dict with integrity validation results
+    """
+    validation = {
+        "passed": True,
+        "failures": [],
+        "toc_entries": 0,
+        "raw_chunks": 0, 
+        "vectors": 0,
+        "chunk_to_dict_ratio": consistency_report.get("chunk_to_dict_ratio", 0.0)
+    }
+    
+    # Only validate if original processing succeeded
+    if not result.success:
+        validation["passed"] = False
+        validation["failures"].append(f"Original processing failed: {result.error}")
+        return validation
+    
+    # Extract metrics from pass results
+    for pass_id, pass_data in result.pass_results.items():
+        if isinstance(pass_data, dict) and not pass_data.get("skipped", False):
+            
+            # Pass A: ToC entries
+            if pass_id == "A" and "toc_entries" in pass_data:
+                validation["toc_entries"] = pass_data.get("toc_entries", 0)
+            
+            # Pass C: Raw chunk extraction  
+            if pass_id == "C" and "chunks_extracted" in pass_data:
+                validation["raw_chunks"] = pass_data.get("chunks_extracted", 0)
+                
+            # Pass D: Vector enrichment
+            if pass_id == "D" and "chunks_vectorized" in pass_data:
+                validation["vectors"] = pass_data.get("chunks_vectorized", 0)
+    
+    # Apply success criteria thresholds
+    if validation["toc_entries"] < 1:
+        validation["passed"] = False
+        validation["failures"].append("ToC entries < 1 (Pass A incomplete)")
+        
+    if validation["raw_chunks"] < 1:
+        validation["passed"] = False  
+        validation["failures"].append("Raw chunks < 1 (Pass C incomplete)")
+        
+    if validation["vectors"] < 1:
+        validation["passed"] = False
+        validation["failures"].append("Vectors < 1 (Pass D incomplete)")
+    
+    # Critical chunk-to-dict ratio threshold
+    ratio = validation["chunk_to_dict_ratio"]
+    if ratio < 0.05:
+        validation["passed"] = False
+        validation["failures"].append(f"chunk_to_dict_ratio {ratio:.3f} < 0.05 (critical threshold)")
+    elif ratio < 0.20:
+        validation["failures"].append(f"chunk_to_dict_ratio {ratio:.3f} < 0.20 (warning threshold)")
+    
+    return validation
+
+
+def print_failure_table(results: List['Source6PassResult']) -> None:
+    """
+    Print concise failure table for BUG-022.
+    
+    Format: source | failed_pass | reason
+    """
+    failed_results = [r for r in results if not r.success]
+    
+    if not failed_results:
+        return
+    
+    print("\n" + "=" * 80)
+    print("FAILED SOURCES SUMMARY")
+    print("=" * 80)
+    print(f"{'Source':<30} | {'Failed Pass':<12} | {'Reason':<30}")
+    print("-" * 80)
+    
+    for result in failed_results:
+        source_name = Path(result.source).stem  # Just filename without extension
+        
+        # Determine failed pass - prioritize integrity over guardrail failures
+        if result.integrity_failed and result.integrity_failures:
+            # Multiple integrity failures - show first one
+            first_failure = result.integrity_failures[0]
+            if "Pass A" in first_failure:
+                failed_pass = "A (ToC)"
+            elif "Pass C" in first_failure:
+                failed_pass = "C (Extract)"
+            elif "Pass D" in first_failure:
+                failed_pass = "D (Vector)"
+            elif "ratio" in first_failure.lower():
+                failed_pass = "Ratio"
+            else:
+                failed_pass = "Integrity"
+            reason = first_failure[:30]
+        elif result.failed_pass:
+            # BUG-021 guardrail failure
+            failed_pass = f"{result.failed_pass} (Guard)"
+            reason = result.failure_reason[:30] if result.failure_reason else "Guardrail failure"
+        else:
+            # Generic pipeline failure
+            failed_pass = "Pipeline"
+            reason = result.error[:30] if result.error else "Unknown error"
+        
+        print(f"{source_name:<30} | {failed_pass:<12} | {reason:<30}")
+    
+    print("-" * 80)
+    print(f"Total failed sources: {len(failed_results)}")
+    print("=" * 80 + "\n")
 
 
 def cleanup_old_artifacts(env: str, days_to_keep: int = 7) -> None:
@@ -700,6 +838,7 @@ def main(argv: List[str]) -> int:
             try:
                 res = fut.result()
                 results.append(res)
+                # BUG-022: Initial status based on pipeline success only
                 status = "OK" if res.success else f"FAIL: {res.error}"
                 logger.info(f"Completed {res.source}: {status}")
             except Exception as e:
@@ -713,6 +852,31 @@ def main(argv: List[str]) -> int:
     if consistency_report.get("warnings"):
         for warning in consistency_report["warnings"]:
             logger.warning(f"Consistency check: {warning}")
+    
+    # BUG-022: Apply success criteria validation to all results
+    for result in results:
+        if result.success:  # Only validate sources that completed pipeline
+            validation = validate_source_success_criteria(result, consistency_report)
+            
+            # Update result with integrity validation
+            result.integrity_failed = not validation["passed"]
+            result.integrity_failures = validation["failures"]
+            result.toc_entries = validation["toc_entries"]
+            result.raw_chunks = validation["raw_chunks"] 
+            result.vectors = validation["vectors"]
+            
+            # Override success status if integrity validation failed
+            if result.integrity_failed:
+                result.success = False
+                if not result.error:
+                    result.error = "Integrity validation failed"
+                # Update failure metadata for reporting
+                result.failure_reason = "; ".join(validation["failures"])
+                
+                # Log integrity failure
+                logger.error(f"[INTEGRITY FAILURE] {result.source}: {result.failure_reason}")
+                for failure in validation["failures"]:
+                    logger.error(f"[INTEGRITY] {result.source}: {failure}")
     
     # Summary artifact
     summary_dir = Path(f"artifacts/ingest/{args.env}")
@@ -747,6 +911,9 @@ def main(argv: List[str]) -> int:
         logger.info(f"Wrote summary: {summary_file}")
     except Exception as e:
         logger.warning(f"Failed writing summary: {e}")
+    
+    # BUG-022: Print failure table for failed sources
+    print_failure_table(results)
     
     # Print console summary
     ok = sum(1 for r in results if r.success)
