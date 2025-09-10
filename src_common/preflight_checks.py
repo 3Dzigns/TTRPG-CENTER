@@ -307,14 +307,21 @@ def run_preflight_checks() -> None:
     This is the main entry point for preflight validation. It checks all
     required external tools and raises PreflightError if any are missing.
     
+    NOTE: On Windows, this function permanently extends PATH with discovered
+    tool locations to ensure tools remain available for the entire process.
+    
     Raises:
         PreflightError: If required dependencies are missing or non-functional
     """
     validator = PreflightValidator()
     try:
         validator.validate_dependencies()
-    finally:
+        # DON'T cleanup on success - keep PATH extensions for the process
+        logger.info("Preflight PATH extensions preserved for process duration")
+    except PreflightError:
+        # Only cleanup on failure
         validator.cleanup()
+        raise
 
 
 if __name__ == "__main__":
