@@ -125,6 +125,20 @@ TTRPG_Center/
 - OpenAI API key (optional for full functionality)
 - AstraDB instance (optional for full functionality)
 
+### 🪟 Windows Setup (Required Dependencies)
+
+**For Windows users** - TTRPG Center requires Poppler and Tesseract for PDF processing:
+
+```powershell
+# Automated setup (recommended)
+.\scripts\setup_windows.ps1
+
+# Verify dependencies
+python scripts/bulk_ingest.py --verify-deps
+```
+
+**Troubleshooting**: If setup fails, see [Windows Setup Guide](setup/WINDOWS_SETUP.md) for manual installation and troubleshooting.
+
 ### Get Running in 5 Steps
 ```bash
 # 1. Clone and setup

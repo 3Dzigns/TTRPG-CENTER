@@ -717,6 +717,7 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--no-cleanup", action="store_true", help="Skip artifact cleanup")
     parser.add_argument("--no-logfile", action="store_true", help="No log file, console only")
     parser.add_argument("--skip-preflight", action="store_true", help="Skip preflight dependency checks (for debugging only)")
+    parser.add_argument("--verify-deps", action="store_true", help="Run only dependency verification checks and exit")
     
     args = parser.parse_args(argv)
     
@@ -737,6 +738,32 @@ def main(argv: List[str]) -> int:
     
     logger.info(f"Starting 6-pass bulk ingestion - env: {args.env}, threads: {args.threads}")
     
+    # BUG-023: Verify dependencies mode - run only preflight checks and exit
+    if args.verify_deps:
+        logger.info("Running dependency verification checks...")
+        try:
+            run_preflight_checks()
+            logger.info("All dependencies verified successfully!")
+            print("")
+            print("=== Dependency Verification PASSED ===")
+            print("All required tools (Poppler, Tesseract) are installed and functional.")
+            print("")
+            print("Next steps:")
+            print("  1. Run ingestion: python scripts/bulk_ingest.py --env dev --upload-dir <path>")
+            print("  2. For setup help: .\\scripts\\setup_windows.ps1 --help")
+            return 0
+        except PreflightError as e:
+            logger.error(f"Dependency verification failed: {e}")
+            print("")
+            print("=== Dependency Verification FAILED ===")
+            print(f"Missing or non-functional dependency: {e}")
+            print("")
+            print("Remediation:")
+            print("  1. Run Windows setup: .\\scripts\\setup_windows.ps1")
+            print("  2. Manual setup guide: docs/setup/WINDOWS_SETUP.md") 
+            print("  3. Verify after setup: python scripts/bulk_ingest.py --verify-deps")
+            return 2  # Exit code 2 indicates dependency/configuration issues
+    
     # BUG-020: Preflight dependency checks (fail-fast for missing tools)
     if not args.skip_preflight:
         try:
@@ -744,6 +771,8 @@ def main(argv: List[str]) -> int:
         except PreflightError as e:
             logger.error(f"Preflight check failed: {e}")
             logger.error("Use --skip-preflight to bypass (not recommended for production)")
+            logger.info("For dependency setup help: .\\scripts\\setup_windows.ps1")
+            logger.info("To verify only: python scripts/bulk_ingest.py --verify-deps")
             return 2  # Exit code 2 indicates dependency/configuration issues
     else:
         logger.warning("Skipping preflight dependency checks (--skip-preflight enabled)")

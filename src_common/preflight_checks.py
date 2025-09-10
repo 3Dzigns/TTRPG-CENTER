@@ -220,8 +220,23 @@ class PreflightValidator:
         logger.error("  • Poppler utilities (pdfinfo, pdftoppm)")
         logger.error("  • Tesseract OCR")
         logger.error("")
-        logger.error("Installation instructions:")
-        logger.error("  Windows:")
+        
+        # BUG-023: Enhanced Windows-specific guidance
+        if sys.platform == "win32":
+            logger.error("AUTOMATED WINDOWS SETUP (Recommended):")
+            logger.error("  Run the automated installer:")
+            logger.error("    .\\scripts\\setup_windows.ps1")
+            logger.error("")
+            logger.error("  Or with options:")
+            logger.error("    .\\scripts\\setup_windows.ps1 -UserScope    # No admin required")
+            logger.error("    .\\scripts\\setup_windows.ps1 -Force        # Force reinstall") 
+            logger.error("")
+            logger.error("MANUAL INSTALLATION:")
+            logger.error("  See detailed guide: docs/setup/WINDOWS_SETUP.md")
+            logger.error("")
+        
+        logger.error("Installation sources by platform:")
+        logger.error("  Windows (Manual):")
         logger.error("    - Poppler: https://github.com/oschwartz10612/poppler-windows/releases")
         logger.error("    - Tesseract: https://github.com/UB-Mannheim/tesseract/wiki")
         logger.error("  Linux:")
@@ -229,9 +244,16 @@ class PreflightValidator:
         logger.error("  macOS:")
         logger.error("    - brew install poppler tesseract")
         logger.error("")
-        logger.error("After installation, ensure tools are in system PATH or set:")
-        logger.error("  POPPLER_PATH=<path to poppler bin directory>")
-        logger.error("  TESSERACT_PATH=<path to tesseract executable>")
+        
+        if sys.platform == "win32":
+            logger.error("VERIFICATION:")
+            logger.error("  After installation, verify with:")
+            logger.error("    python scripts/bulk_ingest.py --verify-deps")
+            logger.error("")
+        else:
+            logger.error("After installation, ensure tools are in system PATH or set:")
+            logger.error("  POPPLER_PATH=<path to poppler bin directory>")
+            logger.error("  TESSERACT_PATH=<path to tesseract executable>")
     
     def validate_dependencies(self) -> None:
         """

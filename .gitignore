@@ -229,3 +229,12 @@ bandit-report.json
 .coverage
 htmlcov/
 test-results/
+.pytest_tmp/
+.benchmarks/
+
+# Claude tasks
+.claude/tasks/active/
+.claude/tasks/completed/
+
+# Other temporary files  
+nul
