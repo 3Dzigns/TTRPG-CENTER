@@ -563,70 +563,23 @@ class PassCExtractor:
 
 def preflight_ocr_tools() -> bool:
     """
-    BUG-015: Preflight check for Poppler and Tesseract OCR tools
+    LEGACY: Preflight check for Poppler and Tesseract OCR tools
     
-    Validates that required OCR tools are available and working.
-    Critical for processing image-only PDFs.
+    This function is deprecated in favor of the centralized preflight_checks module.
+    It remains for backward compatibility with existing code that may call it.
     
     Returns:
         True if all tools are available, False otherwise
     """
-    import subprocess
-    import shutil
+    from .preflight_checks import PreflightValidator, PreflightError
     
-    tools_status = {}
-    all_ok = True
-    
-    # Check Poppler tools
-    poppler_tools = ["pdfinfo", "pdftoppm"]
-    for tool in poppler_tools:
-        try:
-            if shutil.which(tool):
-                result = subprocess.run([tool, "-v"], capture_output=True, text=True, timeout=5)
-                # Note: pdfinfo -v writes to stderr
-                version_output = result.stderr.strip() if result.stderr else result.stdout.strip()
-                tools_status[tool] = f"✅ Available: {version_output.split()[0] if version_output else 'version unknown'}"
-                logger.info(f"Poppler {tool}: {version_output}")
-            else:
-                tools_status[tool] = "❌ Not found in PATH"
-                all_ok = False
-                logger.error(f"Poppler {tool} not found in PATH")
-        except Exception as e:
-            tools_status[tool] = f"❌ Error: {e}"
-            all_ok = False
-            logger.error(f"Failed to check {tool}: {e}")
-    
-    # Check Tesseract
     try:
-        if shutil.which("tesseract"):
-            result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
-            version_line = result.stdout.split('\n')[0] if result.stdout else "version unknown"
-            tools_status["tesseract"] = f"✅ Available: {version_line}"
-            logger.info(f"Tesseract: {version_line}")
-        else:
-            tools_status["tesseract"] = "❌ Not found in PATH"
-            all_ok = False
-            logger.error("Tesseract not found in PATH")
-    except Exception as e:
-        tools_status["tesseract"] = f"❌ Error: {e}"
-        all_ok = False
-        logger.error(f"Failed to check tesseract: {e}")
-    
-    # Summary
-    if all_ok:
-        logger.info("✅ OCR Tools preflight PASSED - All required tools available")
-        for tool, status in tools_status.items():
-            logger.info(f"  {tool}: {status}")
-    else:
-        logger.error("❌ OCR Tools preflight FAILED - Missing required tools")
-        logger.error("Required for image-only PDF processing:")
-        logger.error("  - Poppler: Install via conda/OS package manager (provides pdfinfo, pdftoppm)")
-        logger.error("  - Tesseract OCR: Install via conda/OS package manager")
-        logger.error("  - Windows: Add installation directories to PATH")
-        for tool, status in tools_status.items():
-            logger.error(f"  {tool}: {status}")
-    
-    return all_ok
+        validator = PreflightValidator()
+        validator.validate_dependencies()
+        validator.cleanup()
+        return True
+    except PreflightError:
+        return False
 
 
 def process_pass_c(pdf_path: Path, output_dir: Path, job_id: str, env: str = "dev", max_chunk_size: int = 600) -> PassCResult:

@@ -45,6 +45,7 @@ from src_common.logging import setup_logging, get_logger
 from src_common.astra_loader import AstraLoader
 from src_common.ttrpg_secrets import _load_env_file
 from src_common.ssl_bypass import configure_ssl_bypass_for_development
+from src_common.preflight_checks import run_preflight_checks, PreflightError
 
 # Import new 6-pass system
 from src_common.pass_a_toc_parser import process_pass_a
@@ -121,7 +122,8 @@ class Pass6Pipeline:
         env: str, 
         *, 
         resume: bool = False,
-        force_dict_init: bool = False
+        force_dict_init: bool = False,
+        timeout: int = 1800  # 30 minutes default timeout
     ) -> Source6PassResult:
         """
         Process a source through the complete 6-pass pipeline
@@ -130,16 +132,45 @@ class Pass6Pipeline:
             pdf_path: Path to source PDF
             env: Environment (dev/test/prod)
             resume: Whether to resume from existing artifacts
+            force_dict_init: Force dictionary initialization
+            timeout: Lock acquisition timeout in seconds (BUG-008 fix)
             
         Returns:
             Source6PassResult with comprehensive results
         """
         
-        # Per-source barrier: acquire lock for this source
+        # Per-source barrier with timeout (BUG-008 fix)
         source_lock = self.get_source_lock(pdf_path)
         
-        with source_lock:
-            return self._process_source_sequential(pdf_path, env, resume=resume, force_dict_init=force_dict_init)
+        try:
+            acquired = source_lock.acquire(timeout=timeout)
+            if not acquired:
+                error_msg = f"Failed to acquire lock for {pdf_path.name} within {timeout}s"
+                logger.error(error_msg)
+                return Source6PassResult(
+                    source=pdf_path.name,
+                    job_id=self._job_id_for(pdf_path),
+                    timings=[],
+                    pass_results={},
+                    success=False,
+                    error=error_msg
+                )
+            
+            try:
+                return self._process_source_sequential(pdf_path, env, resume=resume, force_dict_init=force_dict_init)
+            finally:
+                source_lock.release()
+                
+        except Exception as e:
+            logger.error(f"Lock management error for {pdf_path.name}: {e}")
+            return Source6PassResult(
+                source=pdf_path.name,
+                job_id=self._job_id_for(pdf_path),
+                timings=[],
+                pass_results={},
+                success=False,
+                error=f"Threading error: {str(e)}"
+            )
     
     def _process_source_sequential(
         self, 
@@ -284,22 +315,132 @@ class Pass6Pipeline:
                 from src_common.artifact_validator import load_json_with_retry
                 manifest_data = load_json_with_retry(manifest_path)
                 completed_passes = manifest_data.get("completed_passes", [])
-                return pass_id not in completed_passes
+                
+                # Pass is marked complete in manifest
+                if pass_id in completed_passes:
+                    # Validate that expected artifacts actually exist
+                    if self._validate_pass_artifacts(pass_id, output_dir, manifest_data):
+                        logger.info(f"Skipping Pass {pass_id} - already completed with valid artifacts")
+                        return False
+                    else:
+                        logger.warning(f"Pass {pass_id} marked complete but artifacts missing/invalid - re-running")
+                        return True
+                else:
+                    return True
             except Exception as e:
                 logger.warning(f"Failed to read manifest for resume check: {e}")
                 return True
         
         return True
     
+    def _validate_pass_artifacts(self, pass_id: str, output_dir: Path, manifest_data: Dict) -> bool:
+        """Validate that expected artifacts exist for a completed pass"""
+        
+        # Define expected artifacts for each pass
+        expected_artifacts = {
+            "A": ["manifest.json"],  # Pass A creates/updates manifest
+            "B": ["manifest.json", "split_index.json"],  # Pass B may create split_index
+            "C": [],  # Pass C creates chunks in AstraDB, minimal local artifacts
+            "D": [],  # Pass D creates vectors in AstraDB
+            "E": [],  # Pass E creates graph in AstraDB
+            "F": ["manifest.json"]  # Pass F finalizes manifest
+        }
+        
+        artifacts_to_check = expected_artifacts.get(pass_id, [])
+        
+        # Check that all expected files exist and are non-empty
+        for artifact in artifacts_to_check:
+            artifact_path = output_dir / artifact
+            if not artifact_path.exists():
+                logger.debug(f"Missing artifact for Pass {pass_id}: {artifact}")
+                return False
+            if artifact_path.stat().st_size == 0:
+                logger.debug(f"Empty artifact for Pass {pass_id}: {artifact}")
+                return False
+        
+        # Additional validation: check manifest consistency
+        if pass_id in manifest_data.get("completed_passes", []):
+            pass_info = manifest_data.get(f"pass_{pass_id.lower()}", {})
+            if not pass_info.get("success", False):
+                logger.debug(f"Pass {pass_id} marked as failed in manifest")
+                return False
+        
+        return True
+    
     def _job_id_for(self, pdf_path: Path) -> str:
-        """Generate consistent job ID for a PDF"""
+        """Generate consistent job ID for a PDF including file attributes"""
         import hashlib
-        name_hash = hashlib.md5(pdf_path.name.encode()).hexdigest()[:8]
-        return f"job_{int(time.time())}_{name_hash}"
+        
+        # Include filename, size, and mtime for unique identification
+        stat = pdf_path.stat()
+        content = f"{pdf_path.name}_{stat.st_size}_{int(stat.st_mtime)}"
+        content_hash = hashlib.md5(content.encode()).hexdigest()[:12]
+        timestamp = int(time.time())
+        
+        return f"job_{timestamp}_{content_hash}"
     
     def _now_ms(self) -> int:
         """Current timestamp in milliseconds"""
         return int(time.time() * 1000)
+
+
+def check_chunk_dictionary_consistency(env: str, results: List[Source6PassResult]) -> Dict:
+    """Check consistency between chunk counts and dictionary terms"""
+    
+    consistency_report = {
+        "chunk_count": 0,
+        "dictionary_count": 0,
+        "warnings": [],
+        "chunk_to_dict_ratio": 0.0
+    }
+    
+    try:
+        # Count total chunks from all successful results
+        total_chunks = 0
+        for result in results:
+            if result.success:
+                # Extract chunk counts from pass results
+                for pass_id, pass_data in result.pass_results.items():
+                    if isinstance(pass_data, dict) and "chunks_processed" in pass_data:
+                        total_chunks += pass_data.get("chunks_processed", 0)
+        
+        consistency_report["chunk_count"] = total_chunks
+        
+        # Get dictionary count from DictionaryLoader
+        try:
+            from src_common.dictionary_loader import DictionaryLoader
+            dict_loader = DictionaryLoader(env)
+            if dict_loader.client:
+                dict_count = dict_loader.get_term_count()
+                consistency_report["dictionary_count"] = dict_count
+            else:
+                consistency_report["warnings"].append("Dictionary loader not available for count")
+                return consistency_report
+        except Exception as e:
+            consistency_report["warnings"].append(f"Failed to get dictionary count: {e}")
+            return consistency_report
+        
+        # Calculate ratio and validate
+        if consistency_report["dictionary_count"] > 0:
+            ratio = consistency_report["chunk_count"] / consistency_report["dictionary_count"]
+            consistency_report["chunk_to_dict_ratio"] = ratio
+            
+            # Heuristic warnings based on expected ratios
+            if ratio < 0.5:
+                consistency_report["warnings"].append(
+                    f"Low chunk-to-dictionary ratio ({ratio:.2f}) - possible chunk loss"
+                )
+            elif ratio > 10.0:
+                consistency_report["warnings"].append(
+                    f"High chunk-to-dictionary ratio ({ratio:.2f}) - possible over-chunking"
+                )
+        else:
+            consistency_report["warnings"].append("Dictionary is empty - this should not happen after ingestion")
+        
+    except Exception as e:
+        consistency_report["warnings"].append(f"Consistency check failed: {e}")
+    
+    return consistency_report
 
 
 def cleanup_old_artifacts(env: str, days_to_keep: int = 7) -> None:
@@ -359,14 +500,16 @@ def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(description="6-Pass Bulk Ingestion System")
     parser.add_argument("--env", default="dev", choices=["dev", "test", "prod"])
     parser.add_argument("--threads", type=int, default=4, help="Concurrent processing threads")
-    parser.add_argument("--upload-dir", default="uploads", help="Directory containing PDFs")
-    parser.add_argument("--empty-first", action="store_true", help="Empty Astra collections first")
-    parser.add_argument("--empty-dict-first", action="store_true", help="Empty dictionary collection first")
+    parser.add_argument("--upload-dir", help="Directory containing PDFs to process (required for document ingestion)")
+    parser.add_argument("--reset-db", action="store_true", help="Reset database collections before ingestion (DESTRUCTIVE)")
+    parser.add_argument("--empty-first", action="store_true", help="DEPRECATED: Use --reset-db instead")
+    parser.add_argument("--empty-dict-first", action="store_true", help="DEPRECATED: Use --reset-db instead")
     parser.add_argument("--force-dict-init", action="store_true", help="Force dictionary initialization even if exists")
     parser.add_argument("--resume", action="store_true", help="Resume from existing artifacts")
     parser.add_argument("--cleanup-days", type=int, default=7, help="Days to keep artifacts")
     parser.add_argument("--no-cleanup", action="store_true", help="Skip artifact cleanup")
     parser.add_argument("--no-logfile", action="store_true", help="No log file, console only")
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip preflight dependency checks (for debugging only)")
     
     args = parser.parse_args(argv)
     
@@ -383,25 +526,53 @@ def main(argv: List[str]) -> int:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         log_file = logs_dir / f"bulk_ingest_{timestamp}.log"
     
-    setup_logging()
+    setup_logging(log_file=log_file)
     
     logger.info(f"Starting 6-pass bulk ingestion - env: {args.env}, threads: {args.threads}")
+    
+    # BUG-020: Preflight dependency checks (fail-fast for missing tools)
+    if not args.skip_preflight:
+        try:
+            run_preflight_checks()
+        except PreflightError as e:
+            logger.error(f"Preflight check failed: {e}")
+            logger.error("Use --skip-preflight to bypass (not recommended for production)")
+            return 2  # Exit code 2 indicates dependency/configuration issues
+    else:
+        logger.warning("Skipping preflight dependency checks (--skip-preflight enabled)")
+        logger.warning("This may result in silent failures during PDF processing")
     
     # Cleanup old artifacts if requested
     if not args.no_cleanup:
         cleanup_old_artifacts(args.env, args.cleanup_days)
     
-    # Initialize AstraLoader and optionally empty collections
+    # Initialize AstraLoader 
     loader = AstraLoader(args.env)
     
-    if args.empty_first:
-        logger.info("Emptying Astra collections...")
+    # Handle database reset (explicit user request only)
+    reset_requested = args.reset_db or args.empty_first or args.empty_dict_first
+    
+    if reset_requested:
+        if args.empty_first or args.empty_dict_first:
+            logger.warning("Using deprecated flags --empty-first/--empty-dict-first. Use --reset-db instead.")
+        
+        # Add production safety check
+        if args.env == "prod":
+            logger.error("Database reset in production requires additional confirmation")
+            response = input("Reset production database? This will DELETE ALL DATA. Type 'DELETE_ALL_PROD_DATA' to confirm: ")
+            if response != "DELETE_ALL_PROD_DATA":
+                logger.info("Database reset cancelled")
+                return 1
+        
+        logger.warning(f"RESETTING database collections in {args.env} environment...")
+        
+        # Empty chunks collection
         if not loader.empty_collection():
             logger.error("Failed to empty Astra collection")
             return 1
-    
-    # Handle dictionary collection emptying
-    if args.empty_first or args.empty_dict_first:
+        logger.info("Emptied chunks collection")
+        
+        # Empty dictionary collection
         from src_common.dictionary_loader import DictionaryLoader
         dict_loader = DictionaryLoader(args.env)
         try:
@@ -413,8 +584,20 @@ def main(argv: List[str]) -> int:
                 logger.info("SIMULATION: Would empty dictionary collection")
         except Exception as e:
             logger.warning(f"Failed to empty dictionary collection: {e}")
+    else:
+        logger.info("Starting incremental ingestion (preserving existing data)")
+        logger.info("Use --reset-db flag to reset database collections before ingestion")
     
-    # Find PDFs to process
+    # Find PDFs to process (only if upload directory is specified)
+    if args.upload_dir is None:
+        if reset_requested:
+            logger.info("Database reset completed. No upload directory specified, so no documents will be processed.")
+            return 0
+        else:
+            logger.info("No upload directory specified. Use --upload-dir to specify PDFs to process.")
+            logger.info("For database reset only, use: --reset-db without --upload-dir")
+            return 0
+    
     upload_dir = Path(args.upload_dir)
     if not upload_dir.exists():
         logger.error(f"Upload directory not found: {upload_dir}")
@@ -456,6 +639,12 @@ def main(argv: List[str]) -> int:
     end_ts = int(time.time() * 1000)
     elapsed_ms = end_ts - start_ts
     
+    # Consistency check: chunk vs dictionary validation
+    consistency_report = check_chunk_dictionary_consistency(args.env, results)
+    if consistency_report.get("warnings"):
+        for warning in consistency_report["warnings"]:
+            logger.warning(f"Consistency check: {warning}")
+    
     # Summary artifact
     summary_dir = Path(f"artifacts/ingest/{args.env}")
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -480,7 +669,8 @@ def main(argv: List[str]) -> int:
                             len([p for p in r.pass_results.keys() if not r.pass_results[p].get("skipped", False)])
                             for r in results if r.success
                         )
-                    }
+                    },
+                    "consistency_check": consistency_report
                 },
                 f,
                 indent=2,
