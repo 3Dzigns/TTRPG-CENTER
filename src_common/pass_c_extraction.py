@@ -18,8 +18,11 @@ Artifacts:
 """
 
 import json
+import os
+import sys
 import time
 import uuid
+import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, asdict
@@ -28,9 +31,11 @@ from dataclasses import dataclass, asdict
 try:
     from unstructured.partition.pdf import partition_pdf
     from unstructured.chunking.title import chunk_by_title
+    import unstructured
     UNSTRUCTURED_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     UNSTRUCTURED_AVAILABLE = False
+    UNSTRUCTURED_IMPORT_ERROR = str(e)
 
 # Fallback imports
 import pypdf
@@ -38,6 +43,7 @@ import pypdf
 from .logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 from .astra_loader import AstraLoader
+from .metadata_utils import extract_page_info, extract_coordinates, safe_metadata_get
 
 logger = get_logger(__name__)
 
@@ -76,9 +82,10 @@ class PassCResult:
 class PassCExtractor:
     """Pass C: Unstructured.io Extraction"""
     
-    def __init__(self, job_id: str, env: str = "dev"):
+    def __init__(self, job_id: str, env: str = "dev", max_chunk_size: int = 600):
         self.job_id = job_id
         self.env = env
+        self.max_chunk_size = max_chunk_size
         self.astra_loader = AstraLoader(env)
         
     def process_pdf(self, pdf_path: Path, output_dir: Path) -> PassCResult:
@@ -105,7 +112,7 @@ class PassCExtractor:
             
             if split_index_path.exists():
                 # Process split parts
-                split_data = load_json_with_retry(split_index_path)
+                split_data = load_json_with_retry(split_index_path, expected_schema_keys={'parts'})
                 for part_info in split_data.get("parts", []):
                     part_path = Path(part_info["file_path"])
                     if part_path.exists():
@@ -202,10 +209,8 @@ class PassCExtractor:
                 part_path, page_start, page_end, section_titles, part_index
             )
         else:
-            logger.warning("unstructured.io not available, using fallback extraction")
-            chunks = self._extract_with_fallback(
-                part_path, page_start, page_end, section_titles, part_index
-            )
+            logger.error("Unstructured.io not available - cannot proceed with document extraction")
+            chunks = self._handle_unstructured_unavailable(part_path)
         
         return chunks
     
@@ -219,6 +224,39 @@ class PassCExtractor:
     ) -> List[RawChunk]:
         """Extract chunks using unstructured.io"""
         
+        # Configure Poppler and Tesseract for unstructured.io
+        poppler_path = os.getenv("POPPLER_PATH")
+        tesseract_path = os.getenv("TESSERACT_PATH")
+        tessdata_prefix = os.getenv("TESSDATA_PREFIX")
+        original_path = os.environ.get("PATH", "")
+        
+        # Configure Poppler
+        if poppler_path and poppler_path.strip() and Path(poppler_path).exists():
+            logger.info(f"Adding Poppler to PATH: {poppler_path}")
+            os.environ["PATH"] = f"{poppler_path};{original_path}"
+        else:
+            if poppler_path and poppler_path.strip():
+                logger.warning(f"Poppler path not found: {poppler_path}")
+            else:
+                logger.info("Poppler not configured - using fallback extraction without OCR")
+        
+        # Configure Tesseract
+        if tesseract_path and tesseract_path.strip() and Path(tesseract_path).exists():
+            logger.info(f"Adding Tesseract to PATH: {tesseract_path}")
+            os.environ["PATH"] = f"{tesseract_path};{os.environ.get('PATH', '')}"
+        else:
+            if tesseract_path and tesseract_path.strip():
+                logger.warning(f"Tesseract path not found: {tesseract_path}")
+            else:
+                logger.info("Tesseract not configured - using fallback extraction without OCR")
+            
+        # Configure Tessdata path
+        if tessdata_prefix and Path(tessdata_prefix).exists():
+            logger.info(f"Setting TESSDATA_PREFIX: {tessdata_prefix}")
+            os.environ["TESSDATA_PREFIX"] = tessdata_prefix
+        else:
+            logger.warning(f"Tessdata path not found or not configured: {tessdata_prefix}")
+        
         chunks = []
         
         try:
@@ -231,12 +269,14 @@ class PassCExtractor:
                 include_page_breaks=True
             )
             
-            # Chunk by title for better section awareness
+            # Chunk by title for better section awareness with overlap for context preservation
             chunked_elements = chunk_by_title(
                 elements=elements,
-                max_characters=2000,
-                new_after_n_chars=1500,
-                combine_text_under_n_chars=500
+                max_characters=self.max_chunk_size,  # Soft limit - Unstructured.io can exceed for sentence integrity
+                new_after_n_chars=int(self.max_chunk_size * 0.75),  # 75% of max for new chunk trigger
+                combine_text_under_n_chars=120,
+                overlap=150,  # 150 character overlap for context preservation
+                overlap_all=False  # Only overlap chunks that are split due to length
             )
             
             for i, element in enumerate(chunked_elements):
@@ -245,29 +285,22 @@ class PassCExtractor:
                 if len(content) < 50:  # Skip very short chunks
                     continue
                 
+                # Log chunk size statistics for monitoring (no truncation)
+                if len(content) > self.max_chunk_size:
+                    logger.info(f"Chunk {i+1}: {len(content)} chars (target: {self.max_chunk_size}) - Unstructured.io preserved sentence integrity")
+                
                 # Generate chunk ID
                 chunk_id = f"{self.job_id}_c_{part_index}_{i+1:04d}"
                 
-                # Extract page information
-                page_num = getattr(element, 'metadata', {}).get('page_number', page_start)
-                if hasattr(element, 'metadata') and element.metadata:
-                    page_num = element.metadata.page_number or page_start
+                # Extract page information using metadata utility
+                page_num = extract_page_info(getattr(element, 'metadata', None), page_start)
                 
                 # Build section path from titles
                 toc_path = " > ".join(section_titles[:2])  # Limit depth
                 section_id = f"part_{part_index}_section_{i+1}"
                 
-                # Extract coordinates if available
-                coordinates = None
-                if hasattr(element, 'metadata') and element.metadata:
-                    coords = element.metadata.coordinates
-                    if coords:
-                        coordinates = {
-                            "x": coords.x,
-                            "y": coords.y,
-                            "width": coords.width,
-                            "height": coords.height
-                        }
+                # Extract coordinates if available using metadata utility
+                coordinates = extract_coordinates(getattr(element, 'metadata', None))
                 
                 chunk = RawChunk(
                     chunk_id=chunk_id,
@@ -291,76 +324,109 @@ class PassCExtractor:
                 chunks.append(chunk)
                 
         except Exception as e:
-            logger.error(f"Unstructured.io extraction failed for {part_path}: {e}")
-            # Fallback to pypdf extraction
-            return self._extract_with_fallback(part_path, page_start, page_end, section_titles, part_index)
+            logger.error(f"Unstructured.io extraction failed for {part_path.name}: {e}")
+            return self._handle_unstructured_failure(part_path, e)
+        finally:
+            # Restore original PATH and environment
+            if poppler_path or tesseract_path:
+                os.environ["PATH"] = original_path
+                logger.debug("Restored original PATH after unstructured.io processing")
+                
+            # Remove TESSDATA_PREFIX if we set it
+            if tessdata_prefix and "TESSDATA_PREFIX" in os.environ:
+                del os.environ["TESSDATA_PREFIX"]
+                logger.debug("Removed TESSDATA_PREFIX after unstructured.io processing")
         
         return chunks
     
-    def _extract_with_fallback(
-        self,
-        part_path: Path,
-        page_start: int,
-        page_end: int,
-        section_titles: List[str],
-        part_index: int
-    ) -> List[RawChunk]:
-        """Fallback extraction using pypdf"""
+    def _handle_unstructured_unavailable(self, part_path: Path) -> List[RawChunk]:
+        """Handle case where Unstructured.io is not available - diagnostic logging only"""
         
-        chunks = []
+        logger.error("UNSTRUCTURED.IO NOT AVAILABLE - CRITICAL DEPENDENCY MISSING")
+        logger.error(f"Import error: {UNSTRUCTURED_IMPORT_ERROR}")
+        logger.error("Remediation steps:")
+        logger.error("1. Install unstructured: pip install 'unstructured[local-inference,pdf]>=0.17.2'")
+        logger.error("2. Verify installation: python -c 'import unstructured; print(unstructured.__version__)'")
+        logger.error("3. Check requirements.txt for version conflicts")
         
-        try:
-            with open(part_path, "rb") as f:
-                reader = pypdf.PdfReader(f)
-                
-                for page_idx, page in enumerate(reader.pages):
-                    page_num = page_start + page_idx
-                    if page_num > page_end:
-                        break
-                    
-                    # Extract text from page
-                    text = page.extract_text() or ""
-                    text = text.strip()
-                    
-                    if len(text) < 100:  # Skip pages with minimal text
-                        continue
-                    
-                    # Split into paragraph chunks
-                    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-                    
-                    for para_idx, paragraph in enumerate(paragraphs):
-                        if len(paragraph) < 50:
-                            continue
-                        
-                        chunk_id = f"{self.job_id}_c_{part_index}_{page_num}_{para_idx+1:03d}"
-                        section_id = f"part_{part_index}_page_{page_num}"
-                        toc_path = " > ".join(section_titles[:2])
-                        
-                        chunk = RawChunk(
-                            chunk_id=chunk_id,
-                            content=paragraph,
-                            stage="raw",
-                            source_id=self.job_id,
-                            section_id=section_id,
-                            page_span=str(page_num),
-                            toc_path=toc_path,
-                            element_type="text",
-                            page_number=page_num,
-                            metadata={
-                                "part_index": part_index,
-                                "page_start": page_start,
-                                "page_end": page_end,
-                                "extraction_method": "pypdf_fallback",
-                                "paragraph_index": para_idx
-                            }
-                        )
-                        chunks.append(chunk)
-                        
-        except Exception as e:
-            logger.error(f"Fallback extraction failed for {part_path}: {e}")
-            return []
+        # Log system diagnostics
+        diagnostics = {
+            "file_path": str(part_path),
+            "file_exists": part_path.exists(),
+            "file_size": part_path.stat().st_size if part_path.exists() else "N/A",
+            "python_version": sys.version,
+            "working_directory": os.getcwd(),
+            "import_error": UNSTRUCTURED_IMPORT_ERROR,
+        }
+        logger.error("System diagnostics:", extra=diagnostics)
         
-        return chunks
+        # Return empty list - job should fail
+        return []
+    
+    def _handle_unstructured_failure(self, part_path: Path, error: Exception) -> List[RawChunk]:
+        """Handle Unstructured.io processing failure with comprehensive diagnostic logging"""
+        
+        logger.error(f"UNSTRUCTURED.IO PROCESSING FAILED for {part_path.name}")
+        logger.error(f"Error type: {type(error).__name__}")
+        logger.error(f"Error details: {str(error)}")
+        
+        # Collect comprehensive diagnostic information
+        diagnostics = {
+            "file_path": str(part_path),
+            "file_exists": part_path.exists(),
+            "file_size": part_path.stat().st_size if part_path.exists() else "N/A",
+            "file_readable": os.access(part_path, os.R_OK) if part_path.exists() else False,
+            "python_version": sys.version,
+            "unstructured_version": unstructured.__version__ if UNSTRUCTURED_AVAILABLE else "N/A",
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            
+            # OCR tool availability
+            "poppler_pdfinfo": bool(shutil.which("pdfinfo")),
+            "poppler_pdftoppm": bool(shutil.which("pdftoppm")),
+            "tesseract_available": bool(shutil.which("tesseract")),
+            
+            # Environment configuration
+            "tessdata_prefix": os.getenv("TESSDATA_PREFIX"),
+            "tesseract_path": os.getenv("TESSERACT_PATH"),
+            "poppler_path": os.getenv("POPPLER_PATH"),
+            "path_env": os.getenv("PATH", "")[:200] + "..." if len(os.getenv("PATH", "")) > 200 else os.getenv("PATH", ""),
+        }
+        
+        logger.error("Comprehensive diagnostic information:", extra=diagnostics)
+        
+        # Provide specific remediation guidance based on error type
+        if "poppler" in str(error).lower():
+            logger.error("POPPLER ISSUE DETECTED - Install Poppler utilities:")
+            logger.error("- Windows: Download from https://github.com/oschwartz10612/poppler-windows/releases")
+            logger.error("- Linux: apt-get install poppler-utils")
+            logger.error("- macOS: brew install poppler")
+            logger.error("- Add installation directory to PATH environment variable")
+        elif "tesseract" in str(error).lower():
+            logger.error("TESSERACT ISSUE DETECTED - Install Tesseract OCR:")
+            logger.error("- Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki")
+            logger.error("- Linux: apt-get install tesseract-ocr")
+            logger.error("- macOS: brew install tesseract")
+            logger.error("- Set TESSDATA_PREFIX environment variable")
+        elif "memory" in str(error).lower() or "out of memory" in str(error).lower():
+            logger.error("MEMORY ISSUE DETECTED - Try:")
+            logger.error("- Reduce max_characters parameter")
+            logger.error("- Process smaller file chunks")
+            logger.error("- Increase system memory")
+        elif "permission" in str(error).lower() or "access" in str(error).lower():
+            logger.error("PERMISSION ISSUE DETECTED - Check:")
+            logger.error("- File read permissions")
+            logger.error("- Directory access permissions")
+            logger.error("- User account privileges")
+        else:
+            logger.error("UNKNOWN ERROR - General troubleshooting:")
+            logger.error("- Verify PDF file is not corrupted")
+            logger.error("- Try with a different PDF file")
+            logger.error("- Check unstructured.io version compatibility")
+            logger.error("- Review unstructured.io documentation")
+        
+        # Return empty list - let job fail gracefully with full diagnostic info
+        return []
     
     def _write_chunks_jsonl(self, chunks: List[RawChunk], output_path: Path):
         """Write chunks to JSONL file"""
@@ -455,6 +521,7 @@ class PassCExtractor:
         # Update with Pass C information
         manifest_data.update({
             "completed_passes": list(set(manifest_data.get("completed_passes", []) + ["C"])),
+            "chunks": manifest_data.get("chunks", []),  # BUG-016: Ensure chunks key exists
             "pass_c_results": {
                 "chunks_extracted": chunks_extracted,
                 "chunks_loaded": chunks_loaded,
@@ -494,7 +561,75 @@ class PassCExtractor:
             return ""
 
 
-def process_pass_c(pdf_path: Path, output_dir: Path, job_id: str, env: str = "dev") -> PassCResult:
+def preflight_ocr_tools() -> bool:
+    """
+    BUG-015: Preflight check for Poppler and Tesseract OCR tools
+    
+    Validates that required OCR tools are available and working.
+    Critical for processing image-only PDFs.
+    
+    Returns:
+        True if all tools are available, False otherwise
+    """
+    import subprocess
+    import shutil
+    
+    tools_status = {}
+    all_ok = True
+    
+    # Check Poppler tools
+    poppler_tools = ["pdfinfo", "pdftoppm"]
+    for tool in poppler_tools:
+        try:
+            if shutil.which(tool):
+                result = subprocess.run([tool, "-v"], capture_output=True, text=True, timeout=5)
+                # Note: pdfinfo -v writes to stderr
+                version_output = result.stderr.strip() if result.stderr else result.stdout.strip()
+                tools_status[tool] = f"✅ Available: {version_output.split()[0] if version_output else 'version unknown'}"
+                logger.info(f"Poppler {tool}: {version_output}")
+            else:
+                tools_status[tool] = "❌ Not found in PATH"
+                all_ok = False
+                logger.error(f"Poppler {tool} not found in PATH")
+        except Exception as e:
+            tools_status[tool] = f"❌ Error: {e}"
+            all_ok = False
+            logger.error(f"Failed to check {tool}: {e}")
+    
+    # Check Tesseract
+    try:
+        if shutil.which("tesseract"):
+            result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
+            version_line = result.stdout.split('\n')[0] if result.stdout else "version unknown"
+            tools_status["tesseract"] = f"✅ Available: {version_line}"
+            logger.info(f"Tesseract: {version_line}")
+        else:
+            tools_status["tesseract"] = "❌ Not found in PATH"
+            all_ok = False
+            logger.error("Tesseract not found in PATH")
+    except Exception as e:
+        tools_status["tesseract"] = f"❌ Error: {e}"
+        all_ok = False
+        logger.error(f"Failed to check tesseract: {e}")
+    
+    # Summary
+    if all_ok:
+        logger.info("✅ OCR Tools preflight PASSED - All required tools available")
+        for tool, status in tools_status.items():
+            logger.info(f"  {tool}: {status}")
+    else:
+        logger.error("❌ OCR Tools preflight FAILED - Missing required tools")
+        logger.error("Required for image-only PDF processing:")
+        logger.error("  - Poppler: Install via conda/OS package manager (provides pdfinfo, pdftoppm)")
+        logger.error("  - Tesseract OCR: Install via conda/OS package manager")
+        logger.error("  - Windows: Add installation directories to PATH")
+        for tool, status in tools_status.items():
+            logger.error(f"  {tool}: {status}")
+    
+    return all_ok
+
+
+def process_pass_c(pdf_path: Path, output_dir: Path, job_id: str, env: str = "dev", max_chunk_size: int = 600) -> PassCResult:
     """
     Convenience function for Pass C processing
     
@@ -503,11 +638,12 @@ def process_pass_c(pdf_path: Path, output_dir: Path, job_id: str, env: str = "de
         output_dir: Directory for output artifacts
         job_id: Unique job identifier
         env: Environment (dev/test/prod)
+        max_chunk_size: Maximum characters per chunk (default: 600)
         
     Returns:
         PassCResult with processing statistics
     """
-    extractor = PassCExtractor(job_id, env)
+    extractor = PassCExtractor(job_id, env, max_chunk_size)
     return extractor.process_pdf(pdf_path, output_dir)
 
 

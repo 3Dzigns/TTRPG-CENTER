@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..logging import get_logger
+from ..metadata_utils import safe_metadata_get
 from .classifier import classify_query
 from .policies import load_policies, choose_plan
 from .router import pick_model
@@ -69,8 +70,8 @@ async def rag_ask(payload: Dict[str, Any]):
             parts.append("No relevant chunks found in the current environment artifacts.")
         parts.append("\nCitations:")
         for ch in top_chunks[:3]:
-            meta_page = ch.metadata.get("page") or ch.metadata.get("page_number")
-            sec = ch.metadata.get("section") or ch.metadata.get("section_title")
+            meta_page = safe_metadata_get(ch.metadata, "page") or safe_metadata_get(ch.metadata, "page_number")
+            sec = safe_metadata_get(ch.metadata, "section") or safe_metadata_get(ch.metadata, "section_title")
             cite = f"[{PathSafe(ch.source).name}{' p.'+str(meta_page) if meta_page else ''}{' · '+sec if sec else ''}]"
             parts.append(f"- {cite}")
         return f"{prefix}: " + "\n".join(parts)

@@ -41,6 +41,7 @@ from src_common.tls_security import (
     get_tls_health_status,
     run_with_tls,
 )
+from src_common.metadata_utils import safe_metadata_get
 
 logger = get_logger(__name__)
 
@@ -161,7 +162,7 @@ class FeedbackProcessor:
                 query=feedback.query,
                 expected_answer=feedback.answer,
                 expected_chunks=feedback.retrieved_chunks or [],
-                model=feedback.metadata.get("model", "unknown"),
+                model=safe_metadata_get(feedback.metadata, "model", "unknown"),
                 created_at=time.time(),
                 environment=os.getenv("ENVIRONMENT", "dev"),
                 metadata=self._sanitize_metadata(feedback.metadata)
