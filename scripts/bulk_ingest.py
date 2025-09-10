@@ -46,6 +46,7 @@ from src_common.astra_loader import AstraLoader
 from src_common.ttrpg_secrets import _load_env_file
 from src_common.ssl_bypass import configure_ssl_bypass_for_development
 from src_common.preflight_checks import run_preflight_checks, PreflightError
+from src_common.pipeline_guardrails import get_guardrail_policy
 
 # Import new 6-pass system
 from src_common.pass_a_toc_parser import process_pass_a
@@ -79,6 +80,10 @@ class Source6PassResult:
     pass_results: Dict[str, Dict]
     success: bool
     error: Optional[str] = None
+    # BUG-021: Guardrail failure metadata
+    failure_reason: Optional[str] = None
+    failed_pass: Optional[str] = None
+    aborted_after_pass: Optional[str] = None
     
     def to_dict(self) -> Dict:
         return {
@@ -86,6 +91,9 @@ class Source6PassResult:
             "job_id": self.job_id,
             "success": self.success,
             "error": self.error,
+            "failure_reason": self.failure_reason,
+            "failed_pass": self.failed_pass,
+            "aborted_after_pass": self.aborted_after_pass,
             "timings": [
                 {
                     "step": t.name, 
@@ -107,6 +115,7 @@ class Pass6Pipeline:
         self.env = env
         self.source_locks = {}  # Per-source locks for barrier control
         self.lock = threading.Lock()  # Global lock for source_locks dict
+        self.guardrail_policy = get_guardrail_policy(env)  # BUG-021: Guardrail validation
     
     def get_source_lock(self, source_path: Path) -> threading.Lock:
         """Get or create a per-source lock for barrier control"""
@@ -227,12 +236,17 @@ class Pass6Pipeline:
             
             # Pass C: Unstructured.io (Extraction)
             t4 = self._now_ms()
+            pass_c_result = None
             if self._should_run_pass("C", output_dir, resume):
                 logger.info(f"Running Pass C for {pdf_path.name}")
                 pass_c_result = process_pass_c(pdf_path, output_dir, job_id, env)
                 if not pass_c_result.success:
                     raise RuntimeError(f"Pass C failed: {pass_c_result.error_message}")
                 pass_results["C"] = asdict(pass_c_result)
+                
+                # BUG-021: Validate Pass C output before continuing
+                if not self._validate_pass_output("C", pass_c_result, pdf_path, job_id):
+                    return self._abort_source("C", pass_c_result, pdf_path, job_id, timings, pass_results)
             else:
                 logger.info("Pass C artifacts exist; skipping for resume")
                 pass_results["C"] = {"skipped": True}
@@ -242,12 +256,17 @@ class Pass6Pipeline:
             
             # Pass D: Haystack (Vector & Enrichment)
             t6 = self._now_ms()
+            pass_d_result = None
             if self._should_run_pass("D", output_dir, resume):
                 logger.info(f"Running Pass D for {pdf_path.name}")
                 pass_d_result = process_pass_d(output_dir, job_id, env)
                 if not pass_d_result.success:
                     raise RuntimeError(f"Pass D failed: {pass_d_result.error_message}")
                 pass_results["D"] = asdict(pass_d_result)
+                
+                # BUG-021: Validate Pass D output before continuing
+                if not self._validate_pass_output("D", pass_d_result, pdf_path, job_id):
+                    return self._abort_source("D", pass_d_result, pdf_path, job_id, timings, pass_results)
             else:
                 logger.info("Pass D artifacts exist; skipping for resume")
                 pass_results["D"] = {"skipped": True}
@@ -366,6 +385,56 @@ class Pass6Pipeline:
                 return False
         
         return True
+    
+    def _validate_pass_output(self, pass_name: str, pass_result: Any, pdf_path: Path, job_id: str) -> bool:
+        """
+        BUG-021: Validate pass output against guardrail thresholds.
+        
+        Args:
+            pass_name: Pass identifier (A, B, C, D, E, F)
+            pass_result: Result object from the pass
+            pdf_path: Source PDF path for logging
+            job_id: Job identifier for logging
+            
+        Returns:
+            True if validation passed, False if source should be aborted
+        """
+        # Check if we should abort based on guardrail policy
+        should_abort = self.guardrail_policy.should_abort_source(pass_name, pass_result)
+        
+        if should_abort:
+            # Log the prominent failure message as specified in BUG-021
+            logger.error(f"[FATAL][{job_id}] Pass {pass_name} produced zero output — aborting source after Pass {pass_name}")
+            failure_summary = self.guardrail_policy.get_failure_summary(pass_name, pass_result)
+            logger.error(f"[FATAL][{job_id}] Failure reason: {failure_summary.get('failure_reason', 'Unknown')}")
+            logger.error(f"[FATAL][{job_id}] Source: {pdf_path.name}")
+            return False
+        
+        return True
+    
+    def _abort_source(self, pass_name: str, pass_result: Any, pdf_path: Path, job_id: str, 
+                      timings: List[StepTiming], pass_results: Dict[str, Dict]) -> Source6PassResult:
+        """
+        BUG-021: Create a failed Source6PassResult for aborted source processing.
+        
+        Returns a properly formatted failure result with guardrail metadata.
+        """
+        failure_summary = self.guardrail_policy.get_failure_summary(pass_name, pass_result)
+        
+        logger.error(f"Source processing aborted for {pdf_path.name} after Pass {pass_name}")
+        logger.error(f"No downstream passes (D/E/F) will execute for this source")
+        
+        return Source6PassResult(
+            source=pdf_path.name,
+            job_id=job_id,
+            timings=timings,
+            pass_results=pass_results,
+            success=False,
+            error=f"Pipeline aborted after Pass {pass_name}",
+            failure_reason=failure_summary.get("failure_reason"),
+            failed_pass=pass_name,
+            aborted_after_pass=pass_name
+        )
     
     def _job_id_for(self, pdf_path: Path) -> str:
         """Generate consistent job ID for a PDF including file attributes"""
