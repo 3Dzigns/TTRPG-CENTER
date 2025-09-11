@@ -36,6 +36,10 @@ try:
 except ImportError as e:
     UNSTRUCTURED_AVAILABLE = False
     UNSTRUCTURED_IMPORT_ERROR = str(e)
+    
+# Strictness flags
+ALLOW_UNSTRUCTURED_FALLBACK = os.getenv('ALLOW_UNSTRUCTURED_FALLBACK', 'false').strip().lower() in ('1','true','yes')
+ASTRA_REQUIRE_CREDS = os.getenv('ASTRA_REQUIRE_CREDS', 'true').strip().lower() in ('1','true','yes')
 
 # Fallback imports
 import pypdf
@@ -105,6 +109,10 @@ class PassCExtractor:
         try:
             # Ensure output directory exists
             output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Enforce presence of unstructured.io unless fallback explicitly allowed
+            if not UNSTRUCTURED_AVAILABLE and not ALLOW_UNSTRUCTURED_FALLBACK:
+                raise RuntimeError(f"Unstructured.io not available: {UNSTRUCTURED_IMPORT_ERROR}")
             
             # Check if PDF was split in Pass B
             split_index_path = output_dir / "split_index.json"
@@ -480,7 +488,9 @@ class PassCExtractor:
                 logger.info(f"Loaded {loaded_count} raw chunks to AstraDB")
                 return loaded_count
             else:
-                logger.info(f"SIMULATION: Would load {len(documents)} raw chunks to AstraDB")
+                if ASTRA_REQUIRE_CREDS:
+                    raise RuntimeError("AstraDB credentials missing; set in env/<env>/config/.env or disable strict mode")
+                logger.info(f"SIMULATION: Would load {len(documents)} raw chunks to AstraDB (simulation allowed)")
                 return len(documents)
                 
         except Exception as e:

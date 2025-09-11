@@ -117,8 +117,8 @@ class PassBLogicalSplitter:
             split_parts = self._perform_logical_split(pdf_path, output_dir, toc_sections)
             
             if not split_parts:
-                logger.warning("Logical split failed, treating as no-split")
-                return self._create_no_split_result(pdf_path, output_dir, start_time)
+                # For large PDFs, treat split failure as a hard failure so downstream passes are skipped
+                raise RuntimeError("Logical split produced no parts for large PDF")
             
             # Generate split index
             split_index_path = self._generate_split_index(output_dir, split_parts)

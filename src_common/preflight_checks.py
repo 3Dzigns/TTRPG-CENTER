@@ -89,6 +89,25 @@ class PreflightValidator:
             return []
         
         candidate_paths = []
+        # Respect explicit environment variables first
+        poppler_env = os.getenv("POPPLER_PATH", "").strip()
+        if poppler_env:
+            p = Path(poppler_env)
+            if p.exists():
+                candidate_paths.append(p)
+                logger.info(f"Using POPPLER_PATH from env: {p}")
+        tesseract_env = os.getenv("TESSERACT_PATH", "").strip()
+        if tesseract_env:
+            te = Path(tesseract_env)
+            if te.exists():
+                tdir = te.parent
+                candidate_paths.append(tdir)
+                logger.info(f"Using TESSERACT_PATH from env: {te}")
+                # Ensure TESSDATA_PREFIX is set if tessdata folder exists alongside
+                td = tdir / "tessdata"
+                if td.exists() and not os.getenv("TESSDATA_PREFIX"):
+                    os.environ["TESSDATA_PREFIX"] = str(td)
+                    logger.info(f"Set TESSDATA_PREFIX to {td}")
         
         # Common Tesseract installation paths
         tesseract_paths = [

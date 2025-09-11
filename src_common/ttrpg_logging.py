@@ -13,7 +13,12 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pythonjsonlogger import jsonlogger
+try:
+    from pythonjsonlogger import jsonlogger  # type: ignore
+    _HAVE_JSONLOGGER = True
+except Exception:
+    jsonlogger = None  # type: ignore
+    _HAVE_JSONLOGGER = False
 
 
 def jlog(level: str, msg: str, **fields) -> None:
@@ -40,34 +45,43 @@ def jlog(level: str, msg: str, **fields) -> None:
     print(json.dumps(record), flush=True)
 
 
-class TTRPGJsonFormatter(jsonlogger.JsonFormatter):
-    """
-    Custom JSON formatter that adds TTRPG-specific context.
-    """
-    
-    def add_fields(self, log_record: Dict[str, Any], record: _logging.LogRecord, message_dict: Dict[str, Any]) -> None:
-        super().add_fields(log_record, record, message_dict)
-        
-        # Add standard fields
-        log_record['timestamp'] = time.time()
-        log_record['environment'] = os.getenv('APP_ENV', 'dev')
-        log_record['component'] = getattr(record, 'component', 'unknown')
-        
-        # Add trace information if available
-        if hasattr(record, 'trace_id'):
-            log_record['trace_id'] = record.trace_id
-        if hasattr(record, 'user_id'):
-            log_record['user_id'] = record.user_id
-        if hasattr(record, 'session_id'):
-            log_record['session_id'] = record.session_id
-            
-        # Add performance metrics if available
-        if hasattr(record, 'duration_ms'):
-            log_record['duration_ms'] = record.duration_ms
-        if hasattr(record, 'tokens'):
-            log_record['tokens'] = record.tokens
-        if hasattr(record, 'model'):
-            log_record['model'] = record.model
+if _HAVE_JSONLOGGER:
+    class TTRPGJsonFormatter(jsonlogger.JsonFormatter):
+        """Custom JSON formatter that adds TTRPG-specific context."""
+
+        def add_fields(self, log_record: Dict[str, Any], record: _logging.LogRecord, message_dict: Dict[str, Any]) -> None:
+            super().add_fields(log_record, record, message_dict)
+
+            # Add standard fields
+            log_record['timestamp'] = time.time()
+            log_record['environment'] = os.getenv('APP_ENV', 'dev')
+            log_record['component'] = getattr(record, 'component', 'unknown')
+
+            # Add trace information if available
+            if hasattr(record, 'trace_id'):
+                log_record['trace_id'] = record.trace_id
+            if hasattr(record, 'user_id'):
+                log_record['user_id'] = record.user_id
+            if hasattr(record, 'session_id'):
+                log_record['session_id'] = record.session_id
+
+            # Add performance metrics if available
+            if hasattr(record, 'duration_ms'):
+                log_record['duration_ms'] = record.duration_ms
+            if hasattr(record, 'tokens'):
+                log_record['tokens'] = record.tokens
+            if hasattr(record, 'model'):
+                log_record['model'] = record.model
+else:
+    class TTRPGJsonFormatter(_logging.Formatter):
+        """Fallback formatter when python-json-logger is unavailable."""
+
+        def format(self, record: _logging.LogRecord) -> str:
+            # Simple line format with key context; used only if 'json' formatter selected.
+            env = os.getenv('APP_ENV', 'dev')
+            ts = f"{time.time():.3f}"
+            msg = super().format(record)
+            return f"{ts} {record.name} {record.levelname} [{env}] {msg}"
 
 
 def setup_logging(config_path: Optional[Path] = None, log_file: Optional[Path] = None) -> _logging.Logger:

@@ -727,7 +727,8 @@ def main(argv: List[str]) -> int:
     # Setup logging
     log_file = None
     if not args.no_logfile:
-        env_dir = Path(f"env/{args.env}")
+        project_root = Path(__file__).resolve().parents[1]
+        env_dir = project_root / f"env/{args.env}"
         env_dir.mkdir(parents=True, exist_ok=True)
         logs_dir = env_dir / "logs"
         logs_dir.mkdir(exist_ok=True)

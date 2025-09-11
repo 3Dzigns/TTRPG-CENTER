@@ -21,6 +21,7 @@ import json
 import time
 import hashlib
 from pathlib import Path
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
@@ -78,32 +79,24 @@ class PassATocParser:
             # Parse document structure and ToC
             logger.info("Parsing document structure and ToC...")
             outline = self.toc_parser.parse_document_structure(pdf_path)
-            
-            if not outline.entries:
-                logger.warning(f"No ToC entries found in {pdf_path.name}")
-                return PassAResult(
-                    source_file=pdf_path.name,
-                    job_id=self.job_id,
-                    dictionary_entries=0,
-                    sections_parsed=0,
-                    processing_time_ms=int((time.time() - start_time) * 1000),
-                    artifacts=[],
-                    manifest_path="",
-                    success=False,
-                    error_message="No ToC entries found"
-                )
-            
-            # Extract dictionary entries from ToC structure
-            dict_entries = self._extract_dictionary_from_toc(outline, pdf_path.name)
             sections_count = len(outline.entries)
-            
-            logger.info(f"Extracted {len(dict_entries)} dictionary entries from {sections_count} ToC sections")
-            
-            # Upsert dictionary entries to database
+
+            # Extract dictionary entries from ToC structure (if any)
+            dict_entries: List[DictEntry] = []
             upserted_count = 0
-            if dict_entries:
-                upserted_count = self.dict_loader.upsert_entries(dict_entries)
-                logger.info(f"Upserted {upserted_count} dictionary entries to database")
+            if sections_count == 0:
+                logger.info(f"No ToC entries found in {pdf_path.name}; proceeding without dictionary seeding")
+            else:
+                dict_entries = self._extract_dictionary_from_toc(outline, pdf_path.name)
+                logger.info(f"Extracted {len(dict_entries)} dictionary entries from {sections_count} ToC sections")
+
+                # Try to upsert dictionary entries to database; do not fail Pass A if this step fails
+                if dict_entries:
+                    try:
+                        upserted_count = self.dict_loader.upsert_entries(dict_entries)
+                        logger.info(f"Upserted {upserted_count} dictionary entries to database")
+                    except Exception as e:
+                        logger.warning(f"Dictionary upsert failed (non-fatal for Pass A): {e}")
             
             # Write Pass A artifact
             dict_artifact_path = output_dir / f"{self.job_id}_pass_a_dict.json"

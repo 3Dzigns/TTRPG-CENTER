@@ -26,6 +26,7 @@ import time
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple
+import os
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
@@ -43,6 +44,7 @@ from .astra_loader import AstraLoader
 from .dictionary_loader import DictionaryLoader, DictEntry
 
 logger = get_logger(__name__)
+ASTRA_REQUIRE_CREDS = os.getenv('ASTRA_REQUIRE_CREDS', 'true').strip().lower() in ('1','true','yes')
 
 
 @dataclass
@@ -506,6 +508,8 @@ class PassEGraphBuilder:
         
         # Upsert dictionary entries
         if dict_entries:
+            if self.dict_loader.client is None and ASTRA_REQUIRE_CREDS:
+                raise RuntimeError("AstraDB credentials missing; cannot update dictionary in strict mode")
             return self.dict_loader.upsert_entries(dict_entries)
         
         return 0

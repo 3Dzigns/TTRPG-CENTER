@@ -61,6 +61,7 @@ MODEL_DIM = int(os.getenv("MODEL_DIM", "1024"))  # BUG-014: Standardized to 1024
 VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "json")
 EMBED_DIM_REDUCTION = os.getenv("EMBED_DIM_REDUCTION", "pca-1024")  # BUG-014: Default to 1024-d reduction
 ABORT_ON_INCOMPATIBLE_VECTOR = os.getenv("ABORT_ON_INCOMPATIBLE_VECTOR", "true").lower() == "true"
+ASTRA_REQUIRE_CREDS = os.getenv('ASTRA_REQUIRE_CREDS', 'true').strip().lower() in ('1','true','yes')
 
 
 @dataclass
@@ -781,7 +782,9 @@ class PassDVectorEnricher:
                 logger.info(f"Batch upserted {loaded_count} vectorized chunks to AstraDB")
                 return loaded_count
             else:
-                logger.info(f"SIMULATION: Would upsert {len(documents)} vectorized chunks to AstraDB")
+                if ASTRA_REQUIRE_CREDS:
+                    raise RuntimeError("AstraDB credentials missing; cannot upsert vectors in strict mode")
+                logger.info(f"SIMULATION: Would upsert {len(documents)} vectorized chunks to AstraDB (simulation allowed)")
                 return len(documents)
                 
         except Exception as e:

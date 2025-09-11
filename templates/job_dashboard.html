@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTRPG Center - Job Dashboard</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #0a0a0a;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+            font-size: 14px;
+        }
+        
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .status-card {
+            border: 1px solid #00ff00;
+            padding: 15px;
+            background-color: #111;
+            border-radius: 5px;
+        }
+        
+        .status-card h3 {
+            margin: 0 0 10px 0;
+            color: #ffff00;
+        }
+        
+        .status-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00ffff;
+        }
+        
+        .jobs-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .jobs-panel {
+            border: 1px solid #00ff00;
+            padding: 15px;
+            background-color: #111;
+            border-radius: 5px;
+        }
+        
+        .jobs-panel h2 {
+            margin: 0 0 15px 0;
+            color: #ffff00;
+            border-bottom: 1px solid #ffff00;
+            padding-bottom: 5px;
+        }
+        
+        .job-item {
+            border: 1px solid #333;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #1a1a1a;
+            border-radius: 3px;
+        }
+        
+        .job-item.running {
+            border-color: #00ffff;
+            box-shadow: 0 0 5px #00ffff;
+        }
+        
+        .job-item.completed {
+            border-color: #00ff00;
+        }
+        
+        .job-item.failed {
+            border-color: #ff0000;
+            color: #ffcccc;
+        }
+        
+        .job-id {
+            color: #00ffff;
+            font-weight: bold;
+        }
+        
+        .job-source {
+            color: #ffff00;
+        }
+        
+        .job-status {
+            color: #00ff00;
+            text-transform: uppercase;
+        }
+        
+        .progress-bar {
+            background-color: #333;
+            height: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            background-color: #00ff00;
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .job-details {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            border: 1px solid;
+        }
+        
+        .connection-status.connected {
+            background-color: #004400;
+            border-color: #00ff00;
+            color: #00ff00;
+        }
+        
+        .connection-status.disconnected {
+            background-color: #440000;
+            border-color: #ff0000;
+            color: #ff0000;
+        }
+        
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .jobs-section {
+                grid-template-columns: 1fr;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">Connecting...</div>
+    
+    <div class="header">
+        <h1>TTRPG CENTER JOB DASHBOARD</h1>
+        <div id="lastUpdate" class="timestamp">Loading...</div>
+    </div>
+    
+    <div class="status-grid">
+        <div class="status-card">
+            <h3>Active Jobs</h3>
+            <div class="status-value" id="activeJobs">{{ active_jobs }}</div>
+        </div>
+        <div class="status-card">
+            <h3>Success Rate</h3>
+            <div class="status-value" id="successRate">{{ "%.1f"|format(statistics.success_rate) }}%</div>
+        </div>
+        <div class="status-card">
+            <h3>Total Completed</h3>
+            <div class="status-value" id="totalCompleted">{{ statistics.total_completed }}</div>
+        </div>
+        <div class="status-card">
+            <h3>Avg Processing Time</h3>
+            <div class="status-value" id="avgProcessingTime">{{ "%.1f"|format(statistics.average_processing_time) }}s</div>
+        </div>
+    </div>
+    
+    <div class="jobs-section">
+        <div class="jobs-panel">
+            <h2>Active Jobs</h2>
+            <div id="activeJobsList">
+                <div class="job-item">No active jobs</div>
+            </div>
+        </div>
+        
+        <div class="jobs-panel">
+            <h2>Recent Jobs</h2>
+            <div id="recentJobsList">
+                <div class="job-item">No recent jobs</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        class JobDashboard {
+            constructor() {
+                this.ws = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.reconnectDelay = 1000;
+                
+                this.initWebSocket();
+                this.loadInitialData();
+            }
+            
+            initWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/jobs`;
+                
+                try {
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        this.updateConnectionStatus(true);
+                        this.reconnectAttempts = 0;
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    };
+                    
+                    this.ws.onclose = () => {
+                        console.log('WebSocket disconnected');
+                        this.updateConnectionStatus(false);
+                        this.attemptReconnect();
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.updateConnectionStatus(false);
+                    };
+                } catch (error) {
+                    console.error('Failed to create WebSocket:', error);
+                    this.updateConnectionStatus(false);
+                    this.attemptReconnect();
+                }
+            }
+            
+            attemptReconnect() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+                    
+                    setTimeout(() => {
+                        this.initWebSocket();
+                    }, this.reconnectDelay * this.reconnectAttempts);
+                }
+            }
+            
+            updateConnectionStatus(connected) {
+                const statusEl = document.getElementById('connectionStatus');
+                if (connected) {
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'connection-status connected';
+                } else {
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.className = 'connection-status disconnected';
+                }
+            }
+            
+            handleMessage(message) {
+                switch (message.type) {
+                    case 'initial_data':
+                        this.updateDashboard(message.data);
+                        break;
+                    case 'job_update':
+                        this.loadInitialData(); // Refresh all data for simplicity
+                        break;
+                    case 'statistics_update':
+                        this.updateStatistics(message.data);
+                        break;
+                }
+            }
+            
+            async loadInitialData() {
+                try {
+                    const response = await fetch('/dashboard/data');
+                    const data = await response.json();
+                    this.updateDashboard(data);
+                } catch (error) {
+                    console.error('Failed to load dashboard data:', error);
+                }
+            }
+            
+            updateDashboard(data) {
+                // Update statistics
+                document.getElementById('activeJobs').textContent = data.active_jobs.length;
+                document.getElementById('successRate').textContent = data.statistics.success_rate.toFixed(1) + '%';
+                document.getElementById('totalCompleted').textContent = data.statistics.total_completed;
+                document.getElementById('avgProcessingTime').textContent = data.statistics.average_processing_time.toFixed(1) + 's';
+                
+                // Update active jobs
+                this.updateActiveJobs(data.active_jobs);
+                
+                // Update recent jobs  
+                this.updateRecentJobs(data.recent_jobs);
+                
+                // Update timestamp
+                const timestamp = new Date(data.timestamp).toLocaleString();
+                document.getElementById('lastUpdate').textContent = `Last updated: ${timestamp}`;
+            }
+            
+            updateActiveJobs(jobs) {
+                const container = document.getElementById('activeJobsList');
+                
+                if (jobs.length === 0) {
+                    container.innerHTML = '<div class="job-item">No active jobs</div>';
+                    return;
+                }
+                
+                container.innerHTML = jobs.map(job => `
+                    <div class="job-item running">
+                        <div class="job-id">Job: ${job.job_id}</div>
+                        <div class="job-source">Source: ${job.source_file}</div>
+                        <div class="job-status">Status: ${job.current_pass || 'queued'}</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${job.progress_percentage}%"></div>
+                        </div>
+                        <div class="job-details">
+                            Progress: ${job.progress_percentage.toFixed(1)}% | 
+                            Elapsed: ${(job.elapsed_time / 60).toFixed(1)}min |
+                            Environment: ${job.environment}
+                            ${job.estimated_completion_time ? ` | ETA: ${(job.estimated_completion_time / 60).toFixed(1)}min` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            updateRecentJobs(jobs) {
+                const container = document.getElementById('recentJobsList');
+                
+                if (jobs.length === 0) {
+                    container.innerHTML = '<div class="job-item">No recent jobs</div>';
+                    return;
+                }
+                
+                container.innerHTML = jobs.map(job => `
+                    <div class="job-item ${job.status}">
+                        <div class="job-id">Job: ${job.job_id}</div>
+                        <div class="job-source">Source: ${job.source_file}</div>
+                        <div class="job-status">Status: ${job.status}</div>
+                        <div class="job-details">
+                            ${job.processing_time ? `Processing: ${job.processing_time.toFixed(1)}s | ` : ''}
+                            ${job.wait_time ? `Wait: ${job.wait_time.toFixed(1)}s | ` : ''}
+                            Environment: ${job.environment}
+                            ${job.error_message ? `<br>Error: ${job.error_message.substring(0, 100)}...` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new JobDashboard();
+        });
+    </script>
+</body>
+</html>
