@@ -36,6 +36,13 @@ try:
 except ImportError as e:
     UNSTRUCTURED_AVAILABLE = False
     UNSTRUCTURED_IMPORT_ERROR = str(e)
+
+# Import pytesseract independently (needed for absolute path configuration)
+try:
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
     
 # Strictness flags
 ALLOW_UNSTRUCTURED_FALLBACK = os.getenv('ALLOW_UNSTRUCTURED_FALLBACK', 'false').strip().lower() in ('1','true','yes')
@@ -232,50 +239,136 @@ class PassCExtractor:
     ) -> List[RawChunk]:
         """Extract chunks using unstructured.io"""
         
-        # Configure Poppler and Tesseract for unstructured.io
+        # Configure Poppler and Tesseract for unstructured.io with absolute paths
         poppler_path = os.getenv("POPPLER_PATH")
         tesseract_path = os.getenv("TESSERACT_PATH")
         tessdata_prefix = os.getenv("TESSDATA_PREFIX")
+        # Capture original PATH to restore safely later
         original_path = os.environ.get("PATH", "")
+
+        # Auto-detect tool locations if not explicitly provided via env
+        if not poppler_path or not poppler_path.strip():
+            try:
+                pdftoppm = shutil.which("pdftoppm")
+                pdfinfo = shutil.which("pdfinfo")
+                detected = pdftoppm or pdfinfo
+                if detected:
+                    poppler_path = str(Path(detected).parent)
+                    os.environ["POPPLER_PATH"] = poppler_path
+            except Exception:
+                pass
+        if not tesseract_path or not tesseract_path.strip():
+            try:
+                tdet = shutil.which("tesseract")
+                if tdet:
+                    tesseract_path = str(Path(tdet).parent)
+            except Exception:
+                pass
         
-        # Configure Poppler
+        # Configure Poppler with absolute path for pdf2image (used by unstructured.io)
+        poppler_configured = False
         if poppler_path and poppler_path.strip() and Path(poppler_path).exists():
-            logger.info(f"Adding Poppler to PATH: {poppler_path}")
-            os.environ["PATH"] = f"{poppler_path};{original_path}"
+            logger.info(f"Configuring Poppler with absolute path: {poppler_path}")
+            # Set environment variable that pdf2image can use
+            os.environ["POPPLER_PATH"] = poppler_path
+            poppler_configured = True
         else:
             if poppler_path and poppler_path.strip():
                 logger.warning(f"Poppler path not found: {poppler_path}")
             else:
-                logger.info("Poppler not configured - using fallback extraction without OCR")
+                logger.info("Poppler not configured - PDF image extraction may be limited")
         
-        # Configure Tesseract
-        if tesseract_path and tesseract_path.strip() and Path(tesseract_path).exists():
-            logger.info(f"Adding Tesseract to PATH: {tesseract_path}")
-            os.environ["PATH"] = f"{tesseract_path};{os.environ.get('PATH', '')}"
+        # Configure Tesseract with absolute path for pytesseract (used by unstructured.io)
+        tesseract_configured = False
+        if tesseract_path and tesseract_path.strip():
+            tesseract_exe_path = Path(tesseract_path) / "tesseract.exe"
+            if tesseract_exe_path.exists() and PYTESSERACT_AVAILABLE:
+                logger.info(f"Configuring Tesseract with absolute path: {tesseract_exe_path}")
+                pytesseract.pytesseract.tesseract_cmd = str(tesseract_exe_path)
+                tesseract_configured = True
+            elif not tesseract_exe_path.exists():
+                logger.warning(f"Tesseract executable not found: {tesseract_exe_path}")
+            elif not PYTESSERACT_AVAILABLE:
+                logger.warning("pytesseract not available - OCR functionality limited")
         else:
-            if tesseract_path and tesseract_path.strip():
-                logger.warning(f"Tesseract path not found: {tesseract_path}")
-            else:
-                logger.info("Tesseract not configured - using fallback extraction without OCR")
+            logger.info("Tesseract not configured - OCR functionality may be limited")
             
-        # Configure Tessdata path
+        # Configure Tessdata path for Tesseract
+        tessdata_configured = False
+        # If not explicitly provided, try to infer from tesseract path
+        if (not tessdata_prefix or not tessdata_prefix.strip()) and tesseract_exe_path:
+            inferred_td = Path(tesseract_exe_path).parent / "tessdata"
+            if inferred_td.exists():
+                tessdata_prefix = str(inferred_td)
         if tessdata_prefix and Path(tessdata_prefix).exists():
-            logger.info(f"Setting TESSDATA_PREFIX: {tessdata_prefix}")
+            logger.info(f"Configuring TESSDATA_PREFIX: {tessdata_prefix}")
             os.environ["TESSDATA_PREFIX"] = tessdata_prefix
+            tessdata_configured = True
         else:
-            logger.warning(f"Tessdata path not found or not configured: {tessdata_prefix}")
+            if tessdata_prefix and tessdata_prefix.strip():
+                logger.warning(f"Tessdata path not found: {tessdata_prefix}")
+            else:
+                logger.info("Tessdata not configured - OCR language support may be limited")
+        
+        # Log configuration status (ASCII-only for Windows console compatibility)
+        config_status = (
+            "OCR Configuration - "
+            f"Poppler: {'OK' if poppler_configured else 'MISSING'}, "
+            f"Tesseract: {'OK' if tesseract_configured else 'MISSING'}, "
+            f"Tessdata: {'OK' if tessdata_configured else 'MISSING'}"
+        )
+        logger.info(config_status)
         
         chunks = []
         
         try:
-            # Partition PDF with unstructured.io
-            elements = partition_pdf(
-                filename=str(part_path),
-                strategy="auto",
-                infer_table_structure=True,
-                extract_images_in_pdf=False,
-                include_page_breaks=True
+            # Partition PDF with unstructured.io - configure paths if available
+            partition_kwargs = {
+                "filename": str(part_path),
+                "strategy": "auto",
+                # Performance flag: allow disabling table structure inference via env (default: true)
+                "infer_table_structure": os.getenv('PASS_C_INFER_TABLES', 'true').strip().lower() in ('1','true','yes'),
+                "extract_images_in_pdf": False,
+                "include_page_breaks": True
+            }
+
+            logger.info(
+                f"Pass C config - Poppler: {'OK' if poppler_configured else 'MISSING'}, "
+                f"Tesseract: {'OK' if tesseract_configured else 'MISSING'}, "
+                f"Tables: {partition_kwargs['infer_table_structure']}"
             )
+            
+            # Add poppler_path if configured (for newer versions of unstructured.io)
+            if poppler_configured:
+                try:
+                    # Test if partition_pdf accepts poppler_path parameter
+                    start_extract = time.time()
+                    elements = partition_pdf(poppler_path=poppler_path, **partition_kwargs)
+                    elapsed_extract = time.time() - start_extract
+                    logger.info(f"partition_pdf completed in {elapsed_extract:.1f}s for part {part_index}")
+                    logger.info("Successfully used poppler_path parameter in partition_pdf")
+                except TypeError:
+                    # Fallback to environment variable method
+                    start_extract = time.time()
+                    elements = partition_pdf(**partition_kwargs)
+                    elapsed_extract = time.time() - start_extract
+                    logger.info(f"partition_pdf completed in {elapsed_extract:.1f}s for part {part_index} (env POPPLER_PATH)")
+                    logger.info("Using poppler_path via environment variable (older unstructured.io version)")
+            else:
+                start_extract = time.time()
+                elements = partition_pdf(**partition_kwargs)
+                elapsed_extract = time.time() - start_extract
+                logger.info(f"partition_pdf completed in {elapsed_extract:.1f}s for part {part_index}")
+
+            # Soft timeout guidance (logging only)
+            try:
+                soft_timeout = float(os.getenv('PASS_C_PART_TIMEOUT_SEC', '0') or 0)
+            except Exception:
+                soft_timeout = 0.0
+            if soft_timeout and elapsed_extract > soft_timeout:
+                logger.warning(
+                    f"Pass C extraction exceeded soft timeout ({elapsed_extract:.1f}s > {soft_timeout:.1f}s) for part {part_index}."
+                )
             
             # Chunk by title for better section awareness with overlap for context preservation
             chunked_elements = chunk_by_title(
@@ -336,9 +429,12 @@ class PassCExtractor:
             return self._handle_unstructured_failure(part_path, e)
         finally:
             # Restore original PATH and environment
-            if poppler_path or tesseract_path:
-                os.environ["PATH"] = original_path
-                logger.debug("Restored original PATH after unstructured.io processing")
+            try:
+                if original_path is not None:
+                    os.environ["PATH"] = original_path
+                    logger.debug("Restored original PATH after unstructured.io processing")
+            except Exception:
+                pass
                 
             # Remove TESSDATA_PREFIX if we set it
             if tessdata_prefix and "TESSDATA_PREFIX" in os.environ:

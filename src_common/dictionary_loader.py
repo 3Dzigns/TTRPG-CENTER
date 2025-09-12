@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, List, Optional
 from collections import defaultdict
 
 from .logging import get_logger
+from .ssl_bypass import configure_ssl_bypass_for_development, get_httpx_verify_setting
 
 logger = get_logger(__name__)
 
@@ -23,6 +25,7 @@ class DictionaryLoader:
         self.env = env
         self.collection_name = f"ttrpg_dictionary_{env}"
         self.client = None
+        self._astra_insecure_configured = False
         try:
             from astrapy import DataAPIClient  # type: ignore
             from .ttrpg_secrets import get_all_config, validate_database_config
@@ -32,6 +35,8 @@ class DictionaryLoader:
                 logger.warning("Astra config incomplete for dictionary loader; running in simulation mode")
                 self.client = None
             else:
+                # Attempt secure client first
+                self._maybe_configure_astra_httpx_secure()
                 client = DataAPIClient(cfg['ASTRA_DB_APPLICATION_TOKEN'])
                 self.client = client.get_database_by_api_endpoint(cfg['ASTRA_DB_API_ENDPOINT'])
         except Exception as e:
@@ -101,13 +106,26 @@ class DictionaryLoader:
         return list(term_map.values())
     
     def _normalize_term_id(self, term: str) -> str:
-        """Normalize a term to create a consistent document ID."""
-        return term.strip().lower().replace(' ', '_').replace('-', '_').replace("'", "")
+        """Normalize a term to create a consistent, stable document ID.
+
+        Rules:
+        - Lowercase
+        - Replace any non-alphanumeric character with underscore
+        - Collapse repeated underscores
+        - Trim leading/trailing underscores
+        """
+        t = term.strip().lower()
+        # Normalize whitespace and punctuation
+        t = t.replace('\t', ' ')
+        t = re.sub(r"[^a-z0-9]+", "_", t)
+        t = re.sub(r"_+", "_", t)
+        t = t.strip('_')
+        return t
     
     def _upsert_batch(self, collection, batch_docs: List[Dict[str, Any]]) -> int:
         """Upsert a batch of documents using two-step pattern for AstraDB compatibility (BUG-013 fix)."""
         upserted = 0
-        
+
         for doc in batch_docs:
             try:
                 # Step 1: Ensure document exists with base fields
@@ -146,9 +164,70 @@ class DictionaryLoader:
                 logger.debug(f"Dictionary term upserted: {doc['term']} with {len(doc['sources'])} sources")
                 
             except Exception as e:
+                msg = str(e)
+                # TLS fallback: if certificate verification fails, reconfigure astrapy client to no-TLS verify and retry once
+                if any(tok in msg for tok in ["CERTIFICATE_VERIFY_FAILED", "certificate verify failed", "SSLError"]) and not self._astra_insecure_configured:
+                    try:
+                        self._configure_astra_httpx_insecure()
+                        # retry once after switching to insecure client
+                        try:
+                            collection.update_one(
+                                {"_id": doc["_id"]}, 
+                                {
+                                    "$setOnInsert": {
+                                        "_id": doc["_id"],
+                                        "created_at": doc["updated_at"],
+                                        "sources": []
+                                    },
+                                    "$set": {
+                                        "term": doc["term"],
+                                        "definition": doc["definition"],
+                                        "category": doc["category"],
+                                        "updated_at": doc["updated_at"]
+                                    }
+                                },
+                                upsert=True
+                            )
+                            if doc["sources"]:
+                                collection.update_one(
+                                    {"_id": doc["_id"]},
+                                    {"$addToSet": {"sources": {"$each": doc["sources"]}}}
+                                )
+                            upserted += 1
+                            logger.warning("Retried dictionary upsert without TLS verification: success")
+                            continue
+                        except Exception as e2:
+                            logger.warning(f"Retry after disabling TLS verification failed for {doc['_id']}: {e2}")
+                    except Exception as cfg_e:
+                        logger.warning(f"Failed to reconfigure Astra client for no-TLS verify: {cfg_e}")
+                # Final failure path
                 logger.warning(f"Dictionary upsert failed for {doc['_id']}: {e}")
-        
+
         return upserted
+
+    def _maybe_configure_astra_httpx_secure(self) -> None:
+        """Ensure astrapy uses an httpx client with default verification unless dev bypass is active."""
+        try:
+            # Honor global dev SSL bypass, but default to verify=True
+            ssl_bypass_active = configure_ssl_bypass_for_development()
+            import httpx  # type: ignore
+            from astrapy.utils import api_commander as _ac  # type: ignore
+            verify_setting = get_httpx_verify_setting() if ssl_bypass_active else True
+            _ac.APICommander.client = httpx.Client(verify=verify_setting)
+            self._astra_insecure_configured = not verify_setting
+            if not verify_setting:
+                logger.warning("DictionaryLoader: SSL verification bypass enabled for Astra (development only)")
+        except Exception as e:
+            # Non-fatal; will proceed with astrapy defaults
+            logger.debug(f"DictionaryLoader: could not configure Astra httpx client: {e}")
+
+    def _configure_astra_httpx_insecure(self) -> None:
+        """Force astrapy httpx client to verify=False (dev fallback)."""
+        import httpx  # type: ignore
+        from astrapy.utils import api_commander as _ac  # type: ignore
+        _ac.APICommander.client = httpx.Client(verify=False)
+        self._astra_insecure_configured = True
+        logger.warning("DictionaryLoader: switched Astra client to no TLS verification due to certificate errors")
 
     def get_term_count(self) -> int:
         """Get total count of dictionary terms."""

@@ -11,8 +11,10 @@ httpx>=0.27.0
 # Document Processing Pipeline (BUG-019: Enhanced PDF/OCR support)
 unstructured[local-inference,pdf]>=0.17.2
 haystack-ai>=2.17.1
-llama-index>=0.13.3
-llama-index[propertyGraph]
+llama-index>=0.13.5
+# LlamaIndex modular graph stores (replace deprecated [propertygraph] extra)
+# Graph stores for LlamaIndex (Python 3.12 compatible)
+llama-index-graph-stores-neo4j>=0.5.0
 pymupdf>=1.24.3
 pdfminer.six>=20231228
 pypdf>=4.2.0

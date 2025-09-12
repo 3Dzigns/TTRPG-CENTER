@@ -21,6 +21,7 @@ Run 6-pass ingestion nightly via Task Scheduler, produce artifacts, manifest, an
 ## Definition of Done
 - Nightly job succeeds in DEV.  
 - Artifacts/logs visible.  
+- On failure, a single consolidated run report is generated at `docs/bugs/RUN-YYYYMMDD_HHMMSS.md` (with optional AI enrichment when `OPENAI_API_KEY` is set).
 
 ## Implementation Tasks by User Story
 
@@ -50,3 +51,12 @@ Run 6-pass ingestion nightly via Task Scheduler, produce artifacts, manifest, an
 - Tests:
   - Unit: logger produces well-formed JSON lines with required fields.
   - Functional: log file includes start/end for each pass and final summary; malformed lines are not emitted.
+
+### US-002.4 — Post-run Consolidated Bug Report
+- Tasks:
+  - Extend `scripts/post_run_bug_scan.py` with `--single-report` mode that consolidates all failures in a run into one markdown report, defaulting to `docs/bugs/RUN-<timestamp>.md`.
+  - Add optional OpenAI enrichment controlled by `--ai-enrich` and `OPENAI_API_KEY` to draft a single, structured report for review.
+  - Update `scripts/run_nightly_ingestion.ps1` to invoke consolidated mode after each run.
+- Tests:
+  - Functional: with failures present, a `RUN-*.md` is created summarizing groups and instances.
+  - Functional: with `OPENAI_API_KEY`, the report includes an "AI Consolidated Report" section.

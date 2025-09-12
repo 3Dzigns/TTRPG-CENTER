@@ -83,10 +83,10 @@ function Stop-PortListeners {
     } catch {}
 }
 
-# Best-effort dependency ensure
-Write-Host "Checking Python dependencies..." -ForegroundColor Yellow
-try { pip --version 1>$null 2>$null } catch { }
-try { pip install -r requirements.txt 1>$null } catch { Write-Host "pip install skipped/failed (continuing)" -ForegroundColor DarkYellow }
+# Best-effort dependency ensure (use selected interpreter's pip)
+Write-Host "Checking Python dependencies (venv preferred)..." -ForegroundColor Yellow
+try { & $pythonExe -m pip --version 1>$null 2>$null } catch { }
+try { & $pythonExe -m pip install -r requirements.txt | Out-Null } catch { Write-Host "pip install skipped/failed (continuing)" -ForegroundColor DarkYellow }
 
 # Start the correct app per environment
 if ($Env -eq 'dev') {

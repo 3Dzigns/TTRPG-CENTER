@@ -129,6 +129,11 @@ class PreflightValidator:
             if path.exists() and (path / "tesseract.exe").exists():
                 candidate_paths.append(path)
                 logger.info(f"Found Tesseract at: {path}")
+                # If tessdata folder exists alongside and not already configured, set it
+                td = path / "tessdata"
+                if td.exists() and not os.getenv("TESSDATA_PREFIX"):
+                    os.environ["TESSDATA_PREFIX"] = str(td)
+                    logger.info(f"Set TESSDATA_PREFIX to {td}")
                 break
         
         # Check for Poppler (look in bin subdirectories)

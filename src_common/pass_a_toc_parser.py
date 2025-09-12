@@ -18,6 +18,7 @@ Artifacts:
 """
 
 import json
+import re
 import time
 import hashlib
 from pathlib import Path
@@ -147,7 +148,7 @@ class PassATocParser:
                 manifest_path=str(manifest_path),
                 success=True
             )
-            
+
         except Exception as e:
             end_time = time.time()
             processing_time_ms = int((end_time - start_time) * 1000)
@@ -165,6 +166,31 @@ class PassATocParser:
                 error_message=str(e)
             )
     
+    def _sanitize_title(self, title: str) -> str:
+        """Normalize noisy ToC titles into clean dictionary terms.
+
+        Fixes common issues:
+        - Dotted leaders with or without spaces
+        - Letter-spaced headings (e.g., "S h a m a n")
+        - Stray trailing page numbers left in title
+        - Excess punctuation/whitespace
+        """
+        s = title.strip()
+        # Remove dotted/dashed leaders, including spaced variants (". . .", "---")
+        s = re.sub(r"(?:\.|\s)*\.{1}(?:\s*\.){2,}", " ", s)  # collapse runs of spaced dots
+        s = re.sub(r"[\.]{3,}", " ", s)  # collapse contiguous dots
+        s = re.sub(r"-{3,}", " ", s)
+        # If the line looks like letter-spaced text (many single-letter tokens), collapse them
+        if re.search(r"(?:[A-Za-z]\s+){3,}[A-Za-z]", s):
+            letters_only = re.sub(r"[^A-Za-z\s]", "", s)
+            s = re.sub(r"\s+", "", letters_only)
+        # Remove lingering page number at end when likely ToC artifacts were present
+        if re.search(r"(?:\.|\s){2,}", title) or re.search(r"(?:[A-Za-z]\s+){3,}[A-Za-z]", title):
+            s = re.sub(r"[\s\._-]*\d{1,4}$", "", s)
+        # Normalize inner whitespace and trim punctuation
+        s = re.sub(r"\s+", " ", s).strip(" .-_:\t")
+        return s
+
     def _extract_dictionary_from_toc(self, outline, source_name: str) -> List[DictEntry]:
         """Extract dictionary entries from ToC structure"""
         entries = []
@@ -177,10 +203,16 @@ class PassATocParser:
         rule_patterns = ["rule", "mechanic", "system", "combat", "action"]
         
         for entry in outline.entries:
-            title = entry.title.strip()
+            raw_title = entry.title.strip()
+            title = self._sanitize_title(raw_title)
             if not title or len(title) < 3:
                 continue
-                
+            # Guardrails: require at least one run of 3+ letters and reasonable signal
+            letters = re.findall(r"[A-Za-z]", title)
+            nonspace = re.findall(r"\S", title)
+            if len(letters) < 3 or (len(nonspace) > 0 and (len(letters) / max(1, len(nonspace))) < 0.5):
+                continue
+
             title_lower = title.lower()
             category = "general"
             definition = f"Section from {source_name}, page {entry.page}"

@@ -1,7 +1,8 @@
 param(
   [string]$Env = "dev",
   [string[]]$Uploads = @(),
-  [string]$ArtifactsBase = ""
+  [string]$ArtifactsBase = "",
+  [int]$MaxConcurrent = 2
 )
 
 # Avoid terminating on non-critical stderr output from child processes.
@@ -42,6 +43,25 @@ $ts = Get-Date -Format "yyyyMMdd_HHmmss"
 $logFile = Join-Path $logsDir "nightly_ps_$ts.log"
 $pyLogFile = Join-Path $logsDir "nightly_$ts.log"
 
+# If AI enrichment is enabled, ensure the OpenAI client is available (>= 1.0 API)
+if ($env:OPENAI_API_KEY) {
+  try {
+    & $pythonExe @($pythonArgs) -c "import importlib, sys; spec = importlib.util.find_spec('openai');
+import importlib as _il; m = _il.import_module('openai') if spec else None;
+sys.exit(0 if (m is not None and hasattr(m, 'OpenAI')) else 1)"
+    $needsOpenAI = ($LASTEXITCODE -ne 0)
+  } catch { $needsOpenAI = $true }
+  if ($needsOpenAI) {
+    Add-Content -Path $logFile -Value "OpenAI SDK missing or outdated; attempting pip install openai>=1.0.0"
+    try {
+      & $pythonExe @($pythonArgs) -m pip install --upgrade "openai>=1.0.0" | Out-Null
+      Add-Content -Path $logFile -Value "OpenAI SDK installed/updated successfully."
+    } catch {
+      Add-Content -Path $logFile -Value ("WARNING: Failed to install OpenAI SDK: {0}" -f $_.Exception.Message)
+    }
+  }
+}
+
 # Build command
 $scriptPath = Join-Path $repo "scripts\run_nightly_ingestion.py"
 $argList = @()
@@ -49,6 +69,7 @@ $argList += $pythonArgs
 $argList += @($scriptPath, '--env', $Env)
 foreach ($u in $Uploads) { $argList += @('--uploads', $u) }
 if ($ArtifactsBase -and $ArtifactsBase.Trim() -ne "") { $argList += @('--artifacts-base', $ArtifactsBase) }
+$argList += @('--max-concurrent', $MaxConcurrent)
 $argList += @('--log-file', $pyLogFile)
 
 # Quote args for Start-Process
@@ -80,8 +101,9 @@ Add-Content -Path $logFile -Value ("Nightly ingestion finished with exit code {0
 # Optional: Generate BUG docs from Python log when failures occur
 try {
   if (Test-Path $pyLogFile) {
-    $bugArgs = @('scripts\post_run_bug_scan.py', '--log-file', $pyLogFile, '--env', $Env)
-    if ($env:OPENAI_API_KEY -and $code -ne 0) { $bugArgs += '--ai-enrich' }
+    $runReportPath = Join-Path $repo ("docs\\bugs\\RUN-" + $ts + ".md")
+    $bugArgs = @('scripts\post_run_bug_scan.py', '--log-file', $pyLogFile, '--env', $Env, '--single-report', '--single-out', $runReportPath)
+    if ($env:OPENAI_API_KEY) { $bugArgs += '--ai-enrich' }
     $bugOut = Join-Path $env:TEMP ("bugscan_" + $ts + "_" + [Guid]::NewGuid().ToString() + ".log")
     $bugErr = Join-Path $env:TEMP ("bugscan_err_" + $ts + "_" + [Guid]::NewGuid().ToString() + ".log")
     $bp = Start-Process -FilePath $pythonExe -ArgumentList ($bugArgs -join ' ') -Wait -NoNewWindow -PassThru -RedirectStandardOutput $bugOut -RedirectStandardError $bugErr

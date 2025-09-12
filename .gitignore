@@ -236,5 +236,8 @@ test-results/
 .claude/tasks/active/
 .claude/tasks/completed/
 
+# Claude documentation and analysis reports
+claudedocs/
+
 # Other temporary files  
 nul

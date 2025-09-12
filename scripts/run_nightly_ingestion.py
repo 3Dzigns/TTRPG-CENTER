@@ -25,9 +25,10 @@ from src_common.scheduled_processor import ScheduledBulkProcessor
 from src_common.job_manager import Job, JobStatus
 from src_common.logging import setup_logging, get_logger
 from src_common.ttrpg_secrets import load_env
+from src_common.preflight_checks import run_preflight_checks, PreflightError
 
 
-async def main_async(env: str, uploads: List[str], artifacts_base: Path, log_file: Path) -> int:
+async def main_async(env: str, uploads: List[str], artifacts_base: Path, log_file: Path, max_concurrent: int = 2) -> int:
     # Configure environment + logging
     os.environ["APP_ENV"] = env
     # Load .env files (root + env-specific)
@@ -39,6 +40,28 @@ async def main_async(env: str, uploads: List[str], artifacts_base: Path, log_fil
         pass
     setup_logging(log_file=log_file)
     logger = get_logger("nightly_runner")
+
+    # Preflight dependency validation (warn-only in nightly to avoid full aborts)
+    try:
+        run_preflight_checks()
+        logger.info("Preflight dependency checks passed (Poppler/Tesseract available)")
+    except PreflightError as e:
+        logger.warning(f"Preflight checks failed: {e}. Continuing nightly run (dev mode), but PDF processing may fail.")
+
+    # Performance-oriented defaults for nightly runs
+    # 1) Reduce heavy model cost by default; allow override via environment
+    os.environ.setdefault("PASS_C_INFER_TABLES", os.getenv("PASS_C_INFER_TABLES", "true"))
+    # 2) Provide persistent model cache directories to avoid re-downloads across jobs
+    try:
+        project_root = Path(__file__).resolve().parents[1]
+        cache_root = project_root / "env" / env / "cache" / "hf"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("HF_HOME", str(cache_root))
+        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(cache_root / "hub"))
+        os.environ.setdefault("TRANSFORMERS_CACHE", str(cache_root / "transformers"))
+        os.environ.setdefault("TIMM_HOME", str(cache_root / "timm"))
+    except Exception:
+        pass
 
     logger.info(f"Nightly ingestion starting for env={env}")
     logger.info(f"Uploads: {uploads}")
@@ -60,7 +83,14 @@ async def main_async(env: str, uploads: List[str], artifacts_base: Path, log_fil
     logger.info(f"Discovered {len(docs)} documents; queue size now {queue.get_status().get('total_documents')}")
 
     pipeline = Pass6PipelineAdapter(environment=env)
-    processor = ScheduledBulkProcessor(config={"environment": env, "artifacts_base": str(artifacts_base)}, pipeline=pipeline)
+    processor = ScheduledBulkProcessor(
+        config={
+            "environment": env,
+            "artifacts_base": str(artifacts_base),
+            "max_concurrent_jobs": max_concurrent,
+        },
+        pipeline=pipeline,
+    )
 
     # Drain queue
     jobs = []
@@ -198,6 +228,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--uploads", action="append", required=True, help="Upload directory (repeatable)")
     ap.add_argument("--artifacts-base", default=None, help="Artifacts base directory (default: artifacts/ingest/{env})")
     ap.add_argument("--log-file", default=None, help="Optional explicit log file path for Python logger")
+    ap.add_argument("--max-concurrent", type=int, default=int(os.getenv("NIGHTLY_MAX_CONCURRENT", "2")), help="Max concurrent jobs for nightly scheduler")
     args = ap.parse_args(argv)
 
     env = args.env
@@ -211,7 +242,7 @@ def main(argv: list[str]) -> int:
     ts = time.strftime("%Y%m%d_%H%M%S")
     log_file = Path(args.log_file) if args.log_file else (logs_dir / f"nightly_{ts}.log")
 
-    return asyncio.run(main_async(env, args.uploads, artifacts, log_file))
+    return asyncio.run(main_async(env, args.uploads, artifacts, log_file, max_concurrent=args.max_concurrent))
 
 
 if __name__ == "__main__":
