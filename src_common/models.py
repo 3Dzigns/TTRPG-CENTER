@@ -363,6 +363,26 @@ class SourceAccess(TimestampedModel, table=True):
     )
 
 
+class SourceIngestionHistory(TimestampedModel, table=True):
+    """Track source processing history for SHA-based Pass C bypass"""
+    __tablename__ = "source_ingestion_history"
+    
+    source_hash: str = Field(primary_key=True, max_length=64)  # SHA-256 hash
+    source_path: str = Field(max_length=500, nullable=False, index=True)
+    chunk_count: int = Field(nullable=False)
+    last_processed_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    )
+    environment: str = Field(max_length=10, nullable=False, index=True)  # dev/test/prod
+    pass_c_artifacts_path: Optional[str] = Field(max_length=500, nullable=True)  # Path to Pass C artifacts
+    
+    __table_args__ = (
+        Index("idx_ingestion_source_path", "source_path"),
+        Index("idx_ingestion_environment", "environment"),
+        Index("idx_ingestion_processed_at", "last_processed_at"),
+    )
+
+
 class AuthTokenBlacklist(TimestampedModel, table=True):
     """Token blacklist for logout functionality"""
     __tablename__ = "auth_token_blacklist"
@@ -390,6 +410,6 @@ def create_all_tables(engine):
 __all__ = [
     "User", "Role", "Permission", "UserRole_", "RolePermission",
     "OAuthAccount", "Game", "GameMembership", "Source", "SourceAccess",
-    "AuthTokenBlacklist", "UserRole", "GameMembershipRole", "SourceAccessType",
+    "SourceIngestionHistory", "AuthTokenBlacklist", "UserRole", "GameMembershipRole", "SourceAccessType",
     "TimestampedModel", "create_all_tables"
 ]

@@ -407,6 +407,175 @@ class AstraLoader:
         
         return final_parts
 
+    def safe_upsert_chunks_for_source(self, chunks: List[Dict[str, Any]], source_hash: str) -> LoadResult:
+        """
+        Safely upsert chunks for a source, removing old chunks first if they exist
+        
+        Args:
+            chunks: List of chunk dictionaries to load
+            source_hash: SHA hash of the source file for identification
+            
+        Returns:
+            LoadResult with upsert operation details
+        """
+        logger.info(f"Safe upserting {len(chunks)} chunks for source hash {source_hash[:12]}...")
+        start_time = time.time()
+        
+        if self.client is None:
+            # Simulation mode
+            logger.info(f"SIMULATION MODE: Would safe upsert {len(chunks)} chunks for source {source_hash[:12]}...")
+            return LoadResult(
+                collection_name=self.collection_name,
+                chunks_loaded=len(chunks),
+                chunks_failed=0,
+                loading_time_ms=0,
+                success=True,
+                error_message=None
+            )
+        
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            
+            # Step 1: Remove existing chunks for this source
+            logger.info(f"Removing existing chunks for source hash {source_hash[:12]}...")
+            delete_result = collection.delete_many({"metadata.source_hash": source_hash})
+            
+            # Handle various possible return formats for deleted count
+            deleted_count = 0
+            if hasattr(delete_result, 'deleted_count'):
+                deleted_count = delete_result.deleted_count
+            elif hasattr(delete_result, 'deletedCount'):
+                deleted_count = delete_result.deletedCount
+            elif isinstance(delete_result, dict):
+                deleted_count = delete_result.get('deletedCount', delete_result.get('deleted_count', 0))
+            
+            logger.info(f"Removed {deleted_count} existing chunks for source {source_hash[:12]}...")
+            
+            # Step 2: Insert new chunks with source hash metadata
+            documents = []
+            MAX_BYTES = 7000  # BUG-017: Hard byte cap at 7000 bytes
+            TARGET_CHARS = 400  # BUG-017: Target 300-500 characters
+            
+            for chunk in chunks:
+                content = chunk['content']
+                meta = chunk['metadata'].copy() if 'metadata' in chunk else {}
+                
+                # Ensure source_hash is in metadata
+                meta['source_hash'] = source_hash
+                
+                base_id = chunk['id']
+                
+                # Enforce chunk size limits
+                split_parts = self._enforce_chunk_size_limits(content, TARGET_CHARS, MAX_BYTES)
+                
+                if len(split_parts) == 1 and len(split_parts[0].encode('utf-8')) <= MAX_BYTES:
+                    # Single chunk within limits
+                    documents.append({
+                        'chunk_id': base_id,
+                        'content': split_parts[0],
+                        'metadata': meta,
+                        'environment': self.env,
+                        'loaded_at': time.time()
+                    })
+                else:
+                    # Multiple parts needed
+                    for pi, part in enumerate(split_parts, 1):
+                        documents.append({
+                            'chunk_id': f"{base_id}-part{pi}",
+                            'content': part,
+                            'metadata': meta,
+                            'environment': self.env,
+                            'loaded_at': time.time()
+                        })
+            
+            # Step 3: Batch insert new chunks
+            logger.info(f"Inserting {len(documents)} new documents for source {source_hash[:12]}...")
+            insert_result = collection.insert_many(documents)
+            
+            inserted_count = len(insert_result.inserted_ids) if insert_result.inserted_ids else len(documents)
+            logger.info(f"Successfully upserted {inserted_count} chunks (removed {deleted_count}, added {inserted_count})")
+            
+            end_time = time.time()
+            return LoadResult(
+                collection_name=self.collection_name,
+                chunks_loaded=inserted_count,
+                chunks_failed=len(chunks) - inserted_count,
+                loading_time_ms=int((end_time - start_time) * 1000),
+                success=True
+            )
+            
+        except Exception as e:
+            end_time = time.time()
+            logger.error(f"Error in safe chunk upsert for source {source_hash[:12]}...: {e}")
+            return LoadResult(
+                collection_name=self.collection_name,
+                chunks_loaded=0,
+                chunks_failed=len(chunks),
+                loading_time_ms=int((end_time - start_time) * 1000),
+                success=False,
+                error_message=str(e)
+            )
+
+    def validate_chunk_integrity(self, source_hash: str, expected_count: int) -> Dict[str, Any]:
+        """
+        Validate chunk integrity for a source against expected count
+        
+        Args:
+            source_hash: SHA hash of the source file
+            expected_count: Expected number of chunks
+            
+        Returns:
+            Dictionary with validation results
+        """
+        logger.info(f"Validating chunk integrity for source {source_hash[:12]}... (expected: {expected_count})")
+        
+        if self.client is None:
+            logger.info(f"SIMULATION MODE: Chunk integrity validation for {source_hash[:12]}...")
+            return {
+                'source_hash': source_hash,
+                'expected_count': expected_count,
+                'actual_count': expected_count,  # Assume correct in simulation
+                'integrity_valid': True,
+                'status': 'simulation_mode'
+            }
+        
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            
+            # Count chunks with matching source hash
+            actual_count = collection.count_documents(
+                {"metadata.source_hash": source_hash},
+                upper_bound=10000
+            )
+            
+            integrity_valid = actual_count == expected_count
+            
+            result = {
+                'source_hash': source_hash,
+                'expected_count': expected_count,
+                'actual_count': actual_count,
+                'integrity_valid': integrity_valid,
+                'status': 'validated'
+            }
+            
+            if integrity_valid:
+                logger.info(f"Chunk integrity VALID for {source_hash[:12]}...: {actual_count} chunks")
+            else:
+                logger.warning(f"Chunk integrity INVALID for {source_hash[:12]}...: expected {expected_count}, found {actual_count}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error validating chunk integrity for {source_hash[:12]}...: {e}")
+            return {
+                'source_hash': source_hash,
+                'expected_count': expected_count,
+                'actual_count': 0,
+                'integrity_valid': False,
+                'status': 'error',
+                'error': str(e)
+            }
+
 
 def load_chunks_to_astra(chunks_file: Path, env: str = "dev") -> LoadResult:
     """

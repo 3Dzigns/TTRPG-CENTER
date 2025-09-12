@@ -55,6 +55,9 @@ class PassProgress:
     error_message: Optional[str] = None
     error_type: Optional[str] = None
     
+    # Bypass information (for Pass C SHA-based bypass)
+    bypass_reason: Optional[str] = None
+    
     # Additional metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
     

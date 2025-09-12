@@ -29,6 +29,8 @@ class ProgressAwarePipelineWrapper:
         self.progress_callback = progress_callback
         self.loop = loop
         self.artifacts_root = Path(artifacts_root)
+        # Ensure wrapper has a logger for internal diagnostics (fixes Pass C crash)
+        self.logger = get_logger(__name__)
         
     def process_source_6pass_with_progress(self, pdf_path, environment):
         """Execute 6-pass pipeline with progress tracking"""
@@ -140,12 +142,22 @@ class ProgressAwarePipelineWrapper:
             return self._create_failed_result(f"Pass B failed: {str(e)}")
     
     def _execute_pass_c(self, pdf_path, environment, pass_progress):
-        """Execute Pass C with progress tracking"""
+        """Execute Pass C with progress tracking and SHA-based bypass validation"""
         try:
+            # Check for SHA-based Pass C bypass
+            bypass_result = self._check_pass_c_bypass(pdf_path, environment, pass_progress)
+            if bypass_result:
+                return bypass_result
+            
             # Use existing Pass C functionality
             from src_common.pass_c_extraction import process_pass_c  
             result = process_pass_c(pdf_path, self.artifacts_root,
                                   self.job_progress.job_id, environment)
+            
+            # Record successful processing for future bypass validation
+            if hasattr(result, 'success') and result.success:
+                self._record_pass_c_success(pdf_path, result)
+                                  
             return result
         except Exception as e:
             return self._create_failed_result(f"Pass C failed: {str(e)}")
@@ -202,6 +214,138 @@ class ProgressAwarePipelineWrapper:
             return result
         except Exception as e:
             return self._create_failed_result(f"Pass F failed: {str(e)}")
+    
+    def _check_pass_c_bypass(self, pdf_path, environment, pass_progress):
+        """
+        Check if Pass C can be bypassed using SHA-based validation
+        
+        Returns:
+            Result object if bypassed, None if Pass C should execute normally
+        """
+        try:
+            from .pass_c_bypass_validator import get_bypass_validator
+            from .artifact_preservation import get_artifact_manager
+            from .pass_a_toc_parser import PassAToCParser  # To get SHA hash
+            from types import SimpleNamespace
+            
+            # Get source hash from Pass A results or compute it
+            source_hash = self._get_source_hash(pdf_path)
+            if not source_hash:
+                self.logger.warning(f"Cannot get source hash for {pdf_path} - proceeding with normal Pass C")
+                return None
+            
+            # Check bypass validation
+            bypass_validator = get_bypass_validator(environment)
+            validation_result = bypass_validator.can_bypass_pass_c(source_hash, pdf_path)
+            
+            if not validation_result.can_bypass:
+                self.logger.info(f"Pass C bypass DENIED for {pdf_path.name}: {validation_result.reason}")
+                
+                # Handle chunk count mismatches if needed
+                if (validation_result.processing_record and 
+                    validation_result.astra_chunk_count is not None and
+                    validation_result.expected_chunk_count is not None and
+                    validation_result.astra_chunk_count != validation_result.expected_chunk_count):
+                    
+                    self.logger.info(f"Detected chunk count mismatch - will clean and reprocess")
+                    removed_count = bypass_validator.remove_chunks_for_source(source_hash)
+                    self.logger.info(f"Removed {removed_count} stale chunks for reprocessing")
+                
+                return None
+            
+            # Pass C can be bypassed - preserve artifacts
+            self.logger.info(f"Pass C bypass APPROVED for {pdf_path.name}: {validation_result.reason}")
+            
+            artifact_manager = get_artifact_manager(environment)
+            
+            # Copy artifacts from previous run if available
+            if validation_result.processing_record and validation_result.processing_record.pass_c_artifacts_path:
+                source_artifacts = Path(validation_result.processing_record.pass_c_artifacts_path)
+                dest_artifacts = self.artifacts_root
+                
+                copy_result = artifact_manager.copy_artifacts_from_previous_run(source_artifacts, dest_artifacts)
+                
+                if not copy_result.success:
+                    self.logger.error(f"Failed to copy artifacts for bypass: {copy_result.error_message}")
+                    return None
+                
+                self.logger.info(f"Copied {copy_result.artifacts_copied} artifacts for Pass C bypass")
+            
+            # Create bypass marker
+            artifact_manager.create_bypass_marker(self.artifacts_root, source_hash, validation_result.reason)
+            
+            # Update pass progress to indicate bypass
+            from .progress_callback import PassStatus
+            pass_progress.status = PassStatus.COMPLETED
+            pass_progress.bypass_reason = validation_result.reason
+            pass_progress.chunks_processed = validation_result.expected_chunk_count
+            
+            # Create successful bypass result
+            result = SimpleNamespace()
+            result.job_id = self.job_progress.job_id
+            result.success = True
+            result.bypassed = True
+            result.bypass_reason = validation_result.reason
+            result.chunks_loaded = validation_result.expected_chunk_count
+            result.source_hash = source_hash
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error in Pass C bypass check: {e}")
+            return None
+    
+    def _get_source_hash(self, pdf_path):
+        """Get source hash from manifest or compute it"""
+        try:
+            # First try to get from Pass A manifest
+            manifest_path = self.artifacts_root / "manifest.json"
+            if manifest_path.exists():
+                import json
+                with manifest_path.open('r', encoding='utf-8') as f:
+                    manifest_data = json.load(f)
+                    source_hash = manifest_data.get('source_info', {}).get('source_hash')
+                    if source_hash:
+                        return source_hash
+            
+            # Fallback: compute hash directly
+            from .pass_a_toc_parser import PassAToCParser
+            parser = PassAToCParser()
+            return parser._compute_file_hash(pdf_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting source hash: {e}")
+            return None
+    
+    def _record_pass_c_success(self, pdf_path, result):
+        """Record successful Pass C processing for future bypass validation"""
+        try:
+            from .pass_c_bypass_validator import get_bypass_validator
+            
+            source_hash = self._get_source_hash(pdf_path)
+            if not source_hash:
+                self.logger.warning("Cannot record Pass C success - no source hash available")
+                return
+            
+            # Determine chunk count from result
+            chunk_count = 0
+            if hasattr(result, 'chunks_loaded'):
+                chunk_count = result.chunks_loaded
+            elif hasattr(result, 'chunks_created'):
+                chunk_count = result.chunks_created
+            
+            bypass_validator = get_bypass_validator(self.job_progress.environment)
+            success = bypass_validator.record_successful_processing(
+                source_hash, pdf_path, chunk_count, self.artifacts_root
+            )
+            
+            if success:
+                self.logger.info(f"Recorded Pass C success for future bypass validation")
+            else:
+                self.logger.warning(f"Failed to record Pass C success")
+                
+        except Exception as e:
+            self.logger.error(f"Error recording Pass C success: {e}")
     
     def _create_failed_result(self, error_message):
         """Create a failed result object"""
