@@ -16,7 +16,8 @@
       "Bash(dos2unix:*)",
       "Bash(sed:*)",
       "Bash(curl:*)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []
