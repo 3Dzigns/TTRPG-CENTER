@@ -252,7 +252,17 @@ try {
     # Show image size
     $imageInfo = docker images $imageTag --format "{{.Size}}"
     Write-Status "  Image Size: $imageInfo" -Level "Success"
-    
+
+    # Cleanup old Docker images to save space
+    Write-Status "Cleaning up old Docker images..." -Level "Info"
+    try {
+        docker image prune -f | Out-Null
+        Write-Status "Docker cleanup completed" -Level "Success"
+    }
+    catch {
+        Write-Status "Docker cleanup failed (non-critical): $($_.Exception.Message)" -Level "Warning"
+    }
+
     Write-Status "Build completed successfully!" -Level "Success"
     
     # Output final image tag for use in other scripts
