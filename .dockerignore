@@ -1,0 +1,98 @@
+# Git and version control
+.git
+.gitignore
+.github
+
+# Virtual environments
+.venv
+venv
+env
+ENV
+env.bak
+venv.bak
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+logs/
+temp/
+tmp/
+env/*/logs/
+
+# Claude Code
+.claude/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment files (these should be created in container)
+.env
+.env.*
+
+# Documentation and markdown (not needed in runtime)
+docs/
+*.md
+README*
+
+# Test files
+tests/
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Artifacts and uploads (these will be mounted as volumes)
+artifacts/
+uploads/
+data/
+
+# Container-specific ignores
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Script files (development only)
+scripts/
+db_migrations/
+
+# Node modules if any
+node_modules/
+npm-debug.log*
+
+# Large files and caches
+*.tar
+*.zip
+*.gz
+*.bz2

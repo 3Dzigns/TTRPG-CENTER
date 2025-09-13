@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}TTRPG Center{% endblock %}</title>
     
-    <!-- LCARS/Retro Terminal CSS -->
-    <link rel="stylesheet" href="/static/css/themes/lcars.css" id="theme-stylesheet">
-    <link rel="stylesheet" href="/static/css/main.css">
+    <!-- Base CSS first, then theme CSS to override -->
+    <link rel="stylesheet" href="/static/user/css/main.css">
+    <link rel="stylesheet" href="/static/user/css/themes/lcars.css" id="theme-stylesheet">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -59,9 +59,9 @@
     </footer>
 
     <!-- Scripts -->
-    <script src="/static/js/theme-manager.js"></script>
-    <script src="/static/js/websocket-client.js"></script>
-    <script src="/static/js/main.js"></script>
+    <script src="/static/user/js/theme-manager.js"></script>
+    <script src="/static/user/js/websocket-client.js"></script>
+    <script src="/static/user/js/main.js"></script>
     
     {% block extra_scripts %}{% endblock %}
 

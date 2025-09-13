@@ -100,10 +100,34 @@ class TTRPGApp:
         except ImportError as e:
             logger.warning(f"Phase 3 routes not available: {e}")
 
-        # Minimal WebUI: static assets under /ui
+        # Phase 4: Admin UI routes (prefixed to avoid conflicts)
+        try:
+            from src_common.admin_routes import admin_router
+            self.app.include_router(admin_router)
+            logger.info("Phase 4 admin routes loaded")
+        except ImportError as e:
+            logger.warning(f"Phase 4 admin routes not available: {e}")
+
+        # Phase 5: User UI routes (must come after admin routes for proper precedence)
+        try:
+            from src_common.user_routes import user_router
+            self.app.include_router(user_router)
+            logger.info("Phase 5 user routes loaded")
+        except ImportError as e:
+            logger.warning(f"Phase 5 user routes not available: {e}")
+
+        # Static files and templates
         static_dir = Path("static")
+        templates_dir = Path("templates")
+
         if static_dir.exists():
-            self.app.mount("/ui", StaticFiles(directory=str(static_dir), html=True), name="ui")
+            self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        if templates_dir.exists():
+            from fastapi.templating import Jinja2Templates
+            templates = Jinja2Templates(directory=str(templates_dir))
+            # Store templates for use in routes
+            self.templates = templates
 
         @self.app.get("/healthz")
         async def health_check():
@@ -122,15 +146,7 @@ class TTRPGApp:
             logger.info("Health check requested", extra=health_data)
             return JSONResponse(content=health_data)
         
-        @self.app.get("/")
-        async def root():
-            """Root endpoint with basic information."""
-            return {
-                "message": "TTRPG Center API",
-                "environment": os.getenv('APP_ENV', 'dev'),
-                "version": "0.1.0",
-                "health_check": "/healthz"
-            }
+        # Root route removed - User UI will handle the root route
         
         @self.app.get("/status")
         async def system_status():

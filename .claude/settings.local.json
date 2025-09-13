@@ -8,7 +8,15 @@
       "Bash(scripts/cleanup_logs.bat 1 dev)",
       "Bash(grep:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(docker system prune:*)",
+      "Bash(docker-compose:*)",
+      "Bash(dos2unix:*)",
+      "Bash(sed:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)"
     ],
     "deny": [],
     "ask": []

@@ -38,12 +38,53 @@
     --font-mono: 'Source Code Pro', monospace;
 }
 
-/* Base Styling */
+/* Base Styling - Apply variables to theme class and body */
+body.theme-lcars,
 .theme-lcars {
-    background: var(--primary-bg);
-    color: var(--primary-text);
-    font-family: var(--font-primary);
+    /* LCARS Color Palette */
+    --lcars-orange: #ff9900;
+    --lcars-red: #cc6666;
+    --lcars-blue: #9999cc;
+    --lcars-purple: #cc99cc;
+    --lcars-yellow: #ffcc99;
+    --lcars-green: #99cc99;
+    --lcars-teal: #99cccc;
+
+    /* Primary Interface Colors */
+    --primary-bg: #000000;
+    --secondary-bg: #111111;
+    --panel-bg: #1a1a1a;
+    --accent-bg: #2a2a2a;
+
+    /* Text Colors */
+    --primary-text: #ffffff;
+    --secondary-text: #cccccc;
+    --accent-text: var(--lcars-orange);
+    --muted-text: #888888;
+
+    /* Apply the styling */
+    background: #000000 !important;
+    color: #ffffff !important;
+    font-family: 'Orbitron', monospace !important;
     font-weight: 400;
+    min-height: 100vh;
+}
+
+/* Ensure the background covers everything */
+html,
+html body,
+html body.theme-lcars {
+    background: #000000 !important;
+    background-color: #000000 !important;
+}
+
+/* Force all major containers to have proper background */
+.main-content,
+.interface-layout,
+.left-panel,
+.right-panel {
+    background: var(--primary-bg) !important;
+    color: var(--primary-text) !important;
 }
 
 /* Header */

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "user/base.html" %}
 
 {% block title %}TTRPG Center - Query Interface{% endblock %}
 
@@ -133,7 +133,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/query-interface.js"></script>
+<script src="/static/user/js/query-interface.js"></script>
 <script>
     // Initialize query interface with session ID and OAuth config
     window.TTRPG_CONFIG = {

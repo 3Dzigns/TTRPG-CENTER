@@ -17,7 +17,7 @@ param(
     [string]$Tag = $null,
     
     [Parameter(Mandatory=$false)]
-    [switch]$Verbose
+    [switch]$VerboseOutput
 )
 
 # Script configuration
@@ -48,8 +48,8 @@ function Get-GitInfo {
         $gitDirty = git diff --quiet 2>$null; $LASTEXITCODE -ne 0
         
         return @{
-            Sha = $gitSha ?? "unknown"
-            Branch = $gitBranch ?? "unknown" 
+            Sha = if ($gitSha) { $gitSha } else { "unknown" }
+            Branch = if ($gitBranch) { $gitBranch } else { "unknown" }
             Dirty = $gitDirty
         }
     }
