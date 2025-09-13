@@ -7,7 +7,8 @@
       "Bash(\".venv\\Scripts\\python.exe\":*)",
       "Bash(scripts/cleanup_logs.bat 1 dev)",
       "Bash(grep:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
