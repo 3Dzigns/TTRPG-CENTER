@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 import re
@@ -24,21 +25,50 @@ class DictionaryLoader:
     def __init__(self, env: str = "dev"):
         self.env = env
         self.collection_name = f"ttrpg_dictionary_{env}"
-        self.client = None
         self._astra_insecure_configured = False
+
+        # Backend selection: prefer Mongo for FR-006 when available
+        self.backend = os.getenv("DICTIONARY_BACKEND", "mongo").strip().lower()
+        self.client = None           # Astra client
+        self.mongo_client = None     # pymongo.MongoClient
+        self.mongo_collection = None # pymongo Collection
+
+        if self.backend == "mongo":
+            self._init_mongo()
+        else:
+            self._init_astra()
+
+    def _init_mongo(self) -> None:
+        uri = os.getenv("MONGO_URI", "").strip()
+        if not uri:
+            logger.error("MONGO_URI not set; cannot initialize Mongo dictionary backend")
+            return
+        try:
+            from pymongo import MongoClient  # type: ignore
+            self.mongo_client = MongoClient(uri)
+            db = self.mongo_client.get_database()
+            self.mongo_collection = db[self.collection_name]
+            logger.info(f"Mongo dictionary backend initialized: {db.name}.{self.collection_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Mongo dictionary backend: {e}")
+            self.mongo_client = None
+            self.mongo_collection = None
+
+    def _init_astra(self) -> None:
         try:
             from astrapy import DataAPIClient  # type: ignore
-            from .ttrpg_secrets import get_all_config, validate_database_config
+            from .ttrpg_secrets import validate_database_config
 
             cfg = validate_database_config()
             if not all([cfg.get('ASTRA_DB_API_ENDPOINT'), cfg.get('ASTRA_DB_APPLICATION_TOKEN'), cfg.get('ASTRA_DB_ID')]):
                 logger.warning("Astra config incomplete for dictionary loader; running in simulation mode")
                 self.client = None
-            else:
-                # Attempt secure client first
-                self._maybe_configure_astra_httpx_secure()
-                client = DataAPIClient(cfg['ASTRA_DB_APPLICATION_TOKEN'])
-                self.client = client.get_database_by_api_endpoint(cfg['ASTRA_DB_API_ENDPOINT'])
+                return
+            # Attempt secure client first
+            self._maybe_configure_astra_httpx_secure()
+            client = DataAPIClient(cfg['ASTRA_DB_APPLICATION_TOKEN'])
+            self.client = client.get_database_by_api_endpoint(cfg['ASTRA_DB_API_ENDPOINT'])
+            logger.info("Astra dictionary backend initialized")
         except Exception as e:
             logger.warning(f"DictionaryLoader Astra init failed: {e}")
             self.client = None
@@ -55,6 +85,36 @@ class DictionaryLoader:
         if original_count > deduped_count:
             logger.info(f"Deduplicated {original_count} entries to {deduped_count} ({original_count - deduped_count} duplicates removed)")
         
+        if self.backend == "mongo" and self.mongo_collection is not None:
+            try:
+                upserted = 0
+                for e in deduped_entries:
+                    _id = self._normalize_term_id(e.term)
+                    now = time.time()
+                    self.mongo_collection.update_one(
+                        {"_id": _id},
+                        {
+                            "$setOnInsert": {"created_at": now, "sources": []},
+                            "$set": {
+                                "term": e.term,
+                                "definition": e.definition,
+                                "category": e.category,
+                                "updated_at": now,
+                            },
+                        },
+                        upsert=True,
+                    )
+                    if e.sources:
+                        self.mongo_collection.update_one(
+                            {"_id": _id}, {"$addToSet": {"sources": {"$each": e.sources}}}
+                        )
+                    upserted += 1
+                logger.info(f"Mongo dictionary upsert completed: {upserted}/{deduped_count}")
+                return upserted
+            except Exception as e:
+                logger.error(f"Mongo dictionary upsert error: {e}")
+                return 0
+
         if self.client is None:
             logger.info(f"SIMULATION: would upsert {deduped_count} dictionary entries into {self.collection_name}")
             return deduped_count
@@ -231,26 +291,27 @@ class DictionaryLoader:
 
     def get_term_count(self) -> int:
         """Get total count of dictionary terms."""
-        if self.client is None:
-            return 0
-            
         try:
-            collection = self.client.get_collection(self.collection_name)
-            return collection.estimated_document_count()
+            if self.backend == "mongo" and self.mongo_collection is not None:
+                return self.mongo_collection.estimated_document_count()
+            if self.client is not None:
+                collection = self.client.get_collection(self.collection_name)
+                return collection.estimated_document_count()
+            return 0
         except Exception as e:
             logger.warning(f"Failed to get term count: {e}")
             return 0
     
     def get_term_details(self, term: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a specific term."""
-        if self.client is None:
-            return None
-            
+        normalized_id = self._normalize_term_id(term)
         try:
-            collection = self.client.get_collection(self.collection_name)
-            normalized_id = self._normalize_term_id(term)
-            doc = collection.find_one({"_id": normalized_id})
-            return doc
+            if self.backend == "mongo" and self.mongo_collection is not None:
+                return self.mongo_collection.find_one({"_id": normalized_id})
+            if self.client is not None:
+                collection = self.client.get_collection(self.collection_name)
+                return collection.find_one({"_id": normalized_id})
+            return None
         except Exception as e:
             logger.warning(f"Failed to get term details for {term}: {e}")
             return None

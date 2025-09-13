@@ -1,0 +1,7 @@
+# Developer tooling for CI (lint, format, type checks)
+flake8>=7.0.0
+black>=24.10.0
+isort>=5.13.2
+mypy>=1.11.2
+types-requests>=2.32.0.20240914
+types-setuptools>=75.5.0.20241025

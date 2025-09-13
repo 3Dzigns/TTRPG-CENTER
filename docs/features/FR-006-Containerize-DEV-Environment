@@ -1,0 +1,333 @@
+# FR-DEV-DOCKER-006 — Containerize DEV Environment
+
+## Summary
+
+Migrate the **DEV** environment to Docker Desktop (Windows). Build and run containers for:
+
+* **App** (FastAPI Python service) with built-in **ingestion scheduler**, **upload directory** for files, and **log cleanup** (delete logs > 5 days).
+* **PostgreSQL** (users, tiers, permissions, player/GM/game linkage).
+* **MongoDB** (data dictionary).
+* **Neo4j** (graph).
+* **Redis** (idle for now, reserved for session/cache).
+* **Vector** store remains **AstraDB** (existing certs/creds).
+* **OpenAI** remains current external endpoint (existing certs/creds).
+
+Include build & deploy scripts in-repo to build/publish images and `docker compose up` the DEV stack. Promotion to TEST/PROD will be handled separately.
+
+## Scope
+
+* Dockerize DEV: compose file, images, volumes, networks, healthchecks.
+* App image bundles:
+
+  * API server
+  * APScheduler (or Celery beat alternative) to run ingestion jobs on a schedule
+  * CLI to trigger manual ingestion
+  * Log cleanup job (daily; delete >5-day logs)
+* Data layer transitions:
+
+  * Postgres for auth/ACLs/relations
+  * MongoDB for dictionary
+  * Neo4j for graph
+  * Redis for future use (container up, app can ping but not required in flows yet)
+  * AstraDB/OpenAI remain external
+* Build/deploy scripts for Windows (PowerShell) and cross-platform (bash optional)
+
+## Out of Scope
+
+* TEST/PROD compose files and promotion gates
+* TLS/Domain/Tunnel setup (handled later)
+* Any schema redesign beyond what’s required to point the app at new containers
+
+---
+
+## High-Level Architecture (DEV)
+
+* **Network:** `ttrpg-dev-net`
+* **Volumes:**
+
+  * `pg_data_dev`, `mongo_data_dev`, `neo4j_data_dev`, `redis_data_dev`
+  * `logs_dev` (mounted to app `/var/log/ttrpg`)
+  * `uploads_dev` (mounted to app `/data/uploads`)
+* **Ports:** App `8000`; DBs exposed only if needed for admin tools.
+
+**docker-compose.dev.yml (outline)**
+
+* `app-dev`: build `./services/app`, env from `.env.dev`, mounts `uploads_dev`, `logs_dev`; healthcheck `/healthz`.
+* `postgres-dev`: image `postgres:16`, env (db/user/pw), volume `pg_data_dev`.
+* `mongo-dev`: image `mongo:7`, volume `mongo_data_dev`.
+* `neo4j-dev`: image `neo4j:5`, env for auth, volume `neo4j_data_dev`.
+* `redis-dev`: image `redis:7`, volume `redis_data_dev`.
+* All services on `ttrpg-dev-net`.
+
+---
+
+## Detailed User Stories & Acceptance Criteria
+
+### EPIC 1 — Container Orchestration & App Runtime
+
+**US-1.1: As a developer, I can run the entire DEV stack with one command.**
+
+* **AC:**
+
+  * `docker compose -f docker-compose.dev.yml up -d` starts all services.
+  * App reachable at `http://localhost:8000/healthz` returns `{status:"ok", env:"dev"}`.
+  * Healthchecks for Postgres/Mongo/Neo4j/Redis pass within 60s or stack exits with clear logs.
+* **Tests:**
+
+  * *Functional*: Spin up compose; GET `/healthz` → 200.
+  * *Security*: Containers run as non-root where feasible; no privileged flags.
+  * *Regression*: Compose service names and ports remain stable.
+
+**US-1.2: As a developer, I can build the app image locally.**
+
+* **AC:**
+
+  * `scripts/build.ps1 -Env dev` builds `ttrpg/app:dev`.
+  * Dockerfile is multi-stage, pins Python 3.12 and OS packages (poppler/tesseract optional).
+* **Tests:**
+
+  * *Unit*: Lint Dockerfile (hadolint or guidelines).
+  * *Functional*: Build completes; image runs `--version`.
+  * *Regression*: Image tag and label metadata present (git SHA, build time).
+
+**US-1.3: As a developer, I can deploy (start/stop) the DEV stack via scripts.**
+
+* **AC:**
+
+  * `scripts/deploy.ps1 -Env dev -Up` → `docker compose up -d`.
+  * `scripts/deploy.ps1 -Env dev -Down` → `docker compose down -v` (or flag to keep volumes).
+* **Tests:**
+
+  * *Functional*: Up/Down idempotent; volumes persist unless `-Purge` used.
+
+---
+
+### EPIC 2 — Data Layer Transition (Postgres, MongoDB, Neo4j, Redis)
+
+**US-2.1: As the app, I use Postgres for user management and relationships.**
+
+* **AC:**
+
+  * Config via `.env.dev` (`POSTGRES_HOST=postgres-dev`, `DB=ttrpg_dev`).
+  * Migrations run on container start (e.g., Alembic/Prisma).
+  * App routes that read/write users, tiers, permissions operate against Postgres.
+* **Tests:**
+
+  * *Unit*: Migration scripts validate up/down on empty DB.
+  * *Functional*: Create user → row appears in Postgres; link player→GM→game persists.
+  * *Security*: DB creds not logged; least-privileged user works.
+
+**US-2.2: As the app, I use MongoDB for the data dictionary.**
+
+* **AC:**
+
+  * Config via `.env.dev` (`MONGO_URI=mongodb://mongo-dev:27017/ttrpg_dev`).
+  * Dictionary CRUD routes hit MongoDB collections (per system or unified with type field).
+  * Existing dictionary reads/writes redirected from old location to Mongo.
+* **Tests:**
+
+  * *Unit*: Schema validators (JSON schema) for dictionary documents.
+  * *Functional*: Insert PF2E spell dictionary doc; read back; query by system/type.
+  * *Regression*: Sample docs load unchanged across rebuilds.
+
+**US-2.3: As the app, I use Neo4j for graph storage.**
+
+* **AC:**
+
+  * Config via `.env.dev` (`NEO4J_URI=bolt://neo4j-dev:7687`, `NEO4J_USER`, `NEO4J_PASS`).
+  * Graph adapter can upsert nodes/edges and run parameterized queries.
+* **Tests:**
+
+  * *Unit*: Upsert node/edge is idempotent; depth-limited neighbor query.
+  * *Functional*: Ingest sample procedure → verify nodes/edges present.
+  * *Security*: No string concat queries; credentials not printed.
+
+**US-2.4: As the app, I can reach AstraDB for vector search (no changes).**
+
+* **AC:**
+
+  * App continues to use current `ASTRA_DB_ID`, `ASTRA_DB_REGION`, `ASTRA_DB_TOKEN` (from `.env.dev`).
+  * TLS certs remain external/unchanged.
+* **Tests:**
+
+  * *Functional*: Vector search returns TopK results for a known query.
+  * *Security*: Token only from env/secret; redacted in logs.
+
+**US-2.5: As the app, I can ping Redis (idle for now).**
+
+* **AC:**
+
+  * App can connect to `redis-dev:6379` and perform a simple `PING`.
+  * No flows depend on Redis yet (feature-flagged).
+* **Tests:**
+
+  * *Functional*: Health endpoint includes `redis: "ok" | "disabled"`.
+
+---
+
+### EPIC 3 — Ingestion Scheduling, Uploads, and Logging
+
+**US-3.1: As an operator, I can drop files into an upload directory for ingestion.**
+
+* **AC:**
+
+  * Host path `./env/dev/uploads` → mounted to app `/data/uploads`.
+  * App exposes `/ingest/start?path=/data/uploads` and a CLI `python -m app.ingest /data/uploads`.
+* **Tests:**
+
+  * *Functional*: Place PDF in `uploads`; start ingestion; artifacts logged.
+
+**US-3.2: As the app, I automatically run scheduled ingestion jobs.**
+
+* **AC:**
+
+  * APScheduler (inside app) runs at configurable cron (e.g., hourly) scanning `/data/uploads`.
+  * Concurrent runs are locked (no overlap).
+* **Tests:**
+
+  * *Unit*: Cron parser & lock logic.
+  * *Functional*: Two overlapping windows → second run waits/skips.
+
+**US-3.3: As an operator, dev logs older than 5 days are purged daily.**
+
+* **AC:**
+
+  * Daily job deletes files in `/var/log/ttrpg` older than 5 days.
+  * Exclusions: current log file and rotated file for the current day.
+* **Tests:**
+
+  * *Functional*: Seed logs with old timestamps; job deletes only >5-day files.
+  * *Security*: Purge is confined to log directory; cannot traverse outside mount.
+
+---
+
+### EPIC 4 — Configuration, Secrets, and Health
+
+**US-4.1: As a developer, I use per-env `.env.dev` without cross-contamination.**
+
+* **AC:**
+
+  * `.env.dev` mounted/loaded by compose only for DEV.
+  * Secrets never baked into images; `.env.dev` is gitignored.
+* **Tests:**
+
+  * *Security*: Validate `.env.dev` not in repo; secrets not printed.
+
+**US-4.2: As an operator, I can see a consolidated health report.**
+
+* **AC:**
+
+  * `/healthz` returns `{env, version, services:{postgres,mongo,neo4j,redis,astra}}`.
+  * 200 only when app can reach required services (Redis may be “disabled”).
+* **Tests:**
+
+  * *Functional*: Kill Mongo container → `/healthz` shows `mongo:"down"` and 503 if required.
+  * *Regression*: Response schema stable.
+
+---
+
+### EPIC 5 — Build & Deploy Automation
+
+**US-5.1: As a developer, I have scripts to build and run the stack.**
+
+* **AC (PowerShell):**
+
+  * `scripts/build.ps1 -Env dev` → builds all images that are not pure upstream.
+  * `scripts/deploy.ps1 -Env dev -Up` → brings up stack; `-Down`; `-Logs` tails app logs.
+  * Optional `scripts/seed.ps1` to seed Postgres/Mongo/Neo4j with sample data.
+* **Tests:**
+
+  * *Functional*: On a fresh machine with Docker Desktop, scripts complete without manual edits.
+  * *Regression*: Script flags and names remain stable.
+
+**US-5.2: As a developer, I can run tests inside containers.**
+
+* **AC:**
+
+  * `scripts/test.ps1 -Env dev` runs unit/functional tests against the running stack (or in ephemeral test container).
+* **Tests:**
+
+  * *Functional*: Known assertions pass; failing service produces non-zero exit.
+
+---
+
+### EPIC 6 — Observability & Ops
+
+**US-6.1: As an operator, I can view structured logs for ingestion and API.**
+
+* **AC:**
+
+  * JSON logs to stdout and rotated files in `/var/log/ttrpg`.
+  * Log levels controlled by `LOG_LEVEL=INFO|DEBUG` in `.env.dev`.
+* **Tests:**
+
+  * *Functional*: Switch to DEBUG → more fields; ensure secrets redacted.
+
+**US-6.2: As an operator, containers have sane healthchecks/restart policies.**
+
+* **AC:**
+
+  * App healthcheck hits `/healthz`.
+  * DBs use built-in or `CMD-SHELL` healthchecks.
+  * `restart: unless-stopped` for DBs; `on-failure` for app (tunable).
+* **Tests:**
+
+  * *Functional*: Simulate failure; container restarts per policy.
+
+---
+
+## Migration/Transition Tasks
+
+1. **Connection Strings:** Update app config to point to `postgres-dev`, `mongo-dev`, `neo4j-dev`, `redis-dev`.
+2. **Migrations:** Run Postgres migrations; create Mongo indexes; initialize Neo4j constraints.
+3. **Dictionary Writes:** Switch dictionary write path to Mongo (feature-flag to revert if needed).
+4. **Graph Upserts:** Confirm graph builder writes to Neo4j (not old location).
+5. **Ingestion Scheduler:** Enable APScheduler; confirm non-overlapping runs.
+6. **Uploads Volume:** Create `env/dev/uploads` and ensure app reads from `/data/uploads`.
+7. **Logging:** Create `env/dev/logs` → mount to `/var/log/ttrpg`; verify purge job.
+8. **Redis Placeholder:** Ensure app “pings” Redis and reports status, but keeps features off until implemented.
+
+---
+
+## Test Matrix (DEV)
+
+| Area            | Unit                  | Functional                       | Regression                 | Security                       |
+| --------------- | --------------------- | -------------------------------- | -------------------------- | ------------------------------ |
+| Compose up/down | —                     | Start/stop stack; `/healthz` 200 | Service names/ports stable | Non-root images where feasible |
+| App build       | Dockerfile lint       | Build & run `--version`          | Labels present             | No secrets in image layers     |
+| Postgres        | Migrations idempotent | Create user, link player/GM/game | Schema hashes unchanged    | Least-priv user works          |
+| MongoDB         | JSON schema validate  | Insert/read dictionary docs      | Sample docs consistent     | No PII in logs                 |
+| Neo4j           | Upsert idempotent     | Build sample procedure graph     | Node/edge counts stable    | Param queries only             |
+| AstraDB         | —                     | Vector query returns TopK        | —                          | Token from env; redacted       |
+| Redis           | —                     | PING returns OK                  | —                          | Disabled mode respected        |
+| Uploads         | —                     | Ingest from `/data/uploads`      | —                          | Path traversal prevented       |
+| Scheduler       | Cron parse            | Overlap lock works               | —                          | Job limits respected           |
+| Log purge       | —                     | >5-day logs deleted              | —                          | Confined to log dir            |
+| Health          | —                     | Report shows each service        | Schema stable              | 503 on critical deps down      |
+| Scripts         | —                     | build/deploy/test succeed        | Names & flags stable       | Scripts don’t echo secrets     |
+
+---
+
+## Deliverables
+
+* `docker-compose.dev.yml` with all services, volumes, networks, healthchecks.
+* `services/app/Dockerfile` (multi-stage, pinned versions).
+* `scripts/build.ps1`, `scripts/deploy.ps1`, `scripts/test.ps1`, `scripts/seed.ps1`.
+* `env/dev/.env.dev.example` (document required vars), `env/dev/uploads/` and `env/dev/logs/` folders.
+* App changes:
+
+  * `APScheduler` job for ingestion + daily log purge
+  * `/ingest/start` endpoint and CLI
+  * `/healthz` aggregated health
+  * Config loader for Postgres/Mongo/Neo4j/Redis/Astra/OpenAI
+
+---
+
+## Acceptance (Definition of Done)
+
+* One-command bring-up works on Windows Docker Desktop.
+* App successfully uses Postgres (users/relations), Mongo (dictionary), Neo4j (graph), reaches AstraDB/OpenAI.
+* Uploads → ingestion path works; scheduled job runs; logs purge after 5 days.
+* Redis container runs and is reachable; app reports status but doesn’t depend on it.
+* All tests in the matrix pass; scripts documented and committed.
+

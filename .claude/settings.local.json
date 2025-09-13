@@ -5,7 +5,9 @@
       "Bash(.venvScriptsalembic.exe revision --autogenerate -m \"Add source ingestion history table for SHA-based Pass C bypass\")",
       "Bash(\".venv\\Scripts\\alembic.exe\" revision --autogenerate -m \"Add source ingestion history table for SHA-based Pass C bypass\")",
       "Bash(\".venv\\Scripts\\python.exe\":*)",
-      "Bash(scripts/cleanup_logs.bat 1 dev)"
+      "Bash(scripts/cleanup_logs.bat 1 dev)",
+      "Bash(grep:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

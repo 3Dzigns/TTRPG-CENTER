@@ -111,6 +111,11 @@ class PassEGraphBuilder:
         self.env = env
         self.astra_loader = AstraLoader(env)
         self.dict_loader = DictionaryLoader(env)
+        # Graph backend selection (FR-006)
+        self.graph_backend = os.getenv("GRAPH_BACKEND", "files").strip().lower()
+        self.neo4j_uri = os.getenv("NEO4J_URI", "").strip()
+        self.neo4j_user = os.getenv("NEO4J_USER", "").strip()
+        self.neo4j_password = os.getenv("NEO4J_PASSWORD", "").strip()
         
         # Graph storage
         self.nodes: Dict[str, GraphNode] = {}
@@ -178,6 +183,14 @@ class PassEGraphBuilder:
             end_time = time.time()
             processing_time_ms = int((end_time - start_time) * 1000)
             
+            # Optional: write to Neo4j if configured
+            if self.graph_backend == "neo4j" and self.neo4j_uri:
+                try:
+                    self._write_to_neo4j()
+                    logger.info("Neo4j graph upsert completed")
+                except Exception as e:
+                    logger.warning(f"Neo4j graph upsert failed: {e}")
+
             logger.info(f"Pass E completed for job {self.job_id} in {processing_time_ms}ms")
             
             return PassEResult(
@@ -215,6 +228,51 @@ class PassEGraphBuilder:
                 success=False,
                 error_message=str(e)
             )
+
+    def _write_to_neo4j(self) -> None:
+        """Upsert nodes and edges into Neo4j using Bolt driver."""
+        from neo4j import GraphDatabase  # type: ignore
+
+        if not (self.neo4j_uri and self.neo4j_user and self.neo4j_password):
+            raise RuntimeError("Neo4j credentials not configured")
+
+        driver = GraphDatabase.driver(self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password))
+        try:
+            with driver.session() as session:
+                # Best-effort unique constraint
+                try:
+                    session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (n:Node) REQUIRE n.node_id IS UNIQUE")
+                except Exception:
+                    pass
+
+                # Upsert nodes
+                for node in self.nodes.values():
+                    label = "Section" if node.node_type == "section" else ("Chunk" if node.node_type == "chunk" else "Entity")
+                    session.run(
+                        f"MERGE (n:{label} {{node_id: $id}}) SET n.title=$title, n.parent_id=$parent, n.metadata=$metadata",
+                        {
+                            "id": node.node_id,
+                            "title": node.title,
+                            "parent": node.parent_id,
+                            "metadata": node.metadata or {},
+                        },
+                    )
+
+                # Upsert edges
+                for edge in self.edges:
+                    rel_type = "CONTAINS" if edge.edge_type == "contains" else "RELATES_TO"
+                    session.run(
+                        f"MATCH (s {{node_id:$sid}}), (t {{node_id:$tid}}) MERGE (s)-[r:{rel_type}]->(t) SET r.edge_id=$eid, r.edge_type=$etype, r.weight=$w",
+                        {
+                            "sid": edge.source_id,
+                            "tid": edge.target_id,
+                            "eid": edge.edge_id,
+                            "etype": edge.edge_type,
+                            "w": edge.weight,
+                        },
+                    )
+        finally:
+            driver.close()
     
     def _load_vectorized_chunks(self, vectors_file: Path) -> List[Dict[str, Any]]:
         """Load vectorized chunks from Pass D JSONL file"""

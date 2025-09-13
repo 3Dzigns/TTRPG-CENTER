@@ -17,19 +17,17 @@ env_file = Path(__file__).parent.parent / "env" / "dev" / "config" / ".env"
 if env_file.exists():
     load_dotenv(env_file)
 
-# Import our models
+# Import our models and database configuration
 from src_common.models_simple import SQLModel
+from src_common.database_config import DatabaseConfig
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url with environment variable if available
-database_url = os.getenv("APP_DB_PATH")
-if database_url:
-    if not database_url.startswith("sqlite:///"):
-        database_url = f"sqlite:///{database_url}"
-    config.set_main_option("sqlalchemy.url", database_url)
+# Set database URL using the new configuration system
+database_url = DatabaseConfig.get_database_url()
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

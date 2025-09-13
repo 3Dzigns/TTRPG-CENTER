@@ -102,6 +102,9 @@
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewArtifacts('dev')">
                             <i class="bi bi-archive me-1"></i>Artifacts
                         </button>
+                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('dev')">
+                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+                        </button>
                     </div>
                 </div>
             </div>
@@ -138,6 +141,9 @@
                         <button type="button" class="btn btn-sm btn-outline-warning" onclick="viewArtifacts('test')">
                             <i class="bi bi-archive me-1"></i>Artifacts
                         </button>
+                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('test')">
+                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+                        </button>
                     </div>
                 </div>
             </div>
@@ -173,6 +179,9 @@
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-danger" onclick="viewArtifacts('prod')">
                             <i class="bi bi-archive me-1"></i>Artifacts
+                        </button>
+                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('prod')" disabled>
+                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
                         </button>
                     </div>
                 </div>
@@ -380,6 +389,23 @@ function getStatusIcon(status) {
         case 'degraded': return 'exclamation-triangle-fill';
         case 'critical': return 'x-circle-fill';
         default: return 'question-circle-fill';
+    }
+}
+
+async function runNightly(environment) {
+    try {
+        AdminUtils.showToast(`Starting nightly run for ${environment}...`, 'info');
+        const res = await fetch('/api/admin/ingestion/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ env: environment })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        AdminUtils.showToast(`Nightly started for ${data.env} (pid ${data.pid})`, 'success');
+    } catch (e) {
+        console.error('Failed to start nightly:', e);
+        AdminUtils.showToast('Failed to start nightly run', 'danger');
     }
 }
 

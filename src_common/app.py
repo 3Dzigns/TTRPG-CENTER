@@ -6,6 +6,7 @@ Provides health checks, WebSocket support, and environment-aware configuration.
 
 import os
 import time
+import subprocess
 from pathlib import Path
 from typing import Dict, Any
 
@@ -35,6 +36,8 @@ class TTRPGApp:
         self.setup_middleware()
         self.setup_routes()
         self.active_websockets = []
+        # Start background scheduler (if enabled)
+        self._maybe_start_scheduler()
         
     def setup_middleware(self):
         """Configure middleware for the application."""
@@ -236,6 +239,128 @@ class TTRPGApp:
                 "sent": sent_count,
                 "active_connections": len(self.active_websockets)
             }
+
+        @self.app.post("/api/admin/ingestion/run")
+        async def admin_run_nightly(payload: Dict[str, Any]):
+            """Kick off an ad hoc nightly ingestion for the specified environment.
+
+            Body JSON:
+            - env: dev|test|prod (default: current APP_ENV)
+            - uploads: optional path (defaults to UPLOADS_DIR or /data/uploads)
+            - artifacts_base: optional path (defaults to ARTIFACTS_PATH or /app/artifacts)
+            - max_concurrent: optional int (defaults to NIGHTLY_MAX_CONCURRENT or 2)
+            """
+            try:
+                env = (payload or {}).get('env') or os.getenv('APP_ENV', 'dev')
+                uploads = (payload or {}).get('uploads') or os.getenv('UPLOADS_DIR', '/data/uploads')
+                artifacts = (payload or {}).get('artifacts_base') or os.getenv('ARTIFACTS_PATH', '/app/artifacts')
+                max_conc = str((payload or {}).get('max_concurrent') or os.getenv('NIGHTLY_MAX_CONCURRENT', '2'))
+
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                log_dir = os.path.join('env', env, 'logs')
+                os.makedirs(log_dir, exist_ok=True)
+                log_file = os.path.abspath(os.path.join(log_dir, f'nightly_adhoc_{ts}.log'))
+
+                cmd = [
+                    os.getenv('PYTHON', 'python'),
+                    'scripts/run_nightly_ingestion.py',
+                    '--env', env,
+                    '--uploads', uploads,
+                    '--artifacts-base', artifacts,
+                    '--log-file', log_file,
+                    '--max-concurrent', max_conc
+                ]
+
+                # Spawn non-blocking so API returns immediately
+                proc = subprocess.Popen(cmd)
+
+                return JSONResponse(content={
+                    'status': 'started',
+                    'env': env,
+                    'pid': proc.pid,
+                    'log_file': log_file,
+                    'command': ' '.join(cmd),
+                })
+            except Exception as e:
+                logger.error(f"Failed to start ad hoc nightly run: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+    def _maybe_start_scheduler(self) -> None:
+        """Start APScheduler background jobs for nightly ingestion and log purge if enabled."""
+        enabled = os.getenv('ENABLE_SCHEDULER', 'false').strip().lower() in ('1','true','yes')
+        if not enabled:
+            return
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            from apscheduler.triggers.cron import CronTrigger
+        except Exception as e:
+            logger.warning(f"Scheduler requested but APScheduler not available: {e}")
+            return
+
+        scheduler = BackgroundScheduler()
+
+        def run_nightly() -> None:
+            try:
+                env = os.getenv('APP_ENV', 'dev')
+                uploads = os.getenv('UPLOADS_DIR', '/data/uploads')
+                artifacts = os.getenv('ARTIFACTS_PATH', '/app/artifacts')
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                log_dir = '/var/log/ttrpg'
+                os.makedirs(log_dir, exist_ok=True)
+                log_file = os.path.join(log_dir, f'nightly_{ts}.log')
+                max_conc = os.getenv('NIGHTLY_MAX_CONCURRENT', '2')
+                cmd = [
+                    os.getenv('PYTHON', 'python'),
+                    'scripts/run_nightly_ingestion.py',
+                    '--env', env,
+                    '--uploads', uploads,
+                    '--artifacts-base', artifacts,
+                    '--log-file', log_file,
+                    '--max-concurrent', str(max_conc)
+                ]
+                logger.info(f"Scheduler: starting nightly ingestion: {' '.join(cmd)}")
+                subprocess.run(cmd, check=False)
+            except Exception as e:
+                logger.error(f"Scheduler nightly ingestion failed: {e}")
+
+        def purge_logs() -> None:
+            try:
+                log_dir = '/var/log/ttrpg'
+                retention = int(os.getenv('LOG_RETENTION_DAYS', '5') or '5')
+                now = time.time()
+                if not os.path.isdir(log_dir):
+                    return
+                removed = 0
+                for name in os.listdir(log_dir):
+                    path = os.path.join(log_dir, name)
+                    try:
+                        if os.path.isfile(path):
+                            age_days = (now - os.path.getmtime(path)) / 86400.0
+                            if age_days > retention:
+                                os.remove(path)
+                                removed += 1
+                    except Exception:
+                        continue
+                if removed:
+                    logger.info(f"Scheduler: purged {removed} old log files from {log_dir}")
+            except Exception as e:
+                logger.error(f"Scheduler log purge failed: {e}")
+
+        ing_cron = os.getenv('INGEST_CRON', '').strip()
+        if ing_cron:
+            try:
+                parts = ing_cron.split()
+                trigger = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4])
+                scheduler.add_job(run_nightly, trigger, id='nightly_ingest', replace_existing=True)
+            except Exception as e:
+                logger.warning(f"Invalid INGEST_CRON '{ing_cron}': {e}; using default 02:00")
+                scheduler.add_job(run_nightly, CronTrigger(hour=2, minute=0), id='nightly_ingest', replace_existing=True)
+        else:
+            scheduler.add_job(run_nightly, CronTrigger(hour=2, minute=0), id='nightly_ingest', replace_existing=True)
+
+        scheduler.add_job(purge_logs, CronTrigger(hour=3, minute=30), id='purge_logs', replace_existing=True)
+        scheduler.start()
+        logger.info("Background scheduler started (nightly ingestion + log purge)")
     
     async def broadcast_to_websockets(self, message: Dict[str, Any]):
         """Utility method to broadcast messages to all WebSocket connections."""

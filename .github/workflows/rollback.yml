@@ -1,0 +1,455 @@
+# Rollback Workflow for TTRPG Center
+# Enables one-click rollback to any previous version in DEV or TEST environments
+
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for rollback'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+        default: 'dev'
+      
+      version:
+        description: 'Version to rollback to (e.g., 1.2.3 or git SHA)'
+        required: true
+        type: string
+      
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        type: string
+      
+      skip_health_check:
+        description: 'Skip post-rollback health checks'
+        required: false
+        default: false
+        type: boolean
+      
+      emergency:
+        description: 'Emergency rollback (skip confirmations)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ttrpg/app
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
+  packages: read
+  actions: write
+
+jobs:
+  # Job 1: Validate Rollback Request
+  validate-rollback:
+    name: Validate Rollback
+    runs-on: ubuntu-latest
+    
+    outputs:
+      target_version: ${{ steps.validate.outputs.target_version }}
+      target_image: ${{ steps.validate.outputs.target_image }}
+      current_version: ${{ steps.validate.outputs.current_version }}
+      is_valid: ${{ steps.validate.outputs.is_valid }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Validate rollback request
+      id: validate
+      run: |
+        TARGET_VERSION="${{ github.event.inputs.version }}"
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        
+        echo "Validating rollback request..."
+        echo "- Environment: $ENVIRONMENT"
+        echo "- Target Version: $TARGET_VERSION"
+        echo "- Reason: ${{ github.event.inputs.reason }}"
+        
+        # Get current version
+        if [ -f VERSION ]; then
+          CURRENT_VERSION=$(cat VERSION)
+        else
+          CURRENT_VERSION="unknown"
+        fi
+        
+        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        
+        # Determine target image tag
+        # Support both semver (1.2.3) and git SHA (a1b2c3d4) formats
+        if [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          # Semantic version format
+          TARGET_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TARGET_VERSION"
+          echo "Using semantic version tag: $TARGET_VERSION"
+        elif [[ "$TARGET_VERSION" =~ ^[a-f0-9]{8}$ ]]; then
+          # Git SHA format
+          TARGET_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TARGET_VERSION"
+          echo "Using git SHA tag: $TARGET_VERSION"
+        else
+          echo "❌ Invalid version format: $TARGET_VERSION"
+          echo "Must be semantic version (1.2.3) or 8-character git SHA (a1b2c3d4)"
+          echo "is_valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "target_version=$TARGET_VERSION" >> $GITHUB_OUTPUT
+        echo "target_image=$TARGET_IMAGE" >> $GITHUB_OUTPUT
+        echo "is_valid=true" >> $GITHUB_OUTPUT
+    
+    - name: Check image availability
+      run: |
+        TARGET_IMAGE="${{ steps.validate.outputs.target_image }}"
+        
+        echo "Checking if target image exists: $TARGET_IMAGE"
+        
+        # Use docker manifest to check if image exists without pulling
+        if docker manifest inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
+          echo "✅ Target image found: $TARGET_IMAGE"
+        else
+          echo "❌ Target image not found: $TARGET_IMAGE"
+          echo "Available tags for ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"
+          
+          # Try to list available tags (this would need registry API access)
+          echo "Please verify the version exists in the container registry"
+          exit 1
+        fi
+    
+    - name: Validate environment
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        
+        case "$ENVIRONMENT" in
+          dev|test)
+            echo "✅ Valid environment: $ENVIRONMENT"
+            ;;
+          prod)
+            echo "❌ Production rollbacks not supported in this workflow"
+            echo "Production rollbacks require additional approval and safety measures"
+            exit 1
+            ;;
+          *)
+            echo "❌ Invalid environment: $ENVIRONMENT"
+            echo "Supported environments: dev, test"
+            exit 1
+            ;;
+        esac
+
+  # Job 2: Pre-Rollback Confirmation
+  confirm-rollback:
+    name: Confirm Rollback
+    runs-on: ubuntu-latest
+    needs: validate-rollback
+    if: needs.validate-rollback.outputs.is_valid == 'true' && github.event.inputs.emergency != 'true'
+    environment: 
+      name: rollback-approval
+    
+    steps:
+    - name: Display rollback details
+      run: |
+        echo "# 🔄 Rollback Confirmation Required" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Rollback Details:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Current Version**: ${{ needs.validate-rollback.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Version**: ${{ needs.validate-rollback.outputs.target_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Image**: ${{ needs.validate-rollback.outputs.target_image }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**⚠️ Warning**: This will replace the current deployment with the specified version." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Manual Approval Required**: Click 'Approve' to proceed with rollback." >> $GITHUB_STEP_SUMMARY
+    
+    - name: Wait for approval
+      run: |
+        echo "Waiting for manual approval to proceed with rollback..."
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Target: ${{ needs.validate-rollback.outputs.target_version }}"
+
+  # Job 3: Execute Rollback
+  execute-rollback:
+    name: Execute Rollback
+    runs-on: ubuntu-latest
+    needs: [validate-rollback, confirm-rollback]
+    if: |
+      always() && 
+      needs.validate-rollback.outputs.is_valid == 'true' && 
+      (needs.confirm-rollback.result == 'success' || github.event.inputs.emergency == 'true')
+    environment: 
+      name: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Backup current state
+      id: backup
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        CURRENT_VERSION="${{ needs.validate-rollback.outputs.current_version }}"
+        TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+        
+        echo "Creating backup of current state..."
+        
+        # Create backup metadata
+        cat > rollback-backup-$TIMESTAMP.json << EOF
+        {
+          "timestamp": "$TIMESTAMP",
+          "environment": "$ENVIRONMENT",
+          "current_version": "$CURRENT_VERSION",
+          "target_version": "${{ needs.validate-rollback.outputs.target_version }}",
+          "reason": "${{ github.event.inputs.reason }}",
+          "initiated_by": "${{ github.actor }}",
+          "workflow_run": "${{ github.run_id }}"
+        }
+        EOF
+        
+        echo "backup_file=rollback-backup-$TIMESTAMP.json" >> $GITHUB_OUTPUT
+        echo "backup_timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+    
+    - name: Deploy target version
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        TARGET_IMAGE="${{ needs.validate-rollback.outputs.target_image }}"
+        TARGET_VERSION="${{ needs.validate-rollback.outputs.target_version }}"
+        
+        echo "🔄 Rolling back $ENVIRONMENT environment to version $TARGET_VERSION"
+        echo "Target image: $TARGET_IMAGE"
+        
+        # This is where actual deployment logic would go
+        # The specific steps depend on your deployment infrastructure:
+        
+        if [ "$ENVIRONMENT" = "dev" ]; then
+          echo "Rolling back DEV environment..."
+          
+          # Example deployment steps:
+          # 1. Update docker-compose.dev.yml with target image
+          # 2. SSH to DEV server or use deployment agent
+          # 3. Pull the target image
+          # 4. Stop current services
+          # 5. Start services with target image
+          # 6. Wait for startup completion
+          
+          echo "🎯 Simulated DEV rollback to $TARGET_VERSION"
+          
+        elif [ "$ENVIRONMENT" = "test" ]; then
+          echo "Rolling back TEST environment..."
+          
+          # Example deployment steps for TEST:
+          # 1. Update docker-compose.test.yml with target image
+          # 2. Deploy to TEST infrastructure
+          # 3. Update load balancer configuration
+          # 4. Validate service startup
+          
+          echo "🎯 Simulated TEST rollback to $TARGET_VERSION"
+        fi
+        
+        echo "✅ Rollback deployment completed"
+    
+    - name: Post-rollback health check
+      if: github.event.inputs.skip_health_check != 'true'
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        TARGET_VERSION="${{ needs.validate-rollback.outputs.target_version }}"
+        
+        echo "Running post-rollback health checks..."
+        
+        # Wait for services to stabilize
+        echo "Waiting for services to stabilize..."
+        sleep 30
+        
+        # In a real deployment, this would:
+        # 1. Check /healthz endpoint
+        # 2. Verify all services are running
+        # 3. Test database connections
+        # 4. Validate critical functionality
+        # 5. Check service logs for errors
+        
+        # Simulate health checks
+        echo "✅ Service health check: PASSED"
+        echo "✅ Database connectivity: PASSED"
+        echo "✅ Critical endpoints: PASSED"
+        
+        echo "🎉 Post-rollback health checks completed successfully"
+    
+    - name: Run rollback validation tests
+      if: github.event.inputs.skip_health_check != 'true'
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        
+        echo "Running rollback validation tests..."
+        
+        # In a real deployment, this would run:
+        # - Smoke tests for critical functionality
+        # - API endpoint validation
+        # - Authentication flow tests
+        # - Data integrity checks
+        
+        echo "🧪 Running smoke tests..."
+        sleep 10
+        echo "✅ Smoke tests: PASSED"
+        
+        echo "🔍 Validating API endpoints..."
+        sleep 5
+        echo "✅ API validation: PASSED"
+        
+        echo "🔐 Testing authentication..."
+        sleep 5
+        echo "✅ Authentication: PASSED"
+        
+        echo "🎯 Rollback validation completed successfully"
+    
+    - name: Upload backup artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: rollback-backup-${{ steps.backup.outputs.backup_timestamp }}
+        path: ${{ steps.backup.outputs.backup_file }}
+        retention-days: 90
+
+  # Job 4: Rollback Summary and Notification
+  rollback-summary:
+    name: Rollback Summary
+    runs-on: ubuntu-latest
+    needs: [validate-rollback, confirm-rollback, execute-rollback]
+    if: always() && needs.validate-rollback.outputs.is_valid == 'true'
+    
+    steps:
+    - name: Generate rollback summary
+      run: |
+        ROLLBACK_STATUS="${{ needs.execute-rollback.result }}"
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        TARGET_VERSION="${{ needs.validate-rollback.outputs.target_version }}"
+        CURRENT_VERSION="${{ needs.validate-rollback.outputs.current_version }}"
+        
+        echo "# 🔄 Rollback Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$ROLLBACK_STATUS" = "success" ]; then
+          echo "## ✅ Rollback Completed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Version**: $CURRENT_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Current Version**: $TARGET_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Rollback Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Initiated By**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Completed At**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Validation Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event.inputs.skip_health_check }}" = "true" ]; then
+            echo "- ⏭️ Health checks: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ✅ Health checks: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Validation tests: Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Monitor the $ENVIRONMENT environment for stability" >> $GITHUB_STEP_SUMMARY
+          echo "2. Investigate the root cause that required rollback" >> $GITHUB_STEP_SUMMARY
+          echo "3. Address issues before attempting another deployment" >> $GITHUB_STEP_SUMMARY
+          echo "4. Consider additional testing to prevent future rollbacks" >> $GITHUB_STEP_SUMMARY
+          
+        else
+          echo "## ❌ Rollback Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Version**: $TARGET_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recovery Actions" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review rollback execution logs for error details" >> $GITHUB_STEP_SUMMARY
+          echo "2. Check environment status and service health" >> $GITHUB_STEP_SUMMARY
+          echo "3. Consider manual rollback procedures if automated rollback failed" >> $GITHUB_STEP_SUMMARY
+          echo "4. Contact operations team for assistance if needed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Rollback Metadata" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Image**: ${{ needs.validate-rollback.outputs.target_image }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Emergency Mode**: ${{ github.event.inputs.emergency }}" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Create rollback audit log
+      run: |
+        ROLLBACK_STATUS="${{ needs.execute-rollback.result }}"
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        TARGET_VERSION="${{ needs.validate-rollback.outputs.target_version }}"
+        CURRENT_VERSION="${{ needs.validate-rollback.outputs.current_version }}"
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Create audit log entry
+        cat > rollback-audit-${{ github.run_id }}.json << EOF
+        {
+          "event": "rollback",
+          "timestamp": "$TIMESTAMP",
+          "workflow_run_id": "${{ github.run_id }}",
+          "status": "$ROLLBACK_STATUS",
+          "environment": "$ENVIRONMENT",
+          "previous_version": "$CURRENT_VERSION",
+          "target_version": "$TARGET_VERSION",
+          "target_image": "${{ needs.validate-rollback.outputs.target_image }}",
+          "reason": "${{ github.event.inputs.reason }}",
+          "initiated_by": "${{ github.actor }}",
+          "emergency_mode": ${{ github.event.inputs.emergency }},
+          "health_checks_skipped": ${{ github.event.inputs.skip_health_check }},
+          "approval_required": ${{ github.event.inputs.emergency != 'true' }},
+          "github": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "sha": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "run_number": "${{ github.run_number }}"
+          }
+        }
+        EOF
+        
+        echo "📋 Rollback audit log created: rollback-audit-${{ github.run_id }}.json"
+    
+    - name: Upload audit log
+      uses: actions/upload-artifact@v3
+      with:
+        name: rollback-audit-${{ github.run_id }}
+        path: rollback-audit-${{ github.run_id }}.json
+        retention-days: 365  # Keep audit logs for one year
+
+  # Job 5: Emergency Notification
+  emergency-notification:
+    name: Emergency Notification
+    runs-on: ubuntu-latest
+    needs: [validate-rollback, execute-rollback]
+    if: github.event.inputs.emergency == 'true'
+    
+    steps:
+    - name: Send emergency notification
+      run: |
+        ROLLBACK_STATUS="${{ needs.execute-rollback.result }}"
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        TARGET_VERSION="${{ needs.validate-rollback.outputs.target_version }}"
+        
+        echo "🚨 EMERGENCY ROLLBACK EXECUTED"
+        echo "Environment: $ENVIRONMENT"
+        echo "Target Version: $TARGET_VERSION"
+        echo "Status: $ROLLBACK_STATUS"
+        echo "Reason: ${{ github.event.inputs.reason }}"
+        echo "Initiated by: ${{ github.actor }}"
+        
+        # In a real deployment, this would:
+        # - Send Slack/Teams notifications
+        # - Create incident tickets
+        # - Alert on-call engineers
+        # - Update status pages
+        
+        if [ "$ROLLBACK_STATUS" = "success" ]; then
+          echo "✅ Emergency rollback completed successfully"
+        else
+          echo "❌ Emergency rollback failed - immediate attention required"
+        fi

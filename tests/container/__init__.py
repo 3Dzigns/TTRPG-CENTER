@@ -1,0 +1,1 @@
+# Container tests for FR-006 Docker implementation

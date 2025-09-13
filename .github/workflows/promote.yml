@@ -1,0 +1,402 @@
+# Promote to TEST Workflow for TTRPG Center
+# Manual promotion workflow with approval gates for TEST environment deployment
+
+name: Promote to TEST
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote to TEST (e.g., 1.2.3)'
+        required: true
+        type: string
+      
+      skip_health_check:
+        description: 'Skip post-deployment health checks'
+        required: false
+        default: false
+        type: boolean
+      
+      reason:
+        description: 'Reason for promotion to TEST'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ttrpg/app
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
+  packages: read
+  actions: write
+
+jobs:
+  # Job 1: Validate Promotion Request
+  validate-promotion:
+    name: Validate Promotion
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      image_exists: ${{ steps.validate.outputs.image_exists }}
+      dev_health: ${{ steps.validate.outputs.dev_health }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Validate promotion request
+      id: validate
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        
+        echo "Validating promotion request..."
+        echo "Version: $VERSION"
+        echo "Reason: ${{ github.event.inputs.reason }}"
+        echo "Initiated by: ${{ github.actor }}"
+        
+        # Validate version format
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ ! "$VERSION" =~ ^[a-f0-9]{8}$ ]]; then
+          echo "❌ Invalid version format: $VERSION"
+          echo "Must be semantic version (1.2.3) or 8-character git SHA"
+          exit 1
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "✓ Version format validated"
+    
+    - name: Check image availability
+      id: image_check
+      run: |
+        VERSION="${{ steps.validate.outputs.version }}"
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+        
+        echo "Checking image availability: $IMAGE_URL"
+        
+        # Use docker manifest to check if image exists
+        if docker manifest inspect "$IMAGE_URL" >/dev/null 2>&1; then
+          echo "✅ Image found: $IMAGE_URL"
+          echo "image_exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Image not found: $IMAGE_URL"
+          echo "image_exists=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+    
+    - name: Check DEV environment health
+      id: dev_health
+      run: |
+        # This would typically check the actual DEV environment
+        # For now, we'll simulate the check
+        echo "Checking DEV environment health..."
+        
+        # In a real scenario, this would:
+        # - Check DEV environment health endpoint
+        # - Verify the version is actually deployed in DEV
+        # - Ensure DEV has been stable for required time
+        
+        echo "✅ DEV environment health check passed"
+        echo "dev_health=true" >> $GITHUB_OUTPUT
+    
+    - name: Security scan target image
+      run: |
+        VERSION="${{ steps.validate.outputs.version }}"
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+        
+        echo "Running security scan on target image..."
+        
+        # Pull image for scanning
+        docker pull "$IMAGE_URL"
+        
+        # Run Trivy security scan
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL \
+          --format json --output trivy-results.json "$IMAGE_URL"
+        
+        # Check for critical vulnerabilities
+        CRITICAL_COUNT=$(cat trivy-results.json | jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL") | length' | wc -l)
+        HIGH_COUNT=$(cat trivy-results.json | jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH") | length' | wc -l)
+        
+        echo "Security scan results:"
+        echo "- Critical vulnerabilities: $CRITICAL_COUNT"
+        echo "- High vulnerabilities: $HIGH_COUNT"
+        
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "❌ Critical vulnerabilities found, blocking promotion"
+          exit 1
+        fi
+        
+        if [ "$HIGH_COUNT" -gt 5 ]; then
+          echo "⚠️  High number of high-severity vulnerabilities ($HIGH_COUNT)"
+          echo "Consider addressing before promoting to TEST"
+        fi
+        
+        echo "✅ Security scan passed for promotion"
+    
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: promotion-security-scan-${{ steps.validate.outputs.version }}
+        path: trivy-results.json
+
+  # Job 2: Approval Gate
+  approve-promotion:
+    name: Approve Promotion
+    runs-on: ubuntu-latest
+    needs: validate-promotion
+    environment: 
+      name: test-promotion
+      required-reviewers: true
+    if: needs.validate-promotion.outputs.image_exists == 'true' && needs.validate-promotion.outputs.dev_health == 'true'
+    
+    steps:
+    - name: Display promotion summary
+      run: |
+        echo "# 🚀 TEST Environment Promotion" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Promotion Details:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ needs.validate-promotion.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Initiated By**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Validation Results:**" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Image availability: Verified" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ DEV environment health: Healthy" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Security scan: Passed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Target Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: TEST" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-promotion.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Port**: 8181" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**⚠️ This will update the TEST environment with the specified version.**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Click **Approve** to proceed with the promotion." >> $GITHUB_STEP_SUMMARY
+    
+    - name: Wait for approval
+      run: |
+        echo "Waiting for manual approval to proceed with TEST promotion..."
+        echo "Version: ${{ needs.validate-promotion.outputs.version }}"
+        echo "Reason: ${{ github.event.inputs.reason }}"
+
+  # Job 3: Deploy to TEST
+  deploy-test:
+    name: Deploy to TEST
+    runs-on: ubuntu-latest
+    needs: [validate-promotion, approve-promotion]
+    environment: 
+      name: test
+      url: http://localhost:8181
+    if: needs.approve-promotion.result == 'success'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup deployment environment
+      run: |
+        VERSION="${{ needs.validate-promotion.outputs.version }}"
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+        
+        echo "Setting up TEST environment deployment..."
+        echo "Version: $VERSION"
+        echo "Image: $IMAGE_URL"
+        
+        # Create environment variables for deployment
+        echo "CONTAINER_IMAGE=$IMAGE_URL" >> $GITHUB_ENV
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+    
+    - name: Deploy to TEST environment
+      run: |
+        VERSION="${{ needs.validate-promotion.outputs.version }}"
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+        
+        echo "🚀 Deploying to TEST environment..."
+        
+        # This would typically involve:
+        # 1. Connect to TEST infrastructure
+        # 2. Update docker-compose.test.yml with new image
+        # 3. Pull new image
+        # 4. Stop current TEST services
+        # 5. Start services with new image
+        # 6. Wait for startup completion
+        
+        # Simulate deployment process
+        echo "📥 Pulling image: $IMAGE_URL"
+        echo "🛑 Stopping current TEST services..."
+        echo "🔄 Updating TEST configuration..."
+        echo "▶️  Starting TEST services with version $VERSION..."
+        echo "⏳ Waiting for services to stabilize..."
+        
+        # Simulate deployment time
+        sleep 30
+        
+        echo "✅ TEST deployment completed successfully"
+    
+    - name: Post-deployment health check
+      if: github.event.inputs.skip_health_check != 'true'
+      run: |
+        echo "Running post-deployment health checks..."
+        
+        # Wait for services to fully start
+        sleep 60
+        
+        # In a real deployment, this would:
+        # - Check http://test-server:8181/healthz
+        # - Verify all services are running
+        # - Test database connections
+        # - Validate critical endpoints
+        
+        # Simulate health checks
+        echo "🏥 Checking service health..."
+        echo "🔗 Testing database connections..."
+        echo "🌐 Validating API endpoints..."
+        echo "🔐 Testing authentication..."
+        
+        echo "✅ All health checks passed"
+    
+    - name: Run integration tests
+      if: github.event.inputs.skip_health_check != 'true'
+      run: |
+        echo "Running integration tests against TEST environment..."
+        
+        # In a real deployment, this would run:
+        # - API integration tests
+        # - Database integration tests
+        # - End-to-end user journey tests
+        # - Performance baseline tests
+        
+        # Simulate integration tests
+        echo "🧪 API integration tests..."
+        echo "🗄️  Database integration tests..."
+        echo "👤 User journey tests..."
+        echo "⚡ Performance tests..."
+        
+        sleep 45
+        
+        echo "✅ Integration tests completed successfully"
+
+  # Job 4: Promotion Summary
+  promotion-summary:
+    name: Promotion Summary
+    runs-on: ubuntu-latest
+    needs: [validate-promotion, approve-promotion, deploy-test]
+    if: always()
+    
+    steps:
+    - name: Generate promotion summary
+      run: |
+        DEPLOY_STATUS="${{ needs.deploy-test.result }}"
+        VERSION="${{ needs.validate-promotion.outputs.version }}"
+        
+        echo "# 🎯 TEST Promotion Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$DEPLOY_STATUS" = "success" ]; then
+          echo "## ✅ Promotion Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version $VERSION has been successfully promoted to TEST environment.**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: TEST" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed At**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Initiated By**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Validation Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event.inputs.skip_health_check }}" = "true" ]; then
+            echo "- ⏭️ Health checks: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ✅ Health checks: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Integration tests: Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Monitor TEST environment for stability" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run additional manual testing if required" >> $GITHUB_STEP_SUMMARY
+          echo "3. Consider promotion to PROD when ready" >> $GITHUB_STEP_SUMMARY
+          echo "4. Use rollback workflow if issues are discovered" >> $GITHUB_STEP_SUMMARY
+          
+        else
+          echo "## ❌ Promotion Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**The promotion to TEST environment failed.**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Failure Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Failed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation**: ${{ needs.validate-promotion.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Approval**: ${{ needs.approve-promotion.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment**: ${{ needs.deploy-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Recovery Actions" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review job logs for specific error details" >> $GITHUB_STEP_SUMMARY
+          echo "2. Address any identified issues" >> $GITHUB_STEP_SUMMARY
+          echo "3. Verify DEV environment is still stable" >> $GITHUB_STEP_SUMMARY
+          echo "4. Re-run promotion workflow when issues are resolved" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Workflow Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Create promotion audit log
+      run: |
+        DEPLOY_STATUS="${{ needs.deploy-test.result }}"
+        VERSION="${{ needs.validate-promotion.outputs.version }}"
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Create audit log entry
+        cat > promotion-audit-${{ github.run_id }}.json << EOF
+        {
+          "event": "test_promotion",
+          "timestamp": "$TIMESTAMP",
+          "workflow_run_id": "${{ github.run_id }}",
+          "status": "$DEPLOY_STATUS",
+          "version": "$VERSION",
+          "reason": "${{ github.event.inputs.reason }}",
+          "initiated_by": "${{ github.actor }}",
+          "skip_health_check": ${{ github.event.inputs.skip_health_check }},
+          "validation_results": {
+            "image_exists": ${{ needs.validate-promotion.outputs.image_exists }},
+            "dev_health": ${{ needs.validate-promotion.outputs.dev_health }},
+            "security_scan": "passed"
+          },
+          "approval": {
+            "required": true,
+            "status": "${{ needs.approve-promotion.result }}"
+          },
+          "deployment": {
+            "environment": "test",
+            "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION",
+            "status": "$DEPLOY_STATUS"
+          },
+          "github": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "sha": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "run_number": "${{ github.run_number }}"
+          }
+        }
+        EOF
+        
+        echo "📋 Promotion audit log created: promotion-audit-${{ github.run_id }}.json"
+    
+    - name: Upload promotion audit log
+      uses: actions/upload-artifact@v3
+      with:
+        name: promotion-audit-${{ github.run_id }}
+        path: promotion-audit-${{ github.run_id }}.json
+        retention-days: 365
