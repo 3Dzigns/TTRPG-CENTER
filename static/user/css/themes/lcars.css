@@ -78,6 +78,15 @@ html body.theme-lcars {
     background-color: #000000 !important;
 }
 
+/* SUPER SPECIFIC DEBUG CSS - VERY HIGH PRIORITY */
+html body.theme-lcars,
+html body[data-theme="lcars"],
+body.theme-lcars[data-theme="lcars"] {
+    background: #000000 !important;
+    background-color: #000000 !important;
+    border: 5px solid #ff9900 !important; /* DEBUG BORDER - should be visible if working */
+}
+
 /* Force all major containers to have proper background */
 .main-content,
 .interface-layout,
@@ -85,6 +94,25 @@ html body.theme-lcars {
 .right-panel {
     background: var(--primary-bg) !important;
     color: var(--primary-text) !important;
+}
+
+/* NUCLEAR OPTION - OVERRIDE EVERYTHING */
+html.theme-lcars,
+html body.theme-lcars,
+html body[data-theme="lcars"],
+body[data-theme="lcars"].theme-lcars {
+    background: #000000 !important;
+    background-color: #000000 !important;
+    background-image: none !important;
+}
+
+/* Also ensure the main sections get the theme */
+.theme-lcars .main-content,
+.theme-lcars .interface-layout,
+body[data-theme="lcars"] .main-content,
+body[data-theme="lcars"] .interface-layout {
+    background: #000000 !important;
+    color: #ffffff !important;
 }
 
 /* Header */

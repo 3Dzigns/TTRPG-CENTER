@@ -65,8 +65,9 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
 
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        # Send structured JSON to match frontend JSON.parse expectations
+        await websocket.send_json(message)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections[:]:  # Create a copy to avoid modification during iteration
@@ -196,7 +197,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "timestamp": time.time(),
                 "server": "admin"
             }
-            await manager.send_personal_message(str(response), websocket)
+            await manager.send_personal_message(response, websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -224,4 +225,36 @@ async def admin_health_check():
         }
     except Exception as e:
         logger.error(f"Admin health check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Cache control endpoints used by the Admin UI
+@admin_router.post("/api/cache/{environment}/enable")
+async def enable_cache(environment: str):
+    try:
+        ok = await cache_service.enable_cache(environment)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to enable cache")
+        return {"status": "enabled", "environment": environment}
+    except Exception as e:
+        logger.error(f"Enable cache error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/cache/{environment}/disable")
+async def disable_cache(environment: str):
+    try:
+        ok = await cache_service.disable_cache(environment)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to disable cache")
+        return {"status": "disabled", "environment": environment}
+    except Exception as e:
+        logger.error(f"Disable cache error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/cache/{environment}/clear")
+async def clear_cache(environment: str):
+    try:
+        result = await cache_service.clear_cache(environment)
+        return result
+    except Exception as e:
+        logger.error(f"Clear cache error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

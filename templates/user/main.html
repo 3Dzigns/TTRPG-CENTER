@@ -139,7 +139,8 @@
     window.TTRPG_CONFIG = {
         sessionId: '{{ session_id }}',
         apiBase: '/api',
-        wsEndpoint: '/ws/{{ session_id }}',
+        // Use user UI websocket endpoint; sessionId passed as query param by client
+        wsEndpoint: '/ws/user',
         oauthBase: '/auth/oauth'
     };
 

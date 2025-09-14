@@ -52,7 +52,15 @@ class WebSocketClient {
         
         try {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/${this.sessionId}`;
+            // Prefer configured endpoint; fall back to user UI endpoint
+            const endpoint = (window.TTRPG_CONFIG && window.TTRPG_CONFIG.wsEndpoint) ? window.TTRPG_CONFIG.wsEndpoint : '/ws/user';
+            // Ensure endpoint starts with '/'
+            const path = endpoint.startsWith('ws') || endpoint.startsWith('wss') || endpoint.startsWith('http')
+                ? endpoint
+                : `${protocol}//${window.location.host}${endpoint}`;
+            // Pass sessionId as query param for servers that expect it
+            const sep = path.includes('?') ? '&' : '?';
+            const wsUrl = path.startsWith('ws') ? `${path}${sep}sessionId=${encodeURIComponent(this.sessionId)}` : `${path}`;
             
             this.ws = new WebSocket(wsUrl);
             

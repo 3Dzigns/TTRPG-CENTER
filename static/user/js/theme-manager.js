@@ -9,17 +9,18 @@ class ThemeManager {
             lcars: {
                 name: 'LCARS',
                 description: 'Star Trek LCARS-inspired interface',
-                cssFile: '/static/css/themes/lcars.css'
+                // Correct path: user theme CSS lives under /static/user/css/themes
+                cssFile: '/static/user/css/themes/lcars.css'
             },
             terminal: {
                 name: 'Terminal',
                 description: 'Classic retro terminal interface',
-                cssFile: '/static/css/themes/terminal.css'
+                cssFile: '/static/user/css/themes/terminal.css'
             },
             classic: {
                 name: 'Classic',
                 description: 'Clean modern interface',
-                cssFile: '/static/css/themes/classic.css'
+                cssFile: '/static/user/css/themes/classic.css'
             }
         };
         

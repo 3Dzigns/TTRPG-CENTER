@@ -24,7 +24,7 @@ param(
     [string]$Service = $null,
     
     [Parameter(Mandatory=$false)]
-    [switch]$Verbose
+    [switch]$VerboseOutput
 )
 
 # Script configuration
@@ -106,7 +106,7 @@ function Start-Stack {
     
     $cmd = Get-ComposeCommand -ExtraArgs $composeArgs
     
-    if ($Verbose) {
+    if ($VerboseOutput) {
         Write-Status "Execute: $($cmd -join ' ')"
     }
     
@@ -222,7 +222,7 @@ function Test-HealthEndpoint {
                 $health = $response.Content | ConvertFrom-Json
                 Write-Status "Health check passed - Status: $($health.status)" -Level "Success"
                 
-                if ($Verbose -and $health.services) {
+                if ($VerboseOutput -and $health.services) {
                     Write-Status "Service Status:"
                     foreach ($service in $health.services.PSObject.Properties) {
                         Write-Status "  $($service.Name): $($service.Value.status)"
@@ -271,7 +271,7 @@ try {
     # Check prerequisites
     Test-Prerequisites
     
-    if ($Verbose) {
+    if ($VerboseOutput) {
         Show-ComposeInfo
     }
     

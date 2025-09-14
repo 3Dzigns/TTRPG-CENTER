@@ -4,8 +4,7 @@
 name: Release Pipeline
 
 on:
-  push:
-    branches: [ main ]
+  # Disabled auto-triggers for local-only development; run manually when needed.
   workflow_dispatch:
     inputs:
       bump_type:

@@ -223,7 +223,8 @@
         
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${location.host}/ws`);
+            // Admin WS endpoint
+            ws = new WebSocket(`${protocol}//${location.host}/ws/admin`);
             
             ws.onopen = function() {
                 console.log('WebSocket connected');
