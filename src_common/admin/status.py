@@ -8,6 +8,7 @@ import os
 import json
 import time
 import psutil
+import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -104,26 +105,12 @@ class AdminStatusService:
             port = config.get('port', 0)
             websocket_port = config.get('websocket_port', 0)
             
-            # Check environment directory structure
+            # Check environment directory structure (informational only)
             env_path = Path(f"env/{env_name}")
             has_structure = all(
-                (env_path / subdir).exists() 
+                (env_path / subdir).exists()
                 for subdir in ['code', 'config', 'data', 'logs']
             )
-            
-            if not has_structure:
-                return EnvironmentStatus(
-                    name=env_name,
-                    port=port,
-                    websocket_port=websocket_port,
-                    is_active=False,
-                    uptime_seconds=None,
-                    process_id=None,
-                    memory_mb=None,
-                    cpu_percent=None,
-                    last_health_check=time.time(),
-                    error_message=f"Environment directory structure missing: {env_path}"
-                )
             
             # Check port configuration
             ports_file = env_path / "config" / "ports.json"
@@ -135,8 +122,23 @@ class AdminStatusService:
                 except Exception as e:
                     logger.warning(f"Could not read ports config for {env_name}: {e}")
             
-            # Check if service is running (simplified check)
+            # Check if service is running
             is_active = self._check_port_in_use(port)
+
+            # If port check failed, try health endpoint as fallback
+            if not is_active and port:
+                try:
+                    resp = requests.get(f"http://localhost:{port}/healthz", timeout=1.5)
+                    if resp.status_code == 200:
+                        is_active = True
+                except Exception:
+                    pass
+
+            # If still false, and this is the current app environment, assume active
+            curr_env = os.getenv('APP_ENV', 'dev')
+            curr_port = int(os.getenv('PORT', '8000') or '8000')
+            if not is_active and env_name == curr_env and port == curr_port:
+                is_active = True
             
             # Get process information if running
             process_id = None
@@ -152,7 +154,7 @@ class AdminStatusService:
                 cpu_percent = psutil.Process().cpu_percent()
                 uptime_seconds = time.time() - self.start_time
             
-            return EnvironmentStatus(
+            status = EnvironmentStatus(
                 name=env_name,
                 port=port,
                 websocket_port=websocket_port,
@@ -161,8 +163,10 @@ class AdminStatusService:
                 process_id=process_id,
                 memory_mb=memory_mb,
                 cpu_percent=cpu_percent,
-                last_health_check=time.time()
+                last_health_check=time.time(),
+                error_message=(None if has_structure else f"Environment directory structure missing: {env_path}")
             )
+            return status
             
         except Exception as e:
             logger.error(f"Error checking environment {env_name} health: {e}")
