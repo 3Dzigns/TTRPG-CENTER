@@ -18,7 +18,8 @@
       "Bash(curl:*)",
       "Bash(docker logs:*)",
       "Bash(git pull:*)",
-      "Bash(docker image prune:*)"
+      "Bash(docker image prune:*)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

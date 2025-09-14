@@ -82,7 +82,7 @@ class UserConnectionManager:
 manager = UserConnectionManager()
 
 # Routes
-@user_router.get("/", response_class=HTMLResponse)
+@user_router.get("/ui", response_class=HTMLResponse)
 async def user_interface(request: Request):
     """Render the main user interface with LCARS/retro terminal theme."""
     try:
