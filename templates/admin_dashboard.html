@@ -76,7 +76,7 @@
         <div class="card env-card env-dev">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
-                    <strong><i class="bi bi-circle-fill text-success me-2" style="font-size: 0.5rem;"></i>Development</strong>
+                    <strong><i class="bi bi-circle-fill me-2" id="dev-dot" style="font-size: 0.5rem;"></i>Development</strong>
                     <div class="status-badge" id="dev-status">
                         <div class="loading-spinner"></div>
                         <span>Checking...</span>
@@ -103,7 +103,7 @@
                             <i class="bi bi-archive me-1"></i>Artifacts
                         </button>
                         <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('dev')">
-                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+                            <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
                     </div>
                 </div>
@@ -115,7 +115,7 @@
         <div class="card env-card env-test">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
-                    <strong><i class="bi bi-circle-fill text-warning me-2" style="font-size: 0.5rem;"></i>Testing</strong>
+                    <strong><i class="bi bi-circle-fill me-2" id="test-dot" style="font-size: 0.5rem;"></i>Testing</strong>
                     <div class="status-badge" id="test-status">
                         <div class="loading-spinner"></div>
                         <span>Checking...</span>
@@ -142,7 +142,7 @@
                             <i class="bi bi-archive me-1"></i>Artifacts
                         </button>
                         <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('test')">
-                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+                            <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
                     </div>
                 </div>
@@ -154,7 +154,7 @@
         <div class="card env-card env-prod">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
-                    <strong><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Production</strong>
+                    <strong><i class="bi bi-circle-fill me-2" id="prod-dot" style="font-size: 0.5rem;"></i>Production</strong>
                     <div class="status-badge" id="prod-status">
                         <div class="loading-spinner"></div>
                         <span>Checking...</span>
@@ -181,7 +181,7 @@
                             <i class="bi bi-archive me-1"></i>Artifacts
                         </button>
                         <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('prod')" disabled>
-                            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+                            <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
                     </div>
                 </div>
@@ -231,7 +231,7 @@
                 <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Recent Activity</h5>
             </div>
             <div class="card-body">
-                <div id="recent-activity">
+                <div id="recent-activity" style="max-height: 150px; overflow-y: auto;">
                     <div class="text-center text-muted">
                         <div class="loading-spinner mb-2"></div>
                         <small>Loading recent activity...</small>
@@ -353,7 +353,8 @@ function updateEnvironmentStatus(env) {
     const statusElement = document.getElementById(`${env.name}-status`);
     const memoryElement = document.getElementById(`${env.name}-memory`);
     const portElement = document.getElementById(`${env.name}-port`);
-    
+    const dotElement = document.getElementById(`${env.name}-dot`);
+
     if (statusElement) {
         const status = env.is_active ? 'healthy' : 'critical';
         statusElement.innerHTML = `
@@ -362,11 +363,20 @@ function updateEnvironmentStatus(env) {
         `;
         statusElement.className = `status-badge status-${status}`;
     }
-    
+
+    // Update dot color based on status
+    if (dotElement) {
+        let dotClass = 'text-danger'; // red by default (inactive/failed)
+        if (env.is_active) {
+            dotClass = env.error_message ? 'text-warning' : 'text-success'; // yellow if has errors, green if healthy
+        }
+        dotElement.className = `bi bi-circle-fill me-2 ${dotClass}`;
+    }
+
     if (memoryElement && env.memory_mb) {
         memoryElement.textContent = AdminUtils.formatBytes(env.memory_mb * 1024 * 1024);
     }
-    
+
     if (portElement) {
         portElement.textContent = env.port;
     }
@@ -383,23 +393,50 @@ function updateCacheToggles(cacheData) {
     }
 }
 
-function updateRecentActivity() {
-    // Placeholder recent activity
+async function updateRecentActivity() {
     const activityElement = document.getElementById('recent-activity');
-    const activities = [
-        { time: new Date().toLocaleTimeString(), message: 'System status check completed', type: 'info' },
-        { time: new Date(Date.now() - 300000).toLocaleTimeString(), message: 'Cache cleared for dev environment', type: 'warning' },
-        { time: new Date(Date.now() - 600000).toLocaleTimeString(), message: 'Dictionary updated: 3 new terms', type: 'success' }
-    ];
-    
-    activityElement.innerHTML = activities.map(activity => `
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>
-                <small class="text-${activity.type}">${activity.message}</small>
+
+    try {
+        // Load recent logs from the current environment
+        const currentEnv = 'dev'; // Could be dynamic based on active environment
+        const response = await fetch(`/api/status/${currentEnv}/logs?lines=10`);
+        const logs = await response.json();
+
+        if (Array.isArray(logs) && logs.length > 0) {
+            // Take only the first 3 logs for compact display
+            const recentLogs = logs.slice(0, 3);
+
+            activityElement.innerHTML = recentLogs.map((log, index) => `
+                <div class="d-flex justify-content-between align-items-center mb-2 p-2 border-bottom log-entry"
+                     style="cursor: pointer; border-radius: 4px;"
+                     onclick="showLogDetails('${currentEnv}', ${index})"
+                     onmouseover="this.style.backgroundColor='rgba(0,123,255,0.1)'"
+                     onmouseout="this.style.backgroundColor='transparent'">
+                    <div class="flex-grow-1">
+                        <small class="text-${getLogLevelClass(log.level)}">[${log.level}]</small>
+                        <small class="text-dark ms-2">${truncateMessage(log.message, 50)}</small>
+                    </div>
+                    <small class="text-muted">${new Date(log.timestamp * 1000).toLocaleTimeString()}</small>
+                </div>
+            `).join('');
+
+            // Store logs for detail view
+            window.currentActivityLogs = logs;
+        } else {
+            activityElement.innerHTML = `
+                <div class="text-center text-muted py-3">
+                    <small>No recent activity found.</small>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading recent activity:', error);
+        activityElement.innerHTML = `
+            <div class="text-center text-muted py-3">
+                <small>Error loading recent activity.</small>
             </div>
-            <small class="text-muted">${activity.time}</small>
-        </div>
-    `).join('');
+        `;
+    }
 }
 
 function getStatusIcon(status) {
@@ -638,6 +675,76 @@ async function exportLogs() {
     }, 1000);
 }
 
+// Helper functions for log functionality
+function getLogLevelClass(level) {
+    switch(level?.toLowerCase()) {
+        case 'error': return 'danger';
+        case 'warning': case 'warn': return 'warning';
+        case 'info': return 'info';
+        case 'debug': return 'secondary';
+        default: return 'dark';
+    }
+}
+
+function truncateMessage(message, maxLength) {
+    if (!message) return '';
+    return message.length > maxLength ? message.substring(0, maxLength) + '...' : message;
+}
+
+function showLogDetails(environment, index) {
+    if (!window.currentActivityLogs || !window.currentActivityLogs[index]) {
+        AdminUtils.showToast('Log details not available', 'warning');
+        return;
+    }
+
+    const log = window.currentActivityLogs[index];
+    const modalHtml = `
+        <div class="modal fade" id="logDetailModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Log Entry Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <strong>Timestamp:</strong> ${new Date(log.timestamp * 1000).toLocaleString()}
+                        </div>
+                        <div class="mb-3">
+                            <strong>Level:</strong> <span class="badge bg-${getLogLevelClass(log.level)}">${log.level}</span>
+                        </div>
+                        <div class="mb-3">
+                            <strong>Message:</strong>
+                            <pre class="bg-light p-3 mt-2" style="white-space: pre-wrap; word-break: break-word;">${log.message}</pre>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" onclick="viewLogs('${environment}')">View All Logs</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('logDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add new modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('logDetailModal'));
+    modal.show();
+
+    // Clean up modal after it's hidden
+    document.getElementById('logDetailModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+}
 
 // Make updateDashboard available globally for WebSocket updates
 window.updateDashboard = updateDashboard;
