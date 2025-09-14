@@ -61,6 +61,7 @@ services:
       - logs_dev:/var/log/ttrpg
       - uploads_dev:/data/uploads
       - ./artifacts/dev:/app/artifacts
+      - ./env:/app/env
     networks:
       - ttrpg-dev-net
     depends_on:

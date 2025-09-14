@@ -342,19 +342,23 @@ class AdminStatusService:
     def _calculate_overall_status(self, environments: List[Dict[str, Any]]) -> str:
         """
         Calculate overall system status from environment statuses
-        
+
         Args:
             environments: List of environment status dictionaries
-            
+
         Returns:
             Overall status string: 'healthy', 'degraded', or 'critical'
         """
+        current_env = os.getenv('APP_ENV', 'dev')
         active_count = sum(1 for env in environments if env.get('is_active', False))
-        total_count = len(environments)
-        
-        if active_count == total_count:
-            return 'healthy'
+        current_env_active = any(
+            env.get('name') == current_env and env.get('is_active', False)
+            for env in environments
+        )
+
+        if current_env_active:
+            return 'healthy'  # Current environment is running - system is healthy
         elif active_count > 0:
-            return 'degraded' 
+            return 'degraded'  # Some environments running but not current
         else:
-            return 'critical'
+            return 'critical'  # No environments running
