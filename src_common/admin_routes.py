@@ -357,6 +357,89 @@ async def view_artifact(environment: str, name: str):
         logger.error(f"View artifact failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# -------------------------
+# Logs listing / viewing
+# -------------------------
+
+def _log_dirs_for_env(environment: str) -> List[Path]:
+    return [
+        Path(f"env/{environment}/logs"),
+        Path("/var/log/ttrpg"),
+    ]
+
+@admin_router.get("/api/logs/{environment}/list")
+async def list_logs(environment: str):
+    try:
+        results: List[Dict[str, Any]] = []
+        for base, prefix in ((Path(f"env/{environment}/logs"), "env"), (Path("/var/log/ttrpg"), "var")):
+            if base.exists() and base.is_dir():
+                for p in base.glob("*.log"):
+                    try:
+                        st = p.stat()
+                        results.append({
+                            "name": p.name,
+                            "rel": f"{prefix}/{p.name}",
+                            "size_bytes": st.st_size,
+                            "modified_at": st.st_mtime,
+                        })
+                    except Exception:
+                        continue
+        results.sort(key=lambda x: x["modified_at"], reverse=True)
+        return {"environment": environment, "logs": results}
+    except Exception as e:
+        logger.error(f"List logs failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _resolve_log_path(environment: str, rel: str) -> Path:
+    if rel.startswith("var/"):
+        base = Path("/var/log/ttrpg")
+        name = rel[len("var/"):]
+    elif rel.startswith("env/"):
+        base = Path(f"env/{environment}/logs")
+        name = rel[len("env/"):]
+    else:
+        # Fallback: try both bases
+        base = None
+        for b in _log_dirs_for_env(environment):
+            cand = (b / rel).resolve()
+            if cand.exists():
+                return cand
+        raise HTTPException(status_code=400, detail="Invalid log path")
+    target = (base / name).resolve()
+    if not str(target).startswith(str(base.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid log path")
+    return target
+
+@admin_router.get("/api/logs/{environment}/view")
+async def view_log(environment: str, name: str, lines: int = 500):
+    try:
+        target = _resolve_log_path(environment, name)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="Log not found")
+        # Tail last N lines
+        with open(target, 'r', encoding='utf-8', errors='ignore') as f:
+            all_lines = f.readlines()
+        recent = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return JSONResponse(content={"name": target.name, "rel": name, "text": ''.join(recent)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"View log failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/logs/{environment}/file")
+async def download_log(environment: str, name: str):
+    try:
+        target = _resolve_log_path(environment, name)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="Log not found")
+        return FileResponse(path=str(target), filename=target.name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download log failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Cache control endpoints used by the Admin UI
 @admin_router.post("/api/cache/{environment}/enable")
 async def enable_cache(environment: str):

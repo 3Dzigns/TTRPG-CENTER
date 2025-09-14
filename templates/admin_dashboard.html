@@ -283,6 +283,9 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <div class="mb-3">
+                    <div id="logs-list-container" class="table-responsive"></div>
+                </div>
                 <pre id="logs-content" class="bg-dark text-light p-3" style="height: 400px; overflow-y: auto;"></pre>
             </div>
         </div>
@@ -505,13 +508,51 @@ async function clearAllCaches() {
 
 async function viewLogs(environment) {
     try {
-        const response = await fetch(`/api/status/${environment}/logs?lines=100`);
+        // 1) Load aggregated tail for quick context
+        const response = await fetch(`/api/status/${environment}/logs?lines=200`);
         const logs = await response.json();
-        
         const logsContent = document.getElementById('logs-content');
-        logsContent.textContent = logs.map(log => 
-            `[${new Date(log.timestamp * 1000).toLocaleString()}] ${log.level}: ${log.message}`
-        ).join('\n');
+        if (Array.isArray(logs) && logs.length) {
+            logsContent.textContent = logs.map(log => 
+                `[${new Date(log.timestamp * 1000).toLocaleString()}] ${log.level}: ${log.message}`
+            ).join('\n');
+        } else {
+            logsContent.textContent = 'No recent log entries.';
+        }
+
+        // 2) Load list of available log files
+        const listRes = await fetch(`/api/logs/${environment}/list`);
+        const listData = await listRes.json();
+        const container = document.getElementById('logs-list-container');
+        if (listData.logs && listData.logs.length) {
+            container.innerHTML = `
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Log File</th>
+                      <th>Size</th>
+                      <th>Modified</th>
+                      <th style="width: 140px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${listData.logs.map(l => `
+                      <tr>
+                        <td>${l.name}</td>
+                        <td>${AdminUtils.formatBytes(l.size_bytes)}</td>
+                        <td>${AdminUtils.formatTimestamp(l.modified_at)}</td>
+                        <td>
+                          <button class="btn btn-sm btn-outline-primary" onclick="viewLogFile('${environment}','${l.rel.replace(/'/g, "\\'")}')">View</button>
+                          <a class="btn btn-sm btn-outline-secondary" href="/api/logs/${environment}/file?name=${encodeURIComponent(l.rel)}">Download</a>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+            `;
+        } else {
+            container.innerHTML = '<div class="text-muted">No log files found.</div>';
+        }
         
         document.querySelector('#logsModal .modal-title').textContent = `${environment.toUpperCase()} Environment Logs`;
         new bootstrap.Modal(document.getElementById('logsModal')).show();
@@ -519,6 +560,19 @@ async function viewLogs(environment) {
     } catch (error) {
         console.error('Error loading logs:', error);
         AdminUtils.showToast('Error loading logs', 'danger');
+    }
+}
+
+async function viewLogFile(environment, rel) {
+    try {
+        const res = await fetch(`/api/logs/${environment}/view?name=${encodeURIComponent(rel)}&lines=1000`);
+        if (!res.ok) throw new Error('Failed to load log file');
+        const data = await res.json();
+        const logsContent = document.getElementById('logs-content');
+        logsContent.textContent = data.text || '';
+    } catch (e) {
+        console.error('Failed to view log file', e);
+        AdminUtils.showToast('Failed to view log file', 'danger');
     }
 }
 
@@ -543,18 +597,22 @@ async function viewArtifacts(environment) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${artifacts.map(artifact => `
+                            ${artifacts.map(artifact => {
+                                const rel = artifact.path || artifact.name;
+                                const safe = rel.replace(/'/g, "\\'");
+                                const dl = `/api/artifacts/${environment}/file?name=${encodeURIComponent(rel)}`;
+                                return `
                                 <tr>
-                                    <td><a href="#" onclick="viewArtifact('${environment}','${artifact.name.replace(/'/g, "\\'")}'); return false;">${artifact.name}</a></td>
+                                    <td><a href="#" onclick="viewArtifact('${environment}','${safe}'); return false;">${artifact.name}</a></td>
                                     <td>${AdminUtils.formatBytes(artifact.size_bytes)}</td>
                                     <td>${AdminUtils.formatTimestamp(artifact.modified_at)}</td>
                                     <td>
-                                        <a class="btn btn-sm btn-outline-secondary" href="/api/artifacts/${environment}/file?name=${encodeURIComponent(artifact.name)}">
+                                        <a class="btn btn-sm btn-outline-secondary" href="${dl}">
                                             <i class="bi bi-download"></i> Download
                                         </a>
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `; }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -573,7 +631,10 @@ async function viewArtifacts(environment) {
 async function viewArtifact(environment, name) {
     try {
         const res = await fetch(`/api/artifacts/${environment}/view?name=${encodeURIComponent(name)}`);
-        if (!res.ok) throw new Error('Failed to load artifact');
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(`HTTP ${res.status}: ${t}`);
+        }
         const data = await res.json();
         let content = '';
         if (data.json) {
@@ -588,7 +649,7 @@ async function viewArtifact(environment, name) {
         new bootstrap.Modal(document.getElementById('artifactViewModal')).show();
     } catch (e) {
         console.error('Artifact view failed', e);
-        AdminUtils.showToast('Failed to view artifact', 'danger');
+        AdminUtils.showToast(`Failed to view artifact: ${e.message}`, 'danger');
     }
 }
 
