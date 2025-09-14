@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends, Query, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import shutil
@@ -298,6 +298,63 @@ async def delete_upload(name: str, env: Optional[str] = Query(None)):
         raise
     except Exception as e:
         logger.error(f"Delete upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Artifacts viewing / download
+# -------------------------
+
+def _artifacts_dir_for_env(environment: str) -> Path:
+    curr_env = os.getenv("APP_ENV", "dev")
+    if environment == curr_env:
+        base = Path("/app/artifacts")
+    else:
+        base = Path(f"artifacts/{environment}")
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+def _safe_join(base: Path, name: str) -> Path:
+    target = (base / name).resolve()
+    if not str(target).startswith(str(base.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return target
+
+@admin_router.get("/api/artifacts/{environment}/file")
+async def download_artifact(environment: str, name: str):
+    try:
+        root = _artifacts_dir_for_env(environment)
+        target = _safe_join(root, name)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        return FileResponse(path=str(target), filename=target.name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download artifact failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/artifacts/{environment}/view")
+async def view_artifact(environment: str, name: str):
+    try:
+        root = _artifacts_dir_for_env(environment)
+        target = _safe_join(root, name)
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        # Try JSON parse for .json
+        if target.suffix.lower() in {".json", ".ndjson"}:
+            import json as _json
+            try:
+                data = _json.loads(target.read_text(encoding="utf-8", errors="ignore"))
+                return JSONResponse(content={"name": target.name, "json": data})
+            except Exception:
+                pass
+        # Fallback: return text
+        text = target.read_text(encoding="utf-8", errors="ignore")
+        return JSONResponse(content={"name": target.name, "text": text})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"View artifact failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Cache control endpoints used by the Admin UI

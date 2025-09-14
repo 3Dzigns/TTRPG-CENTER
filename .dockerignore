@@ -83,8 +83,11 @@ docker-compose*.yml
 Dockerfile*
 .dockerignore
 
-# Script files (development only)
-scripts/
+# Script files
+# Include scripts needed at runtime (nightly ingestion)
+# Keep migrations ignored for now
+!scripts/**
+!scripts
 db_migrations/
 
 # Node modules if any

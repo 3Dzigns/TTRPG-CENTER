@@ -304,6 +304,21 @@
     </div>
 </div>
 
+<!-- Artifact Viewer Modal -->
+<div class="modal fade" id="artifactViewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="artifact-view-title">Artifact</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="artifact-view-body" class="bg-dark text-light p-3" style="height: 500px; overflow-y: auto; white-space: pre-wrap;"></pre>
+            </div>
+        </div>
+    </div>
+    </div>
+
 {% endblock %}
 
 {% block extra_scripts %}
@@ -524,14 +539,20 @@ async function viewArtifacts(environment) {
                                 <th>Name</th>
                                 <th>Size</th>
                                 <th>Modified</th>
+                                <th style="width: 120px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${artifacts.map(artifact => `
                                 <tr>
-                                    <td>${artifact.name}</td>
+                                    <td><a href="#" onclick="viewArtifact('${environment}','${artifact.name.replace(/'/g, "\\'")}'); return false;">${artifact.name}</a></td>
                                     <td>${AdminUtils.formatBytes(artifact.size_bytes)}</td>
                                     <td>${AdminUtils.formatTimestamp(artifact.modified_at)}</td>
+                                    <td>
+                                        <a class="btn btn-sm btn-outline-secondary" href="/api/artifacts/${environment}/file?name=${encodeURIComponent(artifact.name)}">
+                                            <i class="bi bi-download"></i> Download
+                                        </a>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -546,6 +567,28 @@ async function viewArtifacts(environment) {
     } catch (error) {
         console.error('Error loading artifacts:', error);
         AdminUtils.showToast('Error loading artifacts', 'danger');
+    }
+}
+
+async function viewArtifact(environment, name) {
+    try {
+        const res = await fetch(`/api/artifacts/${environment}/view?name=${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error('Failed to load artifact');
+        const data = await res.json();
+        let content = '';
+        if (data.json) {
+            content = JSON.stringify(data.json, null, 2);
+        } else if (data.text) {
+            content = data.text;
+        } else {
+            content = '[Unsupported artifact format]';
+        }
+        document.getElementById('artifact-view-title').textContent = name;
+        document.getElementById('artifact-view-body').textContent = content;
+        new bootstrap.Modal(document.getElementById('artifactViewModal')).show();
+    } catch (e) {
+        console.error('Artifact view failed', e);
+        AdminUtils.showToast('Failed to view artifact', 'danger');
     }
 }
 
