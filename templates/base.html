@@ -160,7 +160,7 @@
     <!-- Navigation -->
     <nav class="navbar navbar-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/">
+            <a class="navbar-brand" href="/admin">
                 <i class="bi bi-gear-fill me-2"></i>
                 TTRPG Center - Admin Console
             </a>
@@ -189,12 +189,11 @@
             <!-- Sidebar -->
             <div class="col-md-3 col-lg-2 sidebar">
                 <nav class="nav flex-column pt-3">
-                    <a class="nav-link active" href="/"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
-                    <a class="nav-link" href="#status"><i class="bi bi-activity me-2"></i>System Status</a>
-                    <a class="nav-link" href="#ingestion"><i class="bi bi-upload me-2"></i>Ingestion Console</a>
-                    <a class="nav-link" href="#dictionary"><i class="bi bi-book me-2"></i>Dictionary Management</a>
-                    <a class="nav-link" href="#testing"><i class="bi bi-bug me-2"></i>Testing & Bugs</a>
-                    <a class="nav-link" href="#cache"><i class="bi bi-lightning me-2"></i>Cache Control</a>
+                    <a class="nav-link {% if active_nav=='dashboard' %}active{% endif %}" href="/admin"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
+                    <a class="nav-link {% if active_nav=='ingestion' %}active{% endif %}" href="/admin/ingestion"><i class="bi bi-upload me-2"></i>Ingestion Console</a>
+                    <a class="nav-link {% if active_nav=='dictionary' %}active{% endif %}" href="/admin/dictionary"><i class="bi bi-book me-2"></i>Dictionary Management</a>
+                    <a class="nav-link {% if active_nav=='testing' %}active{% endif %}" href="/admin/testing"><i class="bi bi-bug me-2"></i>Testing & Bugs</a>
+                    <a class="nav-link {% if active_nav=='cache' %}active{% endif %}" href="/admin/cache"><i class="bi bi-lightning me-2"></i>Cache Control</a>
                     <hr>
                     <div class="nav-link text-muted small">Environments</div>
                     <a class="nav-link ps-4" href="#dev"><i class="bi bi-circle-fill text-success me-2" style="font-size: 0.5rem;"></i>Development</a>

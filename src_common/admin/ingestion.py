@@ -519,3 +519,206 @@ class AdminIngestionService:
         except Exception as e:
             logger.warning(f"Could not get main log entries: {e}")
             return []
+
+    async def get_sources_health(self, environment: str) -> List[Dict[str, Any]]:
+        """
+        Get health status and chunk counts for all ingested sources
+
+        Args:
+            environment: Environment name (dev/test/prod)
+
+        Returns:
+            List of source dictionaries with health indicators
+        """
+        try:
+            sources = []
+            artifacts_path = Path(f"artifacts/{environment}")
+
+            if not artifacts_path.exists():
+                return []
+
+            # Check ingest directory for completed jobs
+            ingest_path = artifacts_path / "ingest" / environment
+            if ingest_path.exists():
+                for job_dir in ingest_path.iterdir():
+                    if job_dir.is_dir():
+                        source_info = await self._analyze_source_health(job_dir)
+                        if source_info:
+                            sources.append(source_info)
+
+            # Also check direct artifacts directory
+            for item in artifacts_path.iterdir():
+                if item.is_dir() and item.name != "ingest":
+                    source_info = await self._analyze_source_health(item)
+                    if source_info:
+                        sources.append(source_info)
+
+            # Sort by health (red, yellow, green) then by name
+            health_priority = {'red': 0, 'yellow': 1, 'green': 2}
+            sources.sort(key=lambda x: (health_priority.get(x['health'], 0), x['id']))
+
+            return sources
+
+        except Exception as e:
+            logger.error(f"Error getting sources health for {environment}: {e}")
+            return []
+
+    async def remove_source(self, environment: str, source_id: str) -> bool:
+        """
+        Remove an ingested source and all its artifacts
+
+        Args:
+            environment: Environment name
+            source_id: Source identifier
+
+        Returns:
+            True if removal successful
+        """
+        try:
+            removed = False
+
+            # Search in different possible locations
+            search_paths = [
+                Path(f"artifacts/{environment}"),
+                Path(f"artifacts/{environment}/ingest/{environment}"),
+                Path(f"artifacts/ingest/{environment}")
+            ]
+
+            for base_path in search_paths:
+                if not base_path.exists():
+                    continue
+
+                for item in base_path.iterdir():
+                    if item.is_dir():
+                        # Check if this directory matches the source
+                        manifest_file = item / "manifest.json"
+                        if manifest_file.exists():
+                            try:
+                                manifest = json.loads(manifest_file.read_text())
+                                source_file = manifest.get("source_file", "")
+                                job_id = manifest.get("job_id", "")
+
+                                # Match by source file name or job ID
+                                if (source_id in source_file or
+                                    source_id == job_id or
+                                    source_id in item.name):
+
+                                    import shutil
+                                    shutil.rmtree(item)
+                                    removed = True
+                                    logger.info(f"Removed source artifacts: {item}")
+                                    break
+                            except Exception as e:
+                                logger.warning(f"Could not parse manifest in {item}: {e}")
+                                continue
+
+                if removed:
+                    break
+
+            if not removed:
+                logger.warning(f"Source {source_id} not found for removal")
+
+            return removed
+
+        except Exception as e:
+            logger.error(f"Error removing source {source_id} from {environment}: {e}")
+            return False
+
+    async def _analyze_source_health(self, job_dir: Path) -> Optional[Dict[str, Any]]:
+        """
+        Analyze source health based on artifacts and manifest
+
+        Args:
+            job_dir: Path to job directory
+
+        Returns:
+            Source health information dictionary or None
+        """
+        try:
+            manifest_file = job_dir / "manifest.json"
+            if not manifest_file.exists():
+                return None
+
+            manifest = json.loads(manifest_file.read_text())
+            source_file = manifest.get("source_file", job_dir.name)
+            status = manifest.get("status", "unknown")
+
+            # Count chunks from Pass A output
+            chunk_count = 0
+            pass_a_file = job_dir / "passA_chunks.json"
+            if pass_a_file.exists():
+                try:
+                    chunks_data = json.loads(pass_a_file.read_text())
+                    if isinstance(chunks_data, list):
+                        chunk_count = len(chunks_data)
+                    elif isinstance(chunks_data, dict) and "chunks" in chunks_data:
+                        chunk_count = len(chunks_data["chunks"])
+                except Exception:
+                    pass
+
+            # Calculate health based on status and chunk processing
+            health = self._calculate_source_health(status, chunk_count, job_dir)
+
+            # Extract source name from file path
+            source_name = Path(source_file).stem if source_file else job_dir.name
+
+            return {
+                "id": source_name,
+                "source_file": source_file,
+                "chunk_count": chunk_count,
+                "health": health,
+                "status": status,
+                "job_path": str(job_dir),
+                "last_modified": job_dir.stat().st_mtime if job_dir.exists() else 0
+            }
+
+        except Exception as e:
+            logger.warning(f"Could not analyze source health for {job_dir}: {e}")
+            return None
+
+    def _calculate_source_health(self, status: str, chunk_count: int, job_dir: Path) -> str:
+        """
+        Calculate health indicator based on job status and artifacts
+
+        Returns:
+            'green', 'yellow', or 'red'
+        """
+        try:
+            # Red: Failed job or no chunks
+            if status == "failed" or chunk_count == 0:
+                return "red"
+
+            # Check for error indicators in artifacts
+            error_indicators = 0
+
+            # Check if Pass B and C completed successfully
+            pass_b_file = job_dir / "passB_enriched.json"
+            pass_c_file = job_dir / "passC_graph.json"
+
+            if not pass_b_file.exists():
+                error_indicators += 1
+            if not pass_c_file.exists():
+                error_indicators += 1
+
+            # Check for error messages in manifest
+            if job_dir / "manifest.json":
+                try:
+                    manifest = json.loads((job_dir / "manifest.json").read_text())
+                    if manifest.get("error_message"):
+                        error_indicators += 1
+                except Exception:
+                    pass
+
+            # Green: Completed successfully with good chunk count
+            if status == "completed" and chunk_count >= 5 and error_indicators == 0:
+                return "green"
+
+            # Yellow: Some issues but functional
+            if chunk_count >= 1 and error_indicators <= 1:
+                return "yellow"
+
+            # Red: Significant issues
+            return "red"
+
+        except Exception:
+            return "red"

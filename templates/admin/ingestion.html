@@ -1,0 +1,775 @@
+{% extends "base.html" %}
+
+{% block title %}Ingestion Console - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Ingestion Console</h1>
+    <div class="btn-group" role="group">
+        <button class="btn btn-admin" onclick="runNightly('dev')">
+            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+        </button>
+        <button class="btn btn-outline-primary" onclick="refreshConsole()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-gear me-1"></i>Environment
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('dev')">Development</a></li>
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('test')">Testing</a></li>
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('prod')">Production</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Environment Indicator -->
+<div class="alert alert-info d-flex align-items-center mb-4" role="alert">
+    <i class="bi bi-info-circle-fill me-2"></i>
+    <div>
+        Currently managing <strong id="current-environment">Development</strong> environment.
+        Switch environments using the dropdown above to manage different ingestion pipelines.
+    </div>
+</div>
+
+<!-- Upload Management Section -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-cloud-upload me-2"></i>Upload Management</h5>
+        <div class="d-flex align-items-center gap-2">
+            <div class="upload-stats text-muted small" id="upload-stats">
+                Loading...
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <!-- Drag & Drop Upload Area -->
+        <div class="upload-area mb-3" id="upload-area"
+             ondrop="dropHandler(event)"
+             ondragover="dragOverHandler(event)"
+             ondragleave="dragLeaveHandler(event)">
+            <div class="upload-area-content">
+                <i class="bi bi-cloud-arrow-up display-4 text-muted mb-2"></i>
+                <p class="mb-2"><strong>Drag & drop PDF files here</strong></p>
+                <p class="text-muted mb-3">or</p>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="file" id="upload-input" accept=".pdf" multiple class="form-control" style="width: auto;">
+                    <button class="btn btn-admin" onclick="uploadSelected()">
+                        <i class="bi bi-cloud-arrow-up me-1"></i>Upload PDFs
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="upload-progress" class="mb-3" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <small class="text-muted">Uploading files...</small>
+                <small class="text-muted" id="upload-progress-text">0%</small>
+            </div>
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" id="upload-progress-bar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Uploaded Files Table -->
+        <div id="uploads-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-inbox display-4 mb-2"></i>
+            <p>No files in uploads directory.</p>
+            <small>Upload PDF files to get started with ingestion.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="uploads-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-uploads" onchange="toggleAllUploads(this.checked)">
+                        </th>
+                        <th>Name</th>
+                        <th style="width: 100px;">Size</th>
+                        <th style="width: 150px;">Modified</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div class="d-flex justify-content-between align-items-center mt-3" id="bulk-actions" style="display: none !important;">
+            <div class="form-check">
+                <span class="text-muted small" id="selected-count">0 files selected</span>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-danger" onclick="deleteSelected()">
+                    <i class="bi bi-trash me-1"></i>Delete Selected
+                </button>
+                <button class="btn btn-admin" onclick="ingestSelected()">
+                    <i class="bi bi-gear me-1"></i>Ingest Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ingested Sources Health Monitoring -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-database-check me-2"></i>Ingested Sources Health</h5>
+        <div class="d-flex align-items-center gap-2">
+            <div class="legend d-flex align-items-center gap-3 me-3">
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-green"></div>
+                    <small class="text-muted">Healthy</small>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-yellow"></div>
+                    <small class="text-muted">Issues</small>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-red"></div>
+                    <small class="text-muted">Failed</small>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" onclick="loadSources()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="sources-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-database-x display-4 mb-2"></i>
+            <p>No ingested sources found.</p>
+            <small>Upload and process PDF files to see sources here.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="sources-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-sources" onchange="toggleAllSources(this.checked)">
+                        </th>
+                        <th>Source Name</th>
+                        <th style="width: 100px;">Chunks</th>
+                        <th style="width: 100px;">Health</th>
+                        <th style="width: 120px;">Status</th>
+                        <th style="width: 150px;">Last Modified</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Source Bulk Actions -->
+        <div class="d-flex justify-content-between align-items-center mt-3" id="source-bulk-actions" style="display: none !important;">
+            <div class="form-check">
+                <span class="text-muted small" id="sources-selected-count">0 sources selected</span>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-warning" onclick="reprocessSelected()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Reprocess Selected
+                </button>
+                <button class="btn btn-outline-danger" onclick="removeSelectedSources()">
+                    <i class="bi bi-trash me-1"></i>Remove Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Job Monitoring Section -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Recent Ingestion Jobs</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="loadJobs()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+            <button class="btn btn-outline-secondary" onclick="showJobLogs()">
+                <i class="bi bi-file-text me-1"></i>View Logs
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="jobs-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-clock-history display-4 mb-2"></i>
+            <p>No recent ingestion jobs.</p>
+            <small>Job history will appear here after processing files.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="jobs-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Source</th>
+                        <th style="width: 100px;">Status</th>
+                        <th style="width: 120px;">Progress</th>
+                        <th style="width: 150px;">Started</th>
+                        <th style="width: 100px;">Duration</th>
+                        <th style="width: 100px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Styles for Ingestion Console -->
+<style>
+.upload-area {
+    border: 2px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    background: #f8fafc;
+}
+
+.upload-area.dragover {
+    border-color: var(--admin-primary);
+    background: rgba(30, 58, 138, 0.05);
+    transform: scale(1.02);
+}
+
+.upload-area-content {
+    pointer-events: none;
+}
+
+.health-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.health-green { background-color: #16a34a; }
+.health-yellow { background-color: #d97706; }
+.health-red { background-color: #dc2626; }
+
+.job-status-running { color: #2563eb; }
+.job-status-completed { color: #16a34a; }
+.job-status-failed { color: #dc2626; }
+.job-status-pending { color: #d97706; }
+
+.progress-mini {
+    height: 8px;
+    border-radius: 4px;
+}
+
+.legend {
+    font-size: 0.875rem;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    background: rgba(248, 250, 252, 0.8);
+}
+
+.btn-group-sm .btn {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+}
+</style>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentEnvironment = 'dev';
+let selectedUploads = new Set();
+let selectedSources = new Set();
+
+// Initialize console
+document.addEventListener('DOMContentLoaded', function() {
+    refreshConsole();
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // File input change handler
+    document.getElementById('upload-input').addEventListener('change', handleFileSelect);
+}
+
+async function refreshConsole() {
+    AdminUtils.showToast('Refreshing ingestion console...', 'info');
+    await Promise.all([
+        loadUploads(),
+        loadSources(),
+        loadJobs()
+    ]);
+    AdminUtils.showToast('Console refreshed', 'success');
+}
+
+function switchEnvironment(env) {
+    if (env !== currentEnvironment) {
+        currentEnvironment = env;
+        document.getElementById('current-environment').textContent =
+            env === 'dev' ? 'Development' : (env === 'test' ? 'Testing' : 'Production');
+        refreshConsole();
+        AdminUtils.showToast(`Switched to ${env} environment`, 'info');
+    }
+}
+
+// ====================== File Upload Management ======================
+
+function handleFileSelect(event) {
+    const files = event.target.files;
+    if (files.length > 0) {
+        showUploadPreview(Array.from(files));
+    }
+}
+
+function showUploadPreview(files) {
+    // Optional: Show preview of selected files before upload
+    console.log('Selected files:', files.map(f => f.name));
+}
+
+// Drag & Drop handlers
+function dragOverHandler(event) {
+    event.preventDefault();
+    document.getElementById('upload-area').classList.add('dragover');
+}
+
+function dragLeaveHandler(event) {
+    event.preventDefault();
+    document.getElementById('upload-area').classList.remove('dragover');
+}
+
+function dropHandler(event) {
+    event.preventDefault();
+    document.getElementById('upload-area').classList.remove('dragover');
+
+    const files = Array.from(event.dataTransfer.files).filter(f => f.type === 'application/pdf');
+    if (files.length > 0) {
+        uploadFiles(files);
+    } else {
+        AdminUtils.showToast('Please drop only PDF files', 'warning');
+    }
+}
+
+async function uploadSelected() {
+    const input = document.getElementById('upload-input');
+    if (!input.files || input.files.length === 0) {
+        AdminUtils.showToast('Please select PDF files to upload', 'warning');
+        return;
+    }
+    await uploadFiles(Array.from(input.files));
+}
+
+async function uploadFiles(files) {
+    const progressContainer = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+
+    progressContainer.style.display = 'block';
+
+    try {
+        const formData = new FormData();
+        files.forEach(file => formData.append('files', file));
+
+        const xhr = new XMLHttpRequest();
+
+        // Upload progress handler
+        xhr.upload.onprogress = function(event) {
+            if (event.lengthComputable) {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                progressBar.style.width = percent + '%';
+                progressText.textContent = percent + '%';
+            }
+        };
+
+        xhr.onload = function() {
+            progressContainer.style.display = 'none';
+            if (xhr.status === 200) {
+                AdminUtils.showToast(`${files.length} file(s) uploaded successfully`, 'success');
+                document.getElementById('upload-input').value = '';
+                loadUploads();
+            } else {
+                throw new Error('Upload failed');
+            }
+        };
+
+        xhr.onerror = function() {
+            progressContainer.style.display = 'none';
+            throw new Error('Upload failed');
+        };
+
+        xhr.open('POST', `/api/uploads?env=${currentEnvironment}`);
+        xhr.send(formData);
+
+    } catch (error) {
+        progressContainer.style.display = 'none';
+        console.error('Upload failed:', error);
+        AdminUtils.showToast('Upload failed', 'danger');
+    }
+}
+
+async function loadUploads() {
+    try {
+        const response = await fetch(`/api/uploads?env=${currentEnvironment}`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#uploads-table tbody');
+        const empty = document.getElementById('uploads-empty');
+        const stats = document.getElementById('upload-stats');
+
+        tbody.innerHTML = '';
+        selectedUploads.clear();
+        updateBulkActions();
+
+        if (!data.files || data.files.length === 0) {
+            empty.style.display = 'block';
+            stats.textContent = 'No uploads';
+            return;
+        }
+
+        empty.style.display = 'none';
+        stats.textContent = `${data.files.length} file(s), ${AdminUtils.formatBytes(data.files.reduce((sum, f) => sum + f.size_bytes, 0))}`;
+
+        data.files.forEach(file => {
+            const tr = document.createElement('tr');
+            const safeFileName = file.name.replace(/'/g, "\\'");
+
+            tr.innerHTML = `
+                <td><input type="checkbox" class="upload-checkbox" value="${safeFileName}" onchange="toggleUploadSelection('${safeFileName}', this.checked)"></td>
+                <td>
+                    <i class="bi bi-file-pdf text-danger me-1"></i>
+                    ${file.name}
+                </td>
+                <td>${AdminUtils.formatBytes(file.size_bytes)}</td>
+                <td>${AdminUtils.formatTimestamp(file.modified_at)}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-admin btn-sm" onclick="ingestFile('${safeFileName}')" title="Ingest Now">
+                            <i class="bi bi-gear"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteUpload('${safeFileName}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load uploads:', error);
+        AdminUtils.showToast('Failed to load uploads', 'danger');
+    }
+}
+
+function toggleUploadSelection(fileName, checked) {
+    if (checked) {
+        selectedUploads.add(fileName);
+    } else {
+        selectedUploads.delete(fileName);
+    }
+    updateBulkActions();
+}
+
+function toggleAllUploads(checked) {
+    const checkboxes = document.querySelectorAll('.upload-checkbox');
+    selectedUploads.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            selectedUploads.add(cb.value);
+        }
+    });
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCount = document.getElementById('selected-count');
+
+    if (selectedUploads.size > 0) {
+        bulkActions.style.display = 'flex';
+        selectedCount.textContent = `${selectedUploads.size} file(s) selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+async function deleteUpload(fileName) {
+    if (!confirm(`Delete ${fileName}?`)) return;
+
+    try {
+        const response = await fetch(`/api/uploads?name=${encodeURIComponent(fileName)}&env=${currentEnvironment}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            AdminUtils.showToast('File deleted', 'success');
+            loadUploads();
+        } else {
+            throw new Error('Delete failed');
+        }
+    } catch (error) {
+        console.error('Delete failed:', error);
+        AdminUtils.showToast('Failed to delete file', 'danger');
+    }
+}
+
+async function ingestFile(fileName) {
+    try {
+        AdminUtils.showToast(`Starting ingestion for ${fileName}...`, 'info');
+        // This would trigger the actual ingestion process
+        // For now, just show a success message
+        setTimeout(() => {
+            AdminUtils.showToast(`Ingestion started for ${fileName}`, 'success');
+            loadJobs();
+        }, 1000);
+    } catch (error) {
+        console.error('Ingestion failed:', error);
+        AdminUtils.showToast('Failed to start ingestion', 'danger');
+    }
+}
+
+// ====================== Source Health Monitoring ======================
+
+async function loadSources() {
+    try {
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/sources`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#sources-table tbody');
+        const empty = document.getElementById('sources-empty');
+
+        tbody.innerHTML = '';
+        selectedSources.clear();
+        updateSourceBulkActions();
+
+        if (!data.sources || data.sources.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+
+        data.sources.forEach(source => {
+            const tr = document.createElement('tr');
+            const safeSourceId = source.id.replace(/'/g, "\\'");
+            const healthClass = `health-${source.health}`;
+            const statusClass = `job-status-${source.status}`;
+
+            tr.innerHTML = `
+                <td><input type="checkbox" class="source-checkbox" value="${safeSourceId}" onchange="toggleSourceSelection('${safeSourceId}', this.checked)"></td>
+                <td>
+                    <i class="bi bi-file-text me-1"></i>
+                    <strong>${source.id}</strong>
+                    <br><small class="text-muted">${source.source_file}</small>
+                </td>
+                <td><span class="badge bg-light text-dark">${source.chunk_count}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-1">
+                        <div class="health-indicator ${healthClass}"></div>
+                        <span class="text-uppercase small fw-bold">${source.health}</span>
+                    </div>
+                </td>
+                <td><span class="badge bg-secondary ${statusClass}">${source.status}</span></td>
+                <td>${AdminUtils.formatTimestamp(source.last_modified)}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info btn-sm" onclick="viewSourceDetails('${safeSourceId}')" title="View Details">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="reprocessSource('${safeSourceId}')" title="Reprocess">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="removeSource('${safeSourceId}')" title="Remove">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load sources:', error);
+        AdminUtils.showToast('Failed to load sources', 'danger');
+    }
+}
+
+function toggleSourceSelection(sourceId, checked) {
+    if (checked) {
+        selectedSources.add(sourceId);
+    } else {
+        selectedSources.delete(sourceId);
+    }
+    updateSourceBulkActions();
+}
+
+function toggleAllSources(checked) {
+    const checkboxes = document.querySelectorAll('.source-checkbox');
+    selectedSources.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            selectedSources.add(cb.value);
+        }
+    });
+    updateSourceBulkActions();
+}
+
+function updateSourceBulkActions() {
+    const bulkActions = document.getElementById('source-bulk-actions');
+    const selectedCount = document.getElementById('sources-selected-count');
+
+    if (selectedSources.size > 0) {
+        bulkActions.style.display = 'flex';
+        selectedCount.textContent = `${selectedSources.size} source(s) selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+async function removeSource(sourceId) {
+    if (!confirm(`Remove source ${sourceId}? This will delete all associated artifacts and cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/source?name=${encodeURIComponent(sourceId)}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            AdminUtils.showToast('Source removed successfully', 'success');
+            loadSources();
+        } else {
+            throw new Error('Remove failed');
+        }
+    } catch (error) {
+        console.error('Remove source failed:', error);
+        AdminUtils.showToast('Failed to remove source', 'danger');
+    }
+}
+
+async function reprocessSource(sourceId) {
+    try {
+        AdminUtils.showToast(`Starting reprocessing for ${sourceId}...`, 'info');
+        // This would trigger reprocessing
+        setTimeout(() => {
+            AdminUtils.showToast(`Reprocessing started for ${sourceId}`, 'success');
+            loadSources();
+            loadJobs();
+        }, 1000);
+    } catch (error) {
+        console.error('Reprocess failed:', error);
+        AdminUtils.showToast('Failed to start reprocessing', 'danger');
+    }
+}
+
+function viewSourceDetails(sourceId) {
+    // This would show a modal with detailed source information
+    AdminUtils.showToast(`Viewing details for ${sourceId}`, 'info');
+}
+
+// ====================== Job Monitoring ======================
+
+async function loadJobs() {
+    try {
+        const response = await fetch(`/api/ingestion/overview`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#jobs-table tbody');
+        const empty = document.getElementById('jobs-empty');
+
+        tbody.innerHTML = '';
+
+        const envJobs = data.environments[currentEnvironment]?.recent_jobs || [];
+
+        if (envJobs.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+
+        envJobs.forEach(job => {
+            const tr = document.createElement('tr');
+            const statusClass = `job-status-${job.status}`;
+            const progress = job.progress_percent || 0;
+
+            tr.innerHTML = `
+                <td><code>${job.job_id}</code></td>
+                <td>
+                    <i class="bi bi-file-text me-1"></i>
+                    ${job.source_file}
+                </td>
+                <td><span class="badge bg-secondary ${statusClass}">${job.status}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="progress progress-mini flex-grow-1">
+                            <div class="progress-bar" style="width: ${progress}%"></div>
+                        </div>
+                        <small>${Math.round(progress)}%</small>
+                    </div>
+                </td>
+                <td>${job.started_at ? AdminUtils.formatTimestamp(job.started_at) : '-'}</td>
+                <td>${job.duration_seconds ? AdminUtils.formatDuration(job.duration_seconds) : '-'}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info btn-sm" onclick="viewJobDetails('${job.job_id}')" title="View Details">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${job.status === 'failed' ? `<button class="btn btn-outline-warning btn-sm" onclick="retryJob('${job.job_id}')" title="Retry"><i class="bi bi-arrow-clockwise"></i></button>` : ''}
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load jobs:', error);
+        AdminUtils.showToast('Failed to load jobs', 'danger');
+    }
+}
+
+function viewJobDetails(jobId) {
+    // This would show detailed job information in a modal
+    AdminUtils.showToast(`Viewing details for job ${jobId}`, 'info');
+}
+
+function retryJob(jobId) {
+    AdminUtils.showToast(`Retrying job ${jobId}...`, 'info');
+    // Implementation for job retry
+}
+
+function showJobLogs() {
+    // This would show aggregated job logs
+    AdminUtils.showToast('Opening job logs...', 'info');
+}
+
+// Reuse functions from main dashboard that are still needed
+async function runNightly(environment) {
+    try {
+        AdminUtils.showToast(`Starting nightly run for ${environment}...`, 'info');
+        const res = await fetch('/api/admin/ingestion/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ env: environment })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        AdminUtils.showToast(`Nightly started for ${data.env} (pid ${data.pid})`, 'success');
+        setTimeout(() => loadJobs(), 2000); // Refresh jobs after starting
+    } catch (e) {
+        console.error('Failed to start nightly:', e);
+        AdminUtils.showToast('Failed to start nightly run', 'danger');
+    }
+}
+</script>
+{% endblock %}

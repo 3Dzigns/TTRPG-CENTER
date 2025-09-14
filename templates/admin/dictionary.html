@@ -1,0 +1,703 @@
+{% extends "base.html" %}
+
+{% block title %}Dictionary Management - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Dictionary Management</h1>
+    <div class="btn-group" role="group">
+        <button class="btn btn-admin" onclick="addNewTerm()">
+            <i class="bi bi-plus-circle me-1"></i>Add Term
+        </button>
+        <button class="btn btn-outline-primary" onclick="refreshDictionary()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-download me-1"></i>Export
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="exportDictionary('json')">Export as JSON</a></li>
+                <li><a class="dropdown-item" href="#" onclick="exportDictionary('csv')">Export as CSV</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" onclick="importDictionary()">Import Terms</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Dictionary Statistics -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-primary" id="total-terms">--</div>
+                <div class="metric-label">Total Terms</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-success" id="verified-terms">--</div>
+                <div class="metric-label">Verified Terms</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-warning" id="pending-terms">--</div>
+                <div class="metric-label">Pending Review</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-info" id="categories">--</div>
+                <div class="metric-label">Categories</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Search and Filter -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="search-terms" placeholder="Search terms..." onkeyup="filterTerms()">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="category-filter" onchange="filterTerms()">
+                    <option value="">All Categories</option>
+                    <option value="spell">Spells</option>
+                    <option value="item">Items</option>
+                    <option value="creature">Creatures</option>
+                    <option value="location">Locations</option>
+                    <option value="rule">Rules</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="status-filter" onchange="filterTerms()">
+                    <option value="">All Status</option>
+                    <option value="verified">Verified</option>
+                    <option value="pending">Pending Review</option>
+                    <option value="draft">Draft</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Dictionary Terms Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-book me-2"></i>Dictionary Terms</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="selectAllTerms()" id="select-all-btn">
+                <i class="bi bi-check-square me-1"></i>Select All
+            </button>
+            <button class="btn btn-outline-danger" onclick="deleteSelectedTerms()" id="delete-selected-btn" style="display: none;">
+                <i class="bi bi-trash me-1"></i>Delete Selected
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="terms-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-book display-4 mb-2"></i>
+            <p>No dictionary terms found.</p>
+            <small>Add new terms to build your TTRPG dictionary.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="terms-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-checkbox" onchange="toggleAllTerms(this.checked)">
+                        </th>
+                        <th>Term</th>
+                        <th style="width: 120px;">Category</th>
+                        <th style="width: 100px;">Status</th>
+                        <th style="width: 100px;">Usage Count</th>
+                        <th style="width: 150px;">Last Updated</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="text-muted small" id="pagination-info">
+                Showing 0-0 of 0 terms
+            </div>
+            <nav>
+                <ul class="pagination pagination-sm mb-0" id="pagination-controls">
+                    <!-- Pagination will be dynamically generated -->
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Term Modal -->
+<div class="modal fade" id="termModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="termModalTitle">Add New Term</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="termForm">
+                    <input type="hidden" id="termId" value="">
+
+                    <div class="row mb-3">
+                        <div class="col-md-8">
+                            <label for="termName" class="form-label">Term Name *</label>
+                            <input type="text" class="form-control" id="termName" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="termCategory" class="form-label">Category *</label>
+                            <select class="form-select" id="termCategory" required>
+                                <option value="">Select Category</option>
+                                <option value="spell">Spell</option>
+                                <option value="item">Item</option>
+                                <option value="creature">Creature</option>
+                                <option value="location">Location</option>
+                                <option value="rule">Rule</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="termDefinition" class="form-label">Definition *</label>
+                        <textarea class="form-control" id="termDefinition" rows="4" required></textarea>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="termSource" class="form-label">Source</label>
+                            <input type="text" class="form-control" id="termSource" placeholder="e.g., Player's Handbook">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="termPage" class="form-label">Page Reference</label>
+                            <input type="text" class="form-control" id="termPage" placeholder="e.g., p. 123">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="termTags" class="form-label">Tags</label>
+                        <input type="text" class="form-control" id="termTags" placeholder="Comma-separated tags">
+                        <div class="form-text">Use tags to help with searching and organization</div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="termStatus" class="form-label">Status</label>
+                            <select class="form-select" id="termStatus">
+                                <option value="draft">Draft</option>
+                                <option value="pending">Pending Review</option>
+                                <option value="verified">Verified</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="termIsPublic">
+                                <label class="form-check-label" for="termIsPublic">
+                                    Make publicly visible
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="saveTerm()">Save Term</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Dictionary Terms</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="importFile" class="form-label">Select File</label>
+                    <input type="file" class="form-control" id="importFile" accept=".json,.csv">
+                    <div class="form-text">Supported formats: JSON, CSV</div>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="overwriteExisting">
+                    <label class="form-check-label" for="overwriteExisting">
+                        Overwrite existing terms with same name
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="performImport()">Import</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.metric-label {
+    color: var(--admin-secondary);
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    background: rgba(248, 250, 252, 0.8);
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.status-verified { background: #dcfce7; color: #166534; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-draft { background: #f1f5f9; color: #475569; }
+
+.category-spell { color: #7c3aed; }
+.category-item { color: #059669; }
+.category-creature { color: #dc2626; }
+.category-location { color: #2563eb; }
+.category-rule { color: #d97706; }
+.category-other { color: #64748b; }
+</style>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentPage = 1;
+let totalPages = 1;
+let selectedTerms = new Set();
+let allTerms = [];
+let filteredTerms = [];
+
+// Initialize dictionary management
+document.addEventListener('DOMContentLoaded', function() {
+    refreshDictionary();
+});
+
+async function refreshDictionary() {
+    AdminUtils.showToast('Refreshing dictionary...', 'info');
+    await Promise.all([
+        loadDictionaryStats(),
+        loadDictionaryTerms()
+    ]);
+    AdminUtils.showToast('Dictionary refreshed', 'success');
+}
+
+async function loadDictionaryStats() {
+    try {
+        // Mock data for now - replace with actual API call
+        const stats = {
+            total_terms: 1247,
+            verified_terms: 892,
+            pending_terms: 234,
+            categories: 6
+        };
+
+        document.getElementById('total-terms').textContent = stats.total_terms.toLocaleString();
+        document.getElementById('verified-terms').textContent = stats.verified_terms.toLocaleString();
+        document.getElementById('pending-terms').textContent = stats.pending_terms.toLocaleString();
+        document.getElementById('categories').textContent = stats.categories.toLocaleString();
+
+    } catch (error) {
+        console.error('Failed to load dictionary stats:', error);
+        AdminUtils.showToast('Failed to load statistics', 'danger');
+    }
+}
+
+async function loadDictionaryTerms() {
+    try {
+        // Mock data for now - replace with actual API call
+        allTerms = generateMockTerms();
+        filteredTerms = [...allTerms];
+        updateTermsDisplay();
+
+    } catch (error) {
+        console.error('Failed to load dictionary terms:', error);
+        AdminUtils.showToast('Failed to load dictionary terms', 'danger');
+    }
+}
+
+function generateMockTerms() {
+    // Generate some mock terms for demonstration
+    const categories = ['spell', 'item', 'creature', 'location', 'rule', 'other'];
+    const statuses = ['verified', 'pending', 'draft'];
+    const terms = [];
+
+    const sampleTerms = [
+        { name: 'Fireball', category: 'spell', definition: 'A 3rd-level evocation spell that creates a burst of flame.' },
+        { name: 'Sword of Sharpness', category: 'item', definition: 'A magical weapon that can sever limbs on critical hits.' },
+        { name: 'Ancient Red Dragon', category: 'creature', definition: 'A gargantuan dragon of immense power and cunning.' },
+        { name: 'Waterdeep', category: 'location', definition: 'The City of Splendors, largest city on the Sword Coast.' },
+        { name: 'Advantage', category: 'rule', definition: 'Roll two d20s and use the higher result.' },
+        { name: 'Initiative', category: 'rule', definition: 'Determines the order of turns in combat.' }
+    ];
+
+    sampleTerms.forEach((term, index) => {
+        terms.push({
+            id: index + 1,
+            name: term.name,
+            definition: term.definition,
+            category: term.category,
+            status: statuses[index % statuses.length],
+            source: 'Player\'s Handbook',
+            page: `p. ${100 + index * 15}`,
+            tags: ['combat', 'magic'].join(', '),
+            usage_count: Math.floor(Math.random() * 100),
+            is_public: true,
+            last_updated: Date.now() - (index * 86400000) // Days ago
+        });
+    });
+
+    return terms;
+}
+
+function updateTermsDisplay() {
+    const tbody = document.querySelector('#terms-table tbody');
+    const empty = document.getElementById('terms-empty');
+    const pageSize = 25;
+
+    tbody.innerHTML = '';
+    selectedTerms.clear();
+
+    if (filteredTerms.length === 0) {
+        empty.style.display = 'block';
+        updatePagination(0, 0);
+        return;
+    }
+
+    empty.style.display = 'none';
+
+    // Paginate results
+    totalPages = Math.ceil(filteredTerms.length / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, filteredTerms.length);
+    const pageTerms = filteredTerms.slice(startIndex, endIndex);
+
+    pageTerms.forEach(term => {
+        const tr = document.createElement('tr');
+        const statusClass = `status-${term.status}`;
+        const categoryClass = `category-${term.category}`;
+
+        tr.innerHTML = `
+            <td><input type="checkbox" class="term-checkbox" value="${term.id}" onchange="toggleTermSelection(${term.id}, this.checked)"></td>
+            <td>
+                <div>
+                    <strong>${term.name}</strong>
+                    <br>
+                    <small class="text-muted">${term.definition.substring(0, 80)}${term.definition.length > 80 ? '...' : ''}</small>
+                </div>
+            </td>
+            <td><span class="badge bg-light text-dark ${categoryClass}">${term.category}</span></td>
+            <td><span class="status-badge ${statusClass}">${term.status}</span></td>
+            <td><span class="badge bg-light text-dark">${term.usage_count}</span></td>
+            <td>${AdminUtils.formatTimestamp(term.last_updated / 1000)}</td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info btn-sm" onclick="viewTerm(${term.id})" title="View Details">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="editTerm(${term.id})" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteTerm(${term.id})" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    updatePagination(startIndex + 1, endIndex);
+    updateBulkActions();
+}
+
+function updatePagination(start, end) {
+    const info = document.getElementById('pagination-info');
+    const controls = document.getElementById('pagination-controls');
+
+    info.textContent = `Showing ${start}-${end} of ${filteredTerms.length} terms`;
+
+    // Generate pagination controls
+    controls.innerHTML = '';
+
+    if (totalPages <= 1) return;
+
+    // Previous button
+    const prevBtn = document.createElement('li');
+    prevBtn.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+    prevBtn.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage - 1})">&laquo;</a>`;
+    controls.appendChild(prevBtn);
+
+    // Page numbers
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        const pageBtn = document.createElement('li');
+        pageBtn.className = `page-item ${i === currentPage ? 'active' : ''}`;
+        pageBtn.innerHTML = `<a class="page-link" href="#" onclick="changePage(${i})">${i}</a>`;
+        controls.appendChild(pageBtn);
+    }
+
+    // Next button
+    const nextBtn = document.createElement('li');
+    nextBtn.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+    nextBtn.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage + 1})">&raquo;</a>`;
+    controls.appendChild(nextBtn);
+}
+
+function changePage(page) {
+    if (page >= 1 && page <= totalPages && page !== currentPage) {
+        currentPage = page;
+        updateTermsDisplay();
+    }
+}
+
+function filterTerms() {
+    const searchText = document.getElementById('search-terms').value.toLowerCase();
+    const categoryFilter = document.getElementById('category-filter').value;
+    const statusFilter = document.getElementById('status-filter').value;
+
+    filteredTerms = allTerms.filter(term => {
+        const matchesSearch = !searchText ||
+            term.name.toLowerCase().includes(searchText) ||
+            term.definition.toLowerCase().includes(searchText) ||
+            (term.tags && term.tags.toLowerCase().includes(searchText));
+
+        const matchesCategory = !categoryFilter || term.category === categoryFilter;
+        const matchesStatus = !statusFilter || term.status === statusFilter;
+
+        return matchesSearch && matchesCategory && matchesStatus;
+    });
+
+    currentPage = 1;
+    updateTermsDisplay();
+}
+
+function toggleTermSelection(termId, checked) {
+    if (checked) {
+        selectedTerms.add(termId);
+    } else {
+        selectedTerms.delete(termId);
+    }
+    updateBulkActions();
+}
+
+function toggleAllTerms(checked) {
+    const checkboxes = document.querySelectorAll('.term-checkbox');
+    selectedTerms.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            selectedTerms.add(parseInt(cb.value));
+        }
+    });
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const deleteBtn = document.getElementById('delete-selected-btn');
+    const selectAllBtn = document.getElementById('select-all-btn');
+
+    if (selectedTerms.size > 0) {
+        deleteBtn.style.display = 'inline-block';
+        selectAllBtn.textContent = 'Clear Selection';
+        selectAllBtn.onclick = clearSelection;
+    } else {
+        deleteBtn.style.display = 'none';
+        selectAllBtn.textContent = 'Select All';
+        selectAllBtn.onclick = selectAllTerms;
+    }
+}
+
+function selectAllTerms() {
+    document.getElementById('select-all-checkbox').checked = true;
+    toggleAllTerms(true);
+}
+
+function clearSelection() {
+    document.getElementById('select-all-checkbox').checked = false;
+    toggleAllTerms(false);
+}
+
+// Term CRUD operations
+function addNewTerm() {
+    document.getElementById('termModalTitle').textContent = 'Add New Term';
+    document.getElementById('termForm').reset();
+    document.getElementById('termId').value = '';
+    new bootstrap.Modal(document.getElementById('termModal')).show();
+}
+
+function editTerm(termId) {
+    const term = allTerms.find(t => t.id === termId);
+    if (!term) return;
+
+    document.getElementById('termModalTitle').textContent = 'Edit Term';
+    document.getElementById('termId').value = term.id;
+    document.getElementById('termName').value = term.name;
+    document.getElementById('termCategory').value = term.category;
+    document.getElementById('termDefinition').value = term.definition;
+    document.getElementById('termSource').value = term.source;
+    document.getElementById('termPage').value = term.page;
+    document.getElementById('termTags').value = term.tags;
+    document.getElementById('termStatus').value = term.status;
+    document.getElementById('termIsPublic').checked = term.is_public;
+
+    new bootstrap.Modal(document.getElementById('termModal')).show();
+}
+
+function saveTerm() {
+    const form = document.getElementById('termForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const termData = {
+        id: document.getElementById('termId').value,
+        name: document.getElementById('termName').value,
+        category: document.getElementById('termCategory').value,
+        definition: document.getElementById('termDefinition').value,
+        source: document.getElementById('termSource').value,
+        page: document.getElementById('termPage').value,
+        tags: document.getElementById('termTags').value,
+        status: document.getElementById('termStatus').value,
+        is_public: document.getElementById('termIsPublic').checked,
+        last_updated: Date.now()
+    };
+
+    // Mock save operation
+    const isEdit = termData.id !== '';
+
+    if (isEdit) {
+        const index = allTerms.findIndex(t => t.id == termData.id);
+        if (index !== -1) {
+            allTerms[index] = { ...allTerms[index], ...termData };
+        }
+        AdminUtils.showToast('Term updated successfully', 'success');
+    } else {
+        termData.id = allTerms.length + 1;
+        termData.usage_count = 0;
+        allTerms.push(termData);
+        AdminUtils.showToast('Term added successfully', 'success');
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById('termModal')).hide();
+    filterTerms(); // Refresh display
+    loadDictionaryStats(); // Update stats
+}
+
+function viewTerm(termId) {
+    const term = allTerms.find(t => t.id === termId);
+    if (!term) return;
+
+    // This would show a detailed view modal
+    AdminUtils.showToast(`Viewing details for: ${term.name}`, 'info');
+}
+
+function deleteTerm(termId) {
+    const term = allTerms.find(t => t.id === termId);
+    if (!term || !confirm(`Delete term "${term.name}"?`)) return;
+
+    const index = allTerms.findIndex(t => t.id === termId);
+    if (index !== -1) {
+        allTerms.splice(index, 1);
+        AdminUtils.showToast('Term deleted successfully', 'success');
+        filterTerms();
+        loadDictionaryStats();
+    }
+}
+
+function deleteSelectedTerms() {
+    if (selectedTerms.size === 0) return;
+
+    if (!confirm(`Delete ${selectedTerms.size} selected term(s)?`)) return;
+
+    allTerms = allTerms.filter(term => !selectedTerms.has(term.id));
+    selectedTerms.clear();
+
+    AdminUtils.showToast('Selected terms deleted', 'success');
+    filterTerms();
+    loadDictionaryStats();
+}
+
+// Import/Export functions
+function exportDictionary(format) {
+    AdminUtils.showToast(`Preparing ${format.toUpperCase()} export...`, 'info');
+
+    setTimeout(() => {
+        const filename = `dictionary_export_${new Date().toISOString().split('T')[0]}.${format}`;
+        AdminUtils.showToast(`Export ready: ${filename}`, 'success');
+        // Mock download trigger
+    }, 1500);
+}
+
+function importDictionary() {
+    new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+function performImport() {
+    const fileInput = document.getElementById('importFile');
+    const overwrite = document.getElementById('overwriteExisting').checked;
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        AdminUtils.showToast('Please select a file to import', 'warning');
+        return;
+    }
+
+    AdminUtils.showToast('Processing import...', 'info');
+
+    setTimeout(() => {
+        const importedCount = Math.floor(Math.random() * 50) + 10;
+        AdminUtils.showToast(`Successfully imported ${importedCount} terms`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+        refreshDictionary();
+    }, 2000);
+}
+</script>
+{% endblock %}
+

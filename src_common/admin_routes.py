@@ -91,7 +91,8 @@ async def admin_dashboard(request: Request):
             "title": "TTRPG Center - Admin Dashboard",
             "environment": os.getenv("APP_ENV", "dev"),
             "version": "0.1.0",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "active_nav": "dashboard",
         }
         return templates.TemplateResponse("admin_dashboard.html", context)
     except Exception as e:
@@ -471,3 +472,68 @@ async def clear_cache(environment: str):
     except Exception as e:
         logger.error(f"Clear cache error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Source Health Monitoring (Enhanced Ingestion Console)
+# -------------------------
+
+@admin_router.get("/api/ingestion/{environment}/sources")
+async def get_ingestion_sources(environment: str):
+    """Get ingested sources with health indicators and chunk counts."""
+    try:
+        sources_data = await ingestion_service.get_sources_health(environment)
+        return {"sources": sources_data}
+    except Exception as e:
+        logger.error(f"Get ingestion sources error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.delete("/api/ingestion/{environment}/source")
+async def remove_ingestion_source(environment: str, name: str = Query(...)):
+    """Remove an ingested source and all its artifacts."""
+    try:
+        success = await ingestion_service.remove_source(environment, name)
+        if success:
+            return {"message": f"Source {name} removed successfully", "removed": name}
+        else:
+            raise HTTPException(status_code=404, detail="Source not found or could not be removed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Remove ingestion source error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/admin/ingestion", response_class=HTMLResponse)
+async def admin_ingestion_page(request: Request):
+    context = {
+        "request": request,
+        "title": "Ingestion Console",
+        "active_nav": "ingestion",
+    }
+    return templates.TemplateResponse("admin/ingestion.html", context)
+
+@admin_router.get("/admin/dictionary", response_class=HTMLResponse)
+async def admin_dictionary_page(request: Request):
+    context = {
+        "request": request,
+        "title": "Dictionary Management",
+        "active_nav": "dictionary",
+    }
+    return templates.TemplateResponse("admin/dictionary.html", context)
+
+@admin_router.get("/admin/testing", response_class=HTMLResponse)
+async def admin_testing_page(request: Request):
+    context = {
+        "request": request,
+        "title": "Testing & Bugs",
+        "active_nav": "testing",
+    }
+    return templates.TemplateResponse("admin/testing.html", context)
+
+@admin_router.get("/admin/cache", response_class=HTMLResponse)
+async def admin_cache_page(request: Request):
+    context = {
+        "request": request,
+        "title": "Cache Control",
+        "active_nav": "cache",
+    }
+    return templates.TemplateResponse("admin/cache.html", context)
