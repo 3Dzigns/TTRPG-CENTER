@@ -232,33 +232,45 @@ class AdminStatusService:
             List of log entries with timestamps and messages
         """
         try:
-            log_file = Path(f"env/{env_name}/logs/app.log")
-            
-            if not log_file.exists():
+            # Look for logs in multiple standard locations
+            candidates = [
+                Path(f"env/{env_name}/logs"),
+                Path("/var/log/ttrpg"),
+            ]
+            files: List[Path] = []
+            for base in candidates:
+                if base.exists() and base.is_dir():
+                    files.extend([p for p in base.glob("*.log") if p.is_file()])
+            if not files:
                 return []
-            
-            # Read last N lines from log file
-            log_entries = []
-            with open(log_file, 'r', encoding='utf-8') as f:
-                # Simple tail implementation
-                all_lines = f.readlines()
-                recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-                
-                for line in recent_lines:
-                    try:
-                        # Try to parse as JSON log entry
-                        log_data = json.loads(line.strip())
-                        log_entries.append(log_data)
-                    except json.JSONDecodeError:
-                        # Fall back to plain text
-                        log_entries.append({
-                            "timestamp": time.time(),
-                            "level": "INFO",
-                            "message": line.strip(),
-                            "environment": env_name
-                        })
-            
-            return log_entries
+
+            # Choose most recent files and aggregate a tail
+            files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            selected = files[:3]
+            entries: List[Dict[str, Any]] = []
+            for lf in selected:
+                try:
+                    with open(lf, 'r', encoding='utf-8', errors='ignore') as f:
+                        all_lines = f.readlines()
+                        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                        for line in recent_lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                data = json.loads(line)
+                                entries.append(data)
+                            except json.JSONDecodeError:
+                                entries.append({
+                                    "timestamp": time.time(),
+                                    "level": "INFO",
+                                    "message": line,
+                                    "environment": env_name,
+                                    "source": str(lf.name),
+                                })
+                except Exception:
+                    continue
+            return entries
             
         except Exception as e:
             logger.error(f"Error getting logs for {env_name}: {e}")
@@ -275,7 +287,13 @@ class AdminStatusService:
             List of artifacts with metadata
         """
         try:
-            artifacts_path = Path(f"artifacts/{env_name}")
+            # Support both env-specific and current-env mounted path
+            # For current env, /app/artifacts is typically mounted to host artifacts/<env>
+            curr_env = os.getenv('APP_ENV', 'dev')
+            if env_name == curr_env:
+                artifacts_path = Path("/app/artifacts")
+            else:
+                artifacts_path = Path(f"artifacts/{env_name}")
             
             if not artifacts_path.exists():
                 return []

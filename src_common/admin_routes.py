@@ -9,10 +9,12 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends, Query
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends, Query, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+import shutil
+import contextlib
 
 from .logging import get_logger
 from .admin import (
@@ -225,6 +227,77 @@ async def admin_health_check():
         }
     except Exception as e:
         logger.error(f"Admin health check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Uploads management (Admin)
+# -------------------------
+
+def _uploads_dir(env: Optional[str] = None) -> str:
+    base = os.getenv("UPLOADS_DIR", "/data/uploads")
+    # Future: if env-specific upload roots are desired, compute here
+    os.makedirs(base, exist_ok=True)
+    return base
+
+@admin_router.get("/api/uploads")
+async def list_uploads(env: Optional[str] = Query(None)):
+    """List files in uploads directory with basic metadata."""
+    try:
+        root = _uploads_dir(env)
+        files: List[Dict[str, Any]] = []
+        for entry in os.scandir(root):
+            if not entry.is_file():
+                continue
+            stat = entry.stat()
+            files.append({
+                "name": entry.name,
+                "size_bytes": stat.st_size,
+                "modified_at": stat.st_mtime,
+            })
+        files.sort(key=lambda x: x["modified_at"], reverse=True)
+        return {"path": root, "count": len(files), "files": files}
+    except Exception as e:
+        logger.error(f"List uploads failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/uploads")
+async def upload_files(files: List[UploadFile] = File(...), env: Optional[str] = Form(None)):
+    """Upload one or more files to the uploads directory."""
+    try:
+        root = _uploads_dir(env)
+        saved: List[str] = []
+        for f in files:
+            name = os.path.basename(f.filename or "")
+            if not name:
+                continue
+            dest = os.path.join(root, name)
+            with open(dest, "wb") as out:
+                shutil.copyfileobj(f.file, out)
+            saved.append(name)
+        return {"saved": saved, "path": root}
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for f in files:
+            with contextlib.suppress(Exception):
+                f.file.close()
+
+@admin_router.delete("/api/uploads")
+async def delete_upload(name: str, env: Optional[str] = Query(None)):
+    """Delete a file from the uploads directory by name."""
+    try:
+        root = _uploads_dir(env)
+        safe_name = os.path.basename(name)
+        target = os.path.join(root, safe_name)
+        if not os.path.isfile(target):
+            raise HTTPException(status_code=404, detail="File not found")
+        os.remove(target)
+        return {"deleted": safe_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Cache control endpoints used by the Admin UI
