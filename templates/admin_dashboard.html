@@ -414,7 +414,7 @@ async function updateRecentActivity() {
                      onmouseover="this.style.backgroundColor='rgba(0,123,255,0.1)'"
                      onmouseout="this.style.backgroundColor='transparent'">
                     <div class="flex-grow-1">
-                        <small class="text-${getLogLevelClass(log.level)}">[${log.level}]</small>
+                        <small class="text-muted">[${log.level}]</small>
                         <small class="text-dark ms-2">${truncateMessage(log.message, 50)}</small>
                     </div>
                     <small class="text-muted">${new Date(log.timestamp * 1000).toLocaleTimeString()}</small>
@@ -764,7 +764,7 @@ function showLogDetails(environment, index) {
                     <strong>Environment:</strong> ${environment.toUpperCase()}
                 </div>
                 <div class="col-md-4">
-                    <strong>Level:</strong> <span class="badge bg-${getLogLevelClass(log.level)}">${log.level}</span>
+                    <strong>Level:</strong> <span class="badge bg-secondary">${log.level}</span>
                 </div>
                 <div class="col-md-4">
                     <strong>Timestamp:</strong> ${timestamp}
