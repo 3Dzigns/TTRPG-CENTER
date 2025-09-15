@@ -99,12 +99,7 @@ async def admin_dashboard(request: Request):
         logger.error(f"Error rendering admin dashboard: {e}")
         raise HTTPException(status_code=500, detail="Failed to render admin dashboard")
 
-# Root route - redirect to admin dashboard
-@admin_router.get("/", response_class=HTMLResponse)
-async def root_redirect():
-    """Redirect root route to admin dashboard."""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/admin", status_code=302)
+# Root route removed - User UI will handle the root route
 
 # API endpoints
 @admin_router.get("/api/status/overview")

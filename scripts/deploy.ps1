@@ -93,64 +93,110 @@ function Get-ComposeCommand {
 
 function Start-Stack {
     Write-Status "Starting Docker stack for environment: $Env"
-    
-    $composeArgs = @("up", "-d")
-    
+
+    # Always perform some cleanup before starting to ensure fresh deployment
+    Write-Status "Performing pre-deployment cleanup..."
+    try {
+        # Remove any stopped containers for this environment
+        $containers = docker ps -a --filter "name=ttrpg-.*-$Env" --format "{{.Names}}" 2>$null
+        if ($containers) {
+            foreach ($container in $containers) {
+                try {
+                    docker rm -f $container 2>$null | Out-Null
+                    Write-Status "  Removed old container: $container"
+                } catch {
+                    # Ignore errors
+                }
+            }
+        }
+
+        # Clean dangling images
+        docker image prune -f 2>$null | Out-Null
+        Write-Status "Pre-deployment cleanup completed"
+    } catch {
+        Write-Status "Pre-deployment cleanup had issues (non-critical)" -Level "Warning"
+    }
+
+    $composeArgs = @("up", "-d", "--force-recreate")
+
     if ($Build) {
         $composeArgs += "--build"
     }
-    
+
     if ($Service) {
         $composeArgs += $Service
     }
-    
+
     $cmd = Get-ComposeCommand -ExtraArgs $composeArgs
-    
+
     if ($VerboseOutput) {
         Write-Status "Execute: $($cmd -join ' ')"
     }
-    
+
     & $cmd[0] $cmd[1..($cmd.Length-1)]
-    
+
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to start stack (exit code: $LASTEXITCODE)"
     }
-    
+
     Write-Status "Waiting for services to become healthy..."
     Start-Sleep -Seconds 10
-    
+
     Show-Status
     Test-HealthEndpoint
 }
 
 function Stop-Stack {
     Write-Status "Stopping Docker stack for environment: $Env"
-    
-    $composeArgs = @("down")
-    
+
+    $composeArgs = @("down", "--remove-orphans")
+
     if ($Purge) {
-        Write-Status "Purging volumes and orphaned containers..." -Level "Warning"
+        Write-Status "Purging volumes and all related resources..." -Level "Warning"
         $composeArgs += "-v"
-        $composeArgs += "--remove-orphans"
+        $composeArgs += "--rmi"
+        $composeArgs += "local"
     }
-    
+
     if ($Service) {
         $composeArgs = @("stop")
         $composeArgs += $Service
     }
-    
+
     $cmd = Get-ComposeCommand -ExtraArgs $composeArgs
-    
-    if ($Verbose) {
+
+    if ($VerboseOutput) {
         Write-Status "Execute: $($cmd -join ' ')"
     }
-    
+
     & $cmd[0] $cmd[1..($cmd.Length-1)]
-    
+
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to stop stack (exit code: $LASTEXITCODE)"
     }
-    
+
+    # Additional cleanup for better deployment reliability
+    if (-not $Service) {
+        Write-Status "Performing post-stop cleanup..."
+        try {
+            # Clean up any remaining containers for this environment
+            $containers = docker ps -a --filter "name=ttrpg-.*-$Env" --format "{{.Names}}" 2>$null
+            if ($containers) {
+                foreach ($container in $containers) {
+                    try {
+                        docker rm -f $container 2>$null | Out-Null
+                        Write-Status "  Cleaned remaining container: $container"
+                    } catch {
+                        # Ignore errors
+                    }
+                }
+            }
+            Write-Status "Post-stop cleanup completed"
+        } catch {
+            Write-Status "Post-stop cleanup had issues (non-critical)" -Level "Warning"
+        }
+    }
+
     Write-Status "Stack stopped successfully" -Level "Success"
 }
 

@@ -253,14 +253,50 @@ try {
     $imageInfo = docker images $imageTag --format "{{.Size}}"
     Write-Status "  Image Size: $imageInfo" -Level "Success"
 
-    # Cleanup old Docker images to save space
-    Write-Status "Cleaning up old Docker images..." -Level "Info"
+    # Comprehensive cleanup to save space and ensure fresh deployments
+    Write-Status "Performing comprehensive cleanup..." -Level "Info"
     try {
+        # Clean Docker images (more aggressive)
+        Write-Status "  Pruning dangling images..." -Level "Info"
         docker image prune -f | Out-Null
-        Write-Status "Docker cleanup completed" -Level "Success"
+
+        # Clean build cache
+        Write-Status "  Cleaning Docker build cache..." -Level "Info"
+        docker builder prune -f | Out-Null
+
+        # Clean old TTRPG images (keep only last 2 versions)
+        Write-Status "  Removing old TTRPG images..." -Level "Info"
+        $oldImages = docker images "$ImageName" --format "{{.Repository}}:{{.Tag}}" | Select-Object -Skip 2
+        if ($oldImages) {
+            foreach ($image in $oldImages) {
+                try {
+                    docker rmi $image 2>$null
+                    Write-Status "    Removed: $image" -Level "Info"
+                } catch {
+                    # Ignore errors for images in use
+                }
+            }
+        }
+
+        # Clean artifacts directory for current environment
+        $artifactsPath = "artifacts/$Env"
+        if (Test-Path $artifactsPath) {
+            Write-Status "  Cleaning artifacts directory: $artifactsPath..." -Level "Info"
+            $oldArtifacts = Get-ChildItem $artifactsPath -Directory | Sort-Object LastWriteTime -Descending | Select-Object -Skip 5
+            foreach ($artifact in $oldArtifacts) {
+                try {
+                    Remove-Item $artifact.FullName -Recurse -Force
+                    Write-Status "    Removed artifact: $($artifact.Name)" -Level "Info"
+                } catch {
+                    Write-Status "    Failed to remove artifact: $($artifact.Name)" -Level "Warning"
+                }
+            }
+        }
+
+        Write-Status "Comprehensive cleanup completed" -Level "Success"
     }
     catch {
-        Write-Status "Docker cleanup failed (non-critical): $($_.Exception.Message)" -Level "Warning"
+        Write-Status "Cleanup failed (non-critical): $($_.Exception.Message)" -Level "Warning"
     }
 
     Write-Status "Build completed successfully!" -Level "Success"

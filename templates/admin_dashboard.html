@@ -773,8 +773,8 @@ function showLogDetails(environment, index) {
         </div>
         <div class="log-content">${log.message}</div>
         <div class="btn-action">
-            <button type="button" class="btn btn-primary" onclick="openAllLogs()">
-                <i class="bi bi-list-ul me-1"></i>View All Logs
+            <button type="button" class="btn btn-primary" onclick="focusParent()">
+                <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
             </button>
             <button type="button" class="btn btn-secondary" onclick="window.close()">
                 <i class="bi bi-x-circle me-1"></i>Close Window
@@ -782,11 +782,10 @@ function showLogDetails(environment, index) {
         </div>
     </div>
     <script>
-        function openAllLogs() {
-            // Focus back to parent window and trigger view logs
+        function focusParent() {
+            // Focus back to parent window
             if (window.opener && !window.opener.closed) {
                 window.opener.focus();
-                window.opener.viewLogs('${environment}');
             }
             window.close();
         }
@@ -803,7 +802,7 @@ function showLogDetails(environment, index) {
         newWindow.document.close();
         newWindow.focus();
     } else {
-        AdminUtils.showToast('Pop-up blocked. Please allow pop-ups for this site.', 'warning');
+        alert('Pop-up blocked. Please allow pop-ups for this site.');
     }
 }
 

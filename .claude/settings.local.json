@@ -19,7 +19,11 @@
       "Bash(docker logs:*)",
       "Bash(git pull:*)",
       "Bash(docker image prune:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker stats:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

@@ -82,6 +82,12 @@ class UserConnectionManager:
 manager = UserConnectionManager()
 
 # Routes
+@user_router.get("/", response_class=HTMLResponse)
+async def root_user_interface(request: Request):
+    """Root route - redirect to user interface."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui", status_code=302)
+
 @user_router.get("/ui", response_class=HTMLResponse)
 async def user_interface(request: Request):
     """Render the main user interface with LCARS/retro terminal theme."""
