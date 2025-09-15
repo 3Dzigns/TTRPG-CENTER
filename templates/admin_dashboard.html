@@ -403,8 +403,9 @@ async function updateRecentActivity() {
         const logs = await response.json();
 
         if (Array.isArray(logs) && logs.length > 0) {
-            // Take only the first 3 logs for compact display
-            const recentLogs = logs.slice(0, 3);
+            // Sort logs by timestamp descending (newest first) and take top 3
+            const sortedLogs = logs.sort((a, b) => b.timestamp - a.timestamp);
+            const recentLogs = sortedLogs.slice(0, 3);
 
             activityElement.innerHTML = recentLogs.map((log, index) => `
                 <div class="d-flex justify-content-between align-items-center mb-2 p-2 border-bottom log-entry"
@@ -700,7 +701,7 @@ function showLogDetails(environment, index) {
     const log = window.currentActivityLogs[index];
     const modalHtml = `
         <div class="modal fade" id="logDetailModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
+            <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">Log Entry Details</h5>
@@ -715,7 +716,7 @@ function showLogDetails(environment, index) {
                         </div>
                         <div class="mb-3">
                             <strong>Message:</strong>
-                            <pre class="bg-light p-3 mt-2" style="white-space: pre-wrap; word-break: break-word;">${log.message}</pre>
+                            <pre class="bg-dark text-light p-3 mt-2" style="height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">${log.message}</pre>
                         </div>
                     </div>
                     <div class="modal-footer">
