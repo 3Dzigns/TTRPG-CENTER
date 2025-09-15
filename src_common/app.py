@@ -100,6 +100,14 @@ class TTRPGApp:
         except ImportError as e:
             logger.warning(f"Phase 3 routes not available: {e}")
 
+        # Phase 5: User UI routes (must come first for root route precedence)
+        try:
+            from src_common.user_routes import user_router
+            self.app.include_router(user_router)
+            logger.info("Phase 5 user routes loaded")
+        except ImportError as e:
+            logger.warning(f"Phase 5 user routes not available: {e}")
+
         # Phase 4: Admin UI routes (prefixed to avoid conflicts)
         try:
             from src_common.admin_routes import admin_router
@@ -107,14 +115,6 @@ class TTRPGApp:
             logger.info("Phase 4 admin routes loaded")
         except ImportError as e:
             logger.warning(f"Phase 4 admin routes not available: {e}")
-
-        # Phase 5: User UI routes (must come after admin routes for proper precedence)
-        try:
-            from src_common.user_routes import user_router
-            self.app.include_router(user_router)
-            logger.info("Phase 5 user routes loaded")
-        except ImportError as e:
-            logger.warning(f"Phase 5 user routes not available: {e}")
 
         # Static files and templates
         static_dir = Path("static")
