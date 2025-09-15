@@ -699,52 +699,112 @@ function showLogDetails(environment, index) {
     }
 
     const log = window.currentActivityLogs[index];
-    const modalHtml = `
-        <div class="modal fade" id="logDetailModal" tabindex="-1">
-            <div class="modal-dialog modal-xl">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Log Entry Details</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <strong>Timestamp:</strong> ${new Date(log.timestamp * 1000).toLocaleString()}
-                        </div>
-                        <div class="mb-3">
-                            <strong>Level:</strong> <span class="badge bg-${getLogLevelClass(log.level)}">${log.level}</span>
-                        </div>
-                        <div class="mb-3">
-                            <strong>Message:</strong>
-                            <pre class="bg-dark text-light p-3 mt-2" style="height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">${log.message}</pre>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-primary" onclick="viewLogs('${environment}')">View All Logs</button>
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
+    const timestamp = new Date(log.timestamp * 1000).toLocaleString();
+
+    // Create HTML content for the pop-out window
+    const windowContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Entry Details - ${environment.toUpperCase()}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .log-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .log-header {
+            background: linear-gradient(135deg, #495057, #6c757d);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 0;
+        }
+        .log-content {
+            background: #1e1e1e;
+            color: #f8f9fa;
+            padding: 20px;
+            border-radius: 0 0 8px 8px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+            line-height: 1.4;
+        }
+        .badge {
+            font-size: 0.9rem;
+        }
+        .btn-action {
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="log-container">
+        <div class="log-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="bi bi-file-text me-2"></i>Log Entry Details</h4>
+                <button type="button" class="btn btn-outline-light btn-sm" onclick="window.close()">
+                    <i class="bi bi-x-lg"></i> Close
+                </button>
+            </div>
+            <hr class="my-3" style="border-color: rgba(255,255,255,0.3);">
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Environment:</strong> ${environment.toUpperCase()}
+                </div>
+                <div class="col-md-4">
+                    <strong>Level:</strong> <span class="badge bg-${getLogLevelClass(log.level)}">${log.level}</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Timestamp:</strong> ${timestamp}
                 </div>
             </div>
         </div>
+        <div class="log-content">${log.message}</div>
+        <div class="btn-action">
+            <button type="button" class="btn btn-primary" onclick="openAllLogs()">
+                <i class="bi bi-list-ul me-1"></i>View All Logs
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="window.close()">
+                <i class="bi bi-x-circle me-1"></i>Close Window
+            </button>
+        </div>
+    </div>
+    <script>
+        function openAllLogs() {
+            // Focus back to parent window and trigger view logs
+            if (window.opener && !window.opener.closed) {
+                window.opener.focus();
+                window.opener.viewLogs('${environment}');
+            }
+            window.close();
+        }
+    </script>
+</body>
+</html>
     `;
 
-    // Remove existing modal if present
-    const existingModal = document.getElementById('logDetailModal');
-    if (existingModal) {
-        existingModal.remove();
+    // Open new window with the log details
+    const newWindow = window.open('', '_blank', 'width=1000,height=700,scrollbars=yes,resizable=yes,status=yes');
+
+    if (newWindow) {
+        newWindow.document.write(windowContent);
+        newWindow.document.close();
+        newWindow.focus();
+    } else {
+        AdminUtils.showToast('Pop-up blocked. Please allow pop-ups for this site.', 'warning');
     }
-
-    // Add new modal to body
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('logDetailModal'));
-    modal.show();
-
-    // Clean up modal after it's hidden
-    document.getElementById('logDetailModal').addEventListener('hidden.bs.modal', function() {
-        this.remove();
-    });
 }
 
 // Make updateDashboard available globally for WebSocket updates
