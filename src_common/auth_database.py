@@ -15,7 +15,7 @@ import logging
 
 from .auth_models import Base, AuthUser, AuthTokenBlacklist, UserRole
 from .jwt_service import PasswordService
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

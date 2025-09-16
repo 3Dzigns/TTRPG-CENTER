@@ -95,14 +95,8 @@
                     </div>
                 </div>
                 <div class="mt-3">
-                    <div class="btn-group w-100" role="group">
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewLogs('dev')">
-                            <i class="bi bi-file-text me-1"></i>Logs
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewArtifacts('dev')">
-                            <i class="bi bi-archive me-1"></i>Artifacts
-                        </button>
-                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('dev')">
+                    <div class="d-grid">
+                        <button type="button" class="btn btn-admin" onclick="runAdHocIngestion('dev')">
                             <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
                     </div>
@@ -134,14 +128,8 @@
                     </div>
                 </div>
                 <div class="mt-3">
-                    <div class="btn-group w-100" role="group">
-                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="viewLogs('test')">
-                            <i class="bi bi-file-text me-1"></i>Logs
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="viewArtifacts('test')">
-                            <i class="bi bi-archive me-1"></i>Artifacts
-                        </button>
-                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('test')">
+                    <div class="d-grid">
+                        <button type="button" class="btn btn-admin" onclick="runAdHocIngestion('test')">
                             <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
                     </div>
@@ -173,16 +161,190 @@
                     </div>
                 </div>
                 <div class="mt-3">
-                    <div class="btn-group w-100" role="group">
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="viewLogs('prod')">
-                            <i class="bi bi-file-text me-1"></i>Logs
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="viewArtifacts('prod')">
-                            <i class="bi bi-archive me-1"></i>Artifacts
-                        </button>
-                        <button type="button" class="btn btn-sm btn-admin" onclick="runNightly('prod')" disabled>
+                    <div class="d-grid">
+                        <button type="button" class="btn btn-admin" onclick="runAdHocIngestion('prod')" disabled>
                             <i class="bi bi-play-circle me-1"></i>Run Ad-Hoc Ingestion
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AstraDB Sources Health -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-database me-2"></i>AstraDB Sources Health</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-admin me-2" onclick="refreshSourcesHealth()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                    <span class="badge bg-secondary" id="sources-last-updated">Loading...</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <h6>Development Environment</h6>
+                        <div id="dev-sources-health" class="sources-health-container">
+                            <div class="text-center text-muted">
+                                <div class="loading-spinner mb-2"></div>
+                                <small>Loading AstraDB sources...</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>Test Environment</h6>
+                        <div id="test-sources-health" class="sources-health-container">
+                            <div class="text-center text-muted">
+                                <div class="loading-spinner mb-2"></div>
+                                <small>Loading AstraDB sources...</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>Production Environment</h6>
+                        <div id="prod-sources-health" class="sources-health-container">
+                            <div class="text-center text-muted">
+                                <div class="loading-spinner mb-2"></div>
+                                <small>Loading AstraDB sources...</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MongoDB Dictionary Status -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-database-check me-2"></i>MongoDB Dictionary Status</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-admin me-2" onclick="refreshMongoDBStatus()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                    <span class="badge bg-secondary" id="mongodb-last-updated">Loading...</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <h6>Development Environment</h6>
+                        <div id="dev-mongodb-status" class="mongodb-status-container">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-database me-2"></i>Connection</span>
+                                <div class="status-badge" id="dev-mongo-connection">
+                                    <div class="loading-spinner"></div>
+                                    <span>Checking...</span>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-collection me-2"></i>Dictionary Entries</span>
+                                <span id="dev-mongo-entries" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-tags me-2"></i>Categories</span>
+                                <span id="dev-mongo-categories" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-speedometer2 me-2"></i>Avg Query Time</span>
+                                <span id="dev-mongo-perf" class="text-muted">--</span>
+                            </div>
+                            <div class="mt-2" id="dev-mongo-circuit" style="display: none;">
+                                <small class="text-warning">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    Circuit breaker open
+                                    <button class="btn btn-xs btn-outline-warning ms-1" onclick="resetCircuitBreaker('dev')" title="Reset circuit breaker">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>Test Environment</h6>
+                        <div id="test-mongodb-status" class="mongodb-status-container">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-database me-2"></i>Connection</span>
+                                <div class="status-badge" id="test-mongo-connection">
+                                    <div class="loading-spinner"></div>
+                                    <span>Checking...</span>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-collection me-2"></i>Dictionary Entries</span>
+                                <span id="test-mongo-entries" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-tags me-2"></i>Categories</span>
+                                <span id="test-mongo-categories" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-speedometer2 me-2"></i>Avg Query Time</span>
+                                <span id="test-mongo-perf" class="text-muted">--</span>
+                            </div>
+                            <div class="mt-2" id="test-mongo-circuit" style="display: none;">
+                                <small class="text-warning">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    Circuit breaker open
+                                    <button class="btn btn-xs btn-outline-warning ms-1" onclick="resetCircuitBreaker('test')" title="Reset circuit breaker">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>Production Environment</h6>
+                        <div id="prod-mongodb-status" class="mongodb-status-container">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-database me-2"></i>Connection</span>
+                                <div class="status-badge" id="prod-mongo-connection">
+                                    <div class="loading-spinner"></div>
+                                    <span>Checking...</span>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-collection me-2"></i>Dictionary Entries</span>
+                                <span id="prod-mongo-entries" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-tags me-2"></i>Categories</span>
+                                <span id="prod-mongo-categories" class="text-muted">--</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-speedometer2 me-2"></i>Avg Query Time</span>
+                                <span id="prod-mongo-perf" class="text-muted">--</span>
+                            </div>
+                            <div class="mt-2" id="prod-mongo-circuit" style="display: none;">
+                                <small class="text-warning">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    Circuit breaker open
+                                    <button class="btn btn-xs btn-outline-warning ms-1" onclick="resetCircuitBreaker('prod')" title="Reset circuit breaker">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="alert alert-info mb-0" id="mongodb-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>FR-015 MongoDB Integration:</strong>
+                            Dictionary management is now backed by MongoDB for improved performance and scalability.
+                            <span id="mongodb-backend-status" class="ms-2">
+                                <span class="badge bg-success">Active</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -227,14 +389,15 @@
     
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Recent Activity</h5>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Recent Ingestion Jobs</h5>
+                <span class="badge bg-info" id="recent-jobs-count">Top 3</span>
             </div>
             <div class="card-body">
-                <div id="recent-activity" style="max-height: 150px; overflow-y: auto;">
+                <div id="recent-jobs" style="max-height: 200px; overflow-y: auto;">
                     <div class="text-center text-muted">
                         <div class="loading-spinner mb-2"></div>
-                        <small>Loading recent activity...</small>
+                        <small>Loading recent jobs...</small>
                     </div>
                 </div>
             </div>
@@ -261,35 +424,6 @@
     </div>
 </div>
 
-<!-- Artifacts Modal -->
-<div class="modal fade" id="artifactsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Environment Artifacts</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div id="artifacts-content">Loading...</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Artifact Viewer Modal -->
-<div class="modal fade" id="artifactViewModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="artifact-view-title">Artifact</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <pre id="artifact-view-body" class="bg-dark text-light p-3" style="height: 500px; overflow-y: auto; white-space: pre-wrap;"></pre>
-            </div>
-        </div>
-    </div>
-    </div>
 
 {% endblock %}
 
@@ -297,56 +431,253 @@
 <script>
 let dashboardData = {};
 
+// DEBUG: Global debug flag
+window.ADMIN_DEBUG = true;
+
+function debugLog(message, data = null) {
+    if (window.ADMIN_DEBUG) {
+        console.log(`[ADMIN DEBUG] ${message}`, data || '');
+    }
+}
+
+function debugError(message, error = null) {
+    if (window.ADMIN_DEBUG) {
+        console.error(`[ADMIN ERROR] ${message}`, error || '');
+    }
+}
+
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', function() {
+    debugLog('DOMContentLoaded event fired');
+    debugLog('Starting admin dashboard initialization');
+    debugLog('Current location:', window.location.href);
+    debugLog('User agent:', navigator.userAgent);
+
+    // Test basic network connectivity
+    testNetworkConnectivity();
+
     loadDashboardData();
     setInterval(loadDashboardData, 30000); // Refresh every 30 seconds
 });
 
-async function loadDashboardData() {
+async function testNetworkConnectivity() {
+    debugLog('Testing network connectivity...');
     try {
-        const response = await fetch('/api/status/overview');
-        const data = await response.json();
-        dashboardData = data;
-        updateDashboard(data);
-        
-        // Load cache overview
-        const cacheResponse = await fetch('/api/cache/overview');
-        const cacheData = await cacheResponse.json();
-        updateCacheToggles(cacheData);
-        
+        const response = await fetch('/healthz');
+        debugLog('Health check response status:', response.status);
+        if (response.ok) {
+            debugLog('✓ Basic connectivity working');
+        }
     } catch (error) {
-        console.error('Error loading dashboard data:', error);
-        AdminUtils.showToast('Error loading dashboard data', 'danger');
+        debugError('✗ Basic connectivity failed', error);
     }
 }
 
-function updateDashboard(data) {
-    // Update system metrics
-    if (data.system_metrics) {
-        document.getElementById('cpu-usage').textContent = data.system_metrics.cpu_percent.toFixed(1) + '%';
-        document.getElementById('memory-usage').textContent = data.system_metrics.memory_percent.toFixed(1) + '%';
-        document.getElementById('disk-usage').textContent = data.system_metrics.disk_percent.toFixed(1) + '%';
-        document.getElementById('service-uptime').textContent = AdminUtils.formatDuration(data.service_uptime_seconds);
+async function loadDashboardData() {
+    debugLog('=== Starting loadDashboardData ===');
+
+    try {
+        debugLog('Fetching /api/status/overview...');
+        const response = await fetch('/api/status/overview');
+        debugLog('Status overview response status:', response.status);
+        debugLog('Status overview response headers:', Object.fromEntries(response.headers.entries()));
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        debugLog('Status overview data received:', data);
+        dashboardData = data;
+
+        debugLog('Calling updateDashboard...');
+        updateDashboard(data);
+
+        // Load cache overview
+        debugLog('Fetching /api/cache/overview...');
+        const cacheResponse = await fetch('/api/cache/overview');
+        debugLog('Cache overview response status:', cacheResponse.status);
+
+        if (!cacheResponse.ok) {
+            throw new Error(`Cache API HTTP ${cacheResponse.status}: ${cacheResponse.statusText}`);
+        }
+
+        const cacheData = await cacheResponse.json();
+        debugLog('Cache overview data received:', cacheData);
+
+        debugLog('Calling updateCacheToggles...');
+        updateCacheToggles(cacheData);
+
+        // Load AstraDB sources health
+        debugLog('Loading AstraDB sources health...');
+        await loadSourcesHealth();
+
+        // Load recent ingestion jobs
+        debugLog('Loading recent ingestion jobs...');
+        await loadRecentJobs();
+
+        // Load MongoDB status
+        debugLog('Loading MongoDB dictionary status...');
+        await loadMongoDBStatus();
+
+        debugLog('=== loadDashboardData completed successfully ===');
+
+    } catch (error) {
+        debugError('Error in loadDashboardData:', error);
+        debugError('Error stack:', error.stack);
+        console.error('Error loading dashboard data:', error);
+        AdminUtils.showToast(`Error loading dashboard data: ${error.message}`, 'danger');
+
+        // Show error in UI
+        showNetworkError(error.message);
     }
-    
-    // Update overall status
-    const statusElement = document.getElementById('overall-status');
-    statusElement.innerHTML = `
-        <i class="bi bi-${getStatusIcon(data.overall_status)}"></i>
-        <span>${data.overall_status.charAt(0).toUpperCase() + data.overall_status.slice(1)}</span>
+}
+
+function showNetworkError(message) {
+    debugLog('Showing network error in UI:', message);
+    const errorHtml = `
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading">Connection Error</h4>
+            <p><strong>Failed to load admin data:</strong> ${message}</p>
+            <hr>
+            <p class="mb-0">
+                <button class="btn btn-outline-danger" onclick="testNetworkDiagnostics()">
+                    Run Network Diagnostics
+                </button>
+                <button class="btn btn-outline-secondary ms-2" onclick="loadDashboardData()">
+                    Retry
+                </button>
+            </p>
+        </div>
     `;
-    statusElement.className = `status-badge status-${data.overall_status}`;
-    
-    // Update environment status
-    if (data.environments) {
-        data.environments.forEach(env => {
-            updateEnvironmentStatus(env);
-        });
+
+    // Insert error message at top of dashboard
+    const container = document.querySelector('.main-content');
+    if (container) {
+        container.insertAdjacentHTML('afterbegin', errorHtml);
     }
-    
-    // Update recent activity (placeholder)
-    updateRecentActivity();
+}
+
+async function testNetworkDiagnostics() {
+    debugLog('Running network diagnostics...');
+    const endpoints = [
+        '/healthz',
+        '/api/status/overview',
+        '/api/cache/overview',
+        '/api/status/dev/logs?lines=1'
+    ];
+
+    const results = [];
+    for (const endpoint of endpoints) {
+        try {
+            debugLog(`Testing ${endpoint}...`);
+            const start = Date.now();
+            const response = await fetch(endpoint);
+            const duration = Date.now() - start;
+
+            results.push({
+                endpoint,
+                status: response.status,
+                ok: response.ok,
+                duration: `${duration}ms`,
+                error: null
+            });
+
+            debugLog(`✓ ${endpoint}: ${response.status} (${duration}ms)`);
+        } catch (error) {
+            debugError(`✗ ${endpoint}:`, error);
+            results.push({
+                endpoint,
+                status: 'ERROR',
+                ok: false,
+                duration: 'N/A',
+                error: error.message
+            });
+        }
+    }
+
+    debugLog('Network diagnostics results:', results);
+    AdminUtils.showToast('Network diagnostics completed - check browser console', 'info');
+}
+
+function updateDashboard(data) {
+    debugLog('=== Starting updateDashboard ===', data);
+
+    try {
+        // Update system metrics
+        if (data.system_metrics) {
+            debugLog('Updating system metrics...');
+
+            const cpuElement = document.getElementById('cpu-usage');
+            const memoryElement = document.getElementById('memory-usage');
+            const diskElement = document.getElementById('disk-usage');
+            const uptimeElement = document.getElementById('service-uptime');
+
+            if (cpuElement) {
+                cpuElement.textContent = data.system_metrics.cpu_percent.toFixed(1) + '%';
+                debugLog('✓ CPU usage updated:', cpuElement.textContent);
+            } else {
+                debugError('✗ CPU usage element not found: cpu-usage');
+            }
+
+            if (memoryElement) {
+                memoryElement.textContent = data.system_metrics.memory_percent.toFixed(1) + '%';
+                debugLog('✓ Memory usage updated:', memoryElement.textContent);
+            } else {
+                debugError('✗ Memory usage element not found: memory-usage');
+            }
+
+            if (diskElement) {
+                diskElement.textContent = data.system_metrics.disk_percent.toFixed(1) + '%';
+                debugLog('✓ Disk usage updated:', diskElement.textContent);
+            } else {
+                debugError('✗ Disk usage element not found: disk-usage');
+            }
+
+            if (uptimeElement) {
+                const uptimeText = AdminUtils.formatDuration(data.service_uptime_seconds);
+                uptimeElement.textContent = uptimeText;
+                debugLog('✓ Service uptime updated:', uptimeText);
+            } else {
+                debugError('✗ Service uptime element not found: service-uptime');
+            }
+        } else {
+            debugError('✗ No system_metrics in data');
+        }
+
+        // Update overall status
+        debugLog('Updating overall status...');
+        const statusElement = document.getElementById('overall-status');
+        if (statusElement) {
+            statusElement.innerHTML = `
+                <i class="bi bi-${getStatusIcon(data.overall_status)}"></i>
+                <span>${data.overall_status.charAt(0).toUpperCase() + data.overall_status.slice(1)}</span>
+            `;
+            statusElement.className = `status-badge status-${data.overall_status}`;
+            debugLog('✓ Overall status updated:', data.overall_status);
+        } else {
+            debugError('✗ Overall status element not found: overall-status');
+        }
+
+        // Update environment status
+        if (data.environments) {
+            debugLog(`Updating ${data.environments.length} environments...`);
+            data.environments.forEach((env, index) => {
+                debugLog(`Processing environment ${index + 1}:`, env.name);
+                updateEnvironmentStatus(env);
+            });
+        } else {
+            debugError('✗ No environments in data');
+        }
+
+        // Recent jobs are loaded separately in loadDashboardData
+
+        debugLog('=== updateDashboard completed successfully ===');
+
+    } catch (error) {
+        debugError('Error in updateDashboard:', error);
+        debugError('Error stack:', error.stack);
+    }
 }
 
 function updateEnvironmentStatus(env) {
@@ -393,52 +724,6 @@ function updateCacheToggles(cacheData) {
     }
 }
 
-async function updateRecentActivity() {
-    const activityElement = document.getElementById('recent-activity');
-
-    try {
-        // Load recent logs from the current environment
-        const currentEnv = 'dev'; // Could be dynamic based on active environment
-        const response = await fetch(`/api/status/${currentEnv}/logs?lines=10`);
-        const logs = await response.json();
-
-        if (Array.isArray(logs) && logs.length > 0) {
-            // Sort logs by timestamp descending (newest first) and take top 3
-            const sortedLogs = logs.sort((a, b) => b.timestamp - a.timestamp);
-            const recentLogs = sortedLogs.slice(0, 3);
-
-            activityElement.innerHTML = recentLogs.map((log, index) => `
-                <div class="d-flex justify-content-between align-items-center mb-2 p-2 border-bottom log-entry"
-                     style="cursor: pointer; border-radius: 4px;"
-                     onclick="showLogDetails('${currentEnv}', ${index})"
-                     onmouseover="this.style.backgroundColor='rgba(0,123,255,0.1)'"
-                     onmouseout="this.style.backgroundColor='transparent'">
-                    <div class="flex-grow-1">
-                        <small class="text-muted">[${log.level}]</small>
-                        <small class="text-dark ms-2">${truncateMessage(log.message, 50)}</small>
-                    </div>
-                    <small class="text-muted">${new Date(log.timestamp * 1000).toLocaleTimeString()}</small>
-                </div>
-            `).join('');
-
-            // Store logs for detail view
-            window.currentActivityLogs = logs;
-        } else {
-            activityElement.innerHTML = `
-                <div class="text-center text-muted py-3">
-                    <small>No recent activity found.</small>
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Error loading recent activity:', error);
-        activityElement.innerHTML = `
-            <div class="text-center text-muted py-3">
-                <small>Error loading recent activity.</small>
-            </div>
-        `;
-    }
-}
 
 function getStatusIcon(status) {
     switch(status) {
@@ -449,20 +734,20 @@ function getStatusIcon(status) {
     }
 }
 
-async function runNightly(environment) {
+async function runAdHocIngestion(environment) {
     try {
-        AdminUtils.showToast(`Starting nightly run for ${environment}...`, 'info');
+        AdminUtils.showToast(`Starting ad-hoc ingestion for ${environment}...`, 'info');
         const res = await fetch('/api/admin/ingestion/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ env: environment })
+            body: JSON.stringify({ env: environment, job_type: 'ad_hoc' })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        AdminUtils.showToast(`Nightly started for ${data.env} (pid ${data.pid})`, 'success');
+        AdminUtils.showToast(`Ad-hoc ingestion started for ${data.env} (job ${data.job_id || data.pid})`, 'success');
     } catch (e) {
-        console.error('Failed to start nightly:', e);
-        AdminUtils.showToast('Failed to start nightly run', 'danger');
+        console.error('Failed to start ad-hoc ingestion:', e);
+        AdminUtils.showToast('Failed to start ad-hoc ingestion', 'danger');
     }
 }
 
@@ -470,6 +755,12 @@ async function refreshDashboard() {
     AdminUtils.showToast('Refreshing dashboard...', 'info');
     await loadDashboardData();
     AdminUtils.showToast('Dashboard refreshed', 'success');
+}
+
+async function refreshMongoDBStatus() {
+    AdminUtils.showToast('Refreshing MongoDB status...', 'info');
+    await loadMongoDBStatus();
+    AdminUtils.showToast('MongoDB status updated', 'success');
 }
 
 async function toggleCache(environment, enabled) {
@@ -512,152 +803,6 @@ async function clearAllCaches() {
     }
 }
 
-async function viewLogs(environment) {
-    try {
-        // 1) Load aggregated tail for quick context
-        const response = await fetch(`/api/status/${environment}/logs?lines=200`);
-        const logs = await response.json();
-        const logsContent = document.getElementById('logs-content');
-        if (Array.isArray(logs) && logs.length) {
-            logsContent.textContent = logs.map(log => 
-                `[${new Date(log.timestamp * 1000).toLocaleString()}] ${log.level}: ${log.message}`
-            ).join('\n');
-        } else {
-            logsContent.textContent = 'No recent log entries.';
-        }
-
-        // 2) Load list of available log files
-        const listRes = await fetch(`/api/logs/${environment}/list`);
-        const listData = await listRes.json();
-        const container = document.getElementById('logs-list-container');
-        if (listData.logs && listData.logs.length) {
-            container.innerHTML = `
-                <table class="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>Log File</th>
-                      <th>Size</th>
-                      <th>Modified</th>
-                      <th style="width: 140px;">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${listData.logs.map(l => `
-                      <tr>
-                        <td>${l.name}</td>
-                        <td>${AdminUtils.formatBytes(l.size_bytes)}</td>
-                        <td>${AdminUtils.formatTimestamp(l.modified_at)}</td>
-                        <td>
-                          <button class="btn btn-sm btn-outline-primary" onclick="viewLogFile('${environment}','${l.rel.replace(/'/g, "\\'")}')">View</button>
-                          <a class="btn btn-sm btn-outline-secondary" href="/api/logs/${environment}/file?name=${encodeURIComponent(l.rel)}">Download</a>
-                        </td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-            `;
-        } else {
-            container.innerHTML = '<div class="text-muted">No log files found.</div>';
-        }
-        
-        document.querySelector('#logsModal .modal-title').textContent = `${environment.toUpperCase()} Environment Logs`;
-        new bootstrap.Modal(document.getElementById('logsModal')).show();
-        
-    } catch (error) {
-        console.error('Error loading logs:', error);
-        AdminUtils.showToast('Error loading logs', 'danger');
-    }
-}
-
-async function viewLogFile(environment, rel) {
-    try {
-        const res = await fetch(`/api/logs/${environment}/view?name=${encodeURIComponent(rel)}&lines=1000`);
-        if (!res.ok) throw new Error('Failed to load log file');
-        const data = await res.json();
-        const logsContent = document.getElementById('logs-content');
-        logsContent.textContent = data.text || '';
-    } catch (e) {
-        console.error('Failed to view log file', e);
-        AdminUtils.showToast('Failed to view log file', 'danger');
-    }
-}
-
-async function viewArtifacts(environment) {
-    try {
-        const response = await fetch(`/api/status/${environment}/artifacts`);
-        const artifacts = await response.json();
-        
-        const artifactsContent = document.getElementById('artifacts-content');
-        if (artifacts.length === 0) {
-            artifactsContent.innerHTML = '<p class="text-muted">No artifacts found for this environment.</p>';
-        } else {
-            artifactsContent.innerHTML = `
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Size</th>
-                                <th>Modified</th>
-                                <th style="width: 120px;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${artifacts.map(artifact => {
-                                const rel = artifact.path || artifact.name;
-                                const safe = rel.replace(/'/g, "\\'");
-                                const dl = `/api/artifacts/${environment}/file?name=${encodeURIComponent(rel)}`;
-                                return `
-                                <tr>
-                                    <td><a href="#" onclick="viewArtifact('${environment}','${safe}'); return false;">${artifact.name}</a></td>
-                                    <td>${AdminUtils.formatBytes(artifact.size_bytes)}</td>
-                                    <td>${AdminUtils.formatTimestamp(artifact.modified_at)}</td>
-                                    <td>
-                                        <a class="btn btn-sm btn-outline-secondary" href="${dl}">
-                                            <i class="bi bi-download"></i> Download
-                                        </a>
-                                    </td>
-                                </tr>
-                            `; }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        }
-        
-        document.querySelector('#artifactsModal .modal-title').textContent = `${environment.toUpperCase()} Environment Artifacts`;
-        new bootstrap.Modal(document.getElementById('artifactsModal')).show();
-        
-    } catch (error) {
-        console.error('Error loading artifacts:', error);
-        AdminUtils.showToast('Error loading artifacts', 'danger');
-    }
-}
-
-async function viewArtifact(environment, name) {
-    try {
-        const res = await fetch(`/api/artifacts/${environment}/view?name=${encodeURIComponent(name)}`);
-        if (!res.ok) {
-            const t = await res.text();
-            throw new Error(`HTTP ${res.status}: ${t}`);
-        }
-        const data = await res.json();
-        let content = '';
-        if (data.json) {
-            content = JSON.stringify(data.json, null, 2);
-        } else if (data.text) {
-            content = data.text;
-        } else {
-            content = '[Unsupported artifact format]';
-        }
-        document.getElementById('artifact-view-title').textContent = name;
-        document.getElementById('artifact-view-body').textContent = content;
-        new bootstrap.Modal(document.getElementById('artifactViewModal')).show();
-    } catch (e) {
-        console.error('Artifact view failed', e);
-        AdminUtils.showToast(`Failed to view artifact: ${e.message}`, 'danger');
-    }
-}
 
 async function runHealthChecks() {
     AdminUtils.showToast('Running health checks...', 'info');
@@ -747,6 +892,174 @@ function showLogDetails(environment, index) {
         .btn-action {
             margin-top: 15px;
         }
+
+        /* AstraDB Sources Health Styles */
+        .sources-health-container {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            background-color: #f8f9fa;
+        }
+
+        .source-item {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            padding: 0.5rem;
+            margin-bottom: 0.25rem;
+            border-radius: 0.25rem;
+            background: white;
+            border-left: 4px solid #28a745;
+            font-size: 0.85rem;
+        }
+
+        .source-item.health-yellow {
+            border-left-color: #ffc107;
+        }
+
+        .source-item.health-red {
+            border-left-color: #dc3545;
+        }
+
+        .source-item-name {
+            font-weight: 500;
+            color: #495057;
+            flex-grow: 1;
+            margin-right: 0.5rem;
+        }
+
+        .source-item-chunks {
+            background: #e9ecef;
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .sources-empty {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            padding: 1rem;
+        }
+
+        .sources-error {
+            text-align: center;
+            color: #dc3545;
+            padding: 1rem;
+            background: #f8d7da;
+            border-radius: 0.25rem;
+        }
+
+        /* Recent Jobs Styles */
+        .job-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0.375rem;
+            background: white;
+            border: 1px solid #dee2e6;
+            transition: all 0.2s ease;
+        }
+
+        .job-item:hover {
+            background: #f8f9fa;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .job-item-left {
+            flex-grow: 1;
+            min-width: 0;
+        }
+
+        .job-item-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .job-item-title {
+            font-weight: 500;
+            color: #495057;
+            font-size: 0.9rem;
+            margin-right: 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .job-item-env {
+            background: #e9ecef;
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.7rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .job-item-meta {
+            font-size: 0.75rem;
+            color: #6c757d;
+        }
+
+        .job-item-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            text-align: right;
+        }
+
+        .job-status-badge {
+            display: flex;
+            align-items: center;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+        }
+
+        .job-status-badge i {
+            margin-right: 0.25rem;
+        }
+
+        .job-time {
+            font-size: 0.7rem;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .job-pid {
+            font-size: 0.7rem;
+            color: #495057;
+            background: #fff3cd;
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.25rem;
+            border: 1px solid #ffeaa7;
+        }
+
+        .jobs-empty {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            padding: 2rem 1rem;
+        }
+
+        .jobs-error {
+            text-align: center;
+            color: #dc3545;
+            padding: 1rem;
+            background: #f8d7da;
+            border-radius: 0.25rem;
+        }
     </style>
 </head>
 <body>
@@ -781,28 +1094,383 @@ function showLogDetails(environment, index) {
             </button>
         </div>
     </div>
-    <script>
-        function focusParent() {
-            // Focus back to parent window
-            if (window.opener && !window.opener.closed) {
-                window.opener.focus();
-            }
-            window.close();
-        }
-    </script>
-</body>
-</html>
     `;
+
+    // Function for popup window close button
+    function focusParent() {
+        if (window.opener && !window.opener.closed) {
+            window.opener.focus();
+        }
+        window.close();
+    }
 
     // Open new window with the log details
     const newWindow = window.open('', '_blank', 'width=1000,height=700,scrollbars=yes,resizable=yes,status=yes');
 
     if (newWindow) {
         newWindow.document.write(windowContent);
+        // Add the focusParent function to the new window
+        newWindow.focusParent = focusParent;
         newWindow.document.close();
         newWindow.focus();
     } else {
         alert('Pop-up blocked. Please allow pop-ups for this site.');
+    }
+}
+
+// AstraDB Sources Health Functions
+async function loadSourcesHealth() {
+    debugLog('Loading AstraDB sources health...');
+    const environments = ['dev', 'test', 'prod'];
+
+    for (const env of environments) {
+        await loadEnvironmentSourcesHealth(env);
+    }
+
+    // Update timestamp
+    const timestampElement = document.getElementById('sources-last-updated');
+    if (timestampElement) {
+        timestampElement.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    }
+}
+
+async function loadEnvironmentSourcesHealth(environment) {
+    const containerElement = document.getElementById(`${environment}-sources-health`);
+    if (!containerElement) return;
+
+    try {
+        debugLog(`Loading sources health for ${environment}...`);
+        const response = await fetch(`/api/admin/sources/health/${environment}`);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        debugLog(`Sources health response for ${environment}:`, data);
+
+        if (data.sources && data.sources.length > 0) {
+            containerElement.innerHTML = data.sources.map(source => `
+                <div class="source-item health-${source.health}">
+                    <div class="source-item-name">${source.source_file}</div>
+                    <div class="source-item-chunks">${source.chunk_count} chunks</div>
+                </div>
+            `).join('');
+        } else {
+            containerElement.innerHTML = `
+                <div class="sources-empty">
+                    <i class="bi bi-database"></i><br>
+                    No sources found in AstraDB
+                </div>
+            `;
+        }
+    } catch (error) {
+        debugError(`Error loading sources health for ${environment}:`, error);
+        containerElement.innerHTML = `
+            <div class="sources-error">
+                <i class="bi bi-exclamation-triangle"></i><br>
+                Error loading sources: ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function refreshSourcesHealth() {
+    debugLog('Refreshing AstraDB sources health...');
+    AdminUtils.showToast('Refreshing AstraDB sources health...', 'info');
+
+    // Show loading state
+    const environments = ['dev', 'test', 'prod'];
+    environments.forEach(env => {
+        const containerElement = document.getElementById(`${env}-sources-health`);
+        if (containerElement) {
+            containerElement.innerHTML = `
+                <div class="text-center text-muted">
+                    <div class="loading-spinner mb-2"></div>
+                    <small>Refreshing AstraDB sources...</small>
+                </div>
+            `;
+        }
+    });
+
+    try {
+        await loadSourcesHealth();
+        AdminUtils.showToast('AstraDB sources health refreshed successfully', 'success');
+    } catch (error) {
+        debugError('Error refreshing sources health:', error);
+        AdminUtils.showToast('Failed to refresh AstraDB sources health', 'danger');
+    }
+}
+
+// Recent Jobs Functions
+async function loadRecentJobs() {
+    debugLog('Loading recent ingestion jobs...');
+    const containerElement = document.getElementById('recent-jobs');
+    const countElement = document.getElementById('recent-jobs-count');
+
+    try {
+        const response = await fetch('/api/admin/ingestion/recent?limit=3');
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        debugLog('Recent jobs response:', data);
+
+        if (data.jobs && data.jobs.length > 0) {
+            // Update count badge
+            if (countElement) {
+                countElement.textContent = `Top ${data.jobs.length}`;
+            }
+
+            // Render jobs
+            containerElement.innerHTML = data.jobs.map(job => {
+                const status = job.standardized_status;
+                const createdDate = new Date(job.created_at * 1000);
+                const timeAgo = getTimeAgo(createdDate);
+
+                // Show PID for running jobs (FR-013 requirement)
+                const pidDisplay = job.status === 'running' && job.process_id
+                    ? `<div class="job-pid">PID: ${job.process_id}</div>`
+                    : '';
+
+                return `
+                    <div class="job-item" onclick="viewJobDetails('${job.environment}', '${job.job_id}')">
+                        <div class="job-item-left">
+                            <div class="job-item-header">
+                                <div class="job-item-title">${job.source_file}</div>
+                                <div class="job-item-env">${job.environment}</div>
+                            </div>
+                            <div class="job-item-meta">
+                                Job ID: ${job.job_id.split('_')[0]}...${job.job_id.split('_').pop()}
+                            </div>
+                        </div>
+                        <div class="job-item-right">
+                            <div class="job-status-badge bg-${status.color} text-white">
+                                <i class="bi bi-${status.icon}"></i>
+                                ${status.display}
+                            </div>
+                            <div class="job-time">${timeAgo}</div>
+                            ${pidDisplay}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            if (countElement) {
+                countElement.textContent = 'None';
+            }
+            containerElement.innerHTML = `
+                <div class="jobs-empty">
+                    <i class="bi bi-inbox"></i><br>
+                    No recent ingestion jobs found
+                </div>
+            `;
+        }
+    } catch (error) {
+        debugError('Error loading recent jobs:', error);
+        if (countElement) {
+            countElement.textContent = 'Error';
+        }
+        containerElement.innerHTML = `
+            <div class="jobs-error">
+                <i class="bi bi-exclamation-triangle"></i><br>
+                Error loading recent jobs: ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function loadMongoDBStatus() {
+    debugLog('Loading MongoDB dictionary status...');
+
+    try {
+        const environments = ['dev', 'test', 'prod'];
+
+        for (const env of environments) {
+            await loadEnvironmentMongoDBStatus(env);
+        }
+
+        // Update last updated timestamp
+        const lastUpdatedElement = document.getElementById('mongodb-last-updated');
+        if (lastUpdatedElement) {
+            lastUpdatedElement.textContent = new Date().toLocaleTimeString();
+            lastUpdatedElement.className = 'badge bg-success';
+        }
+
+        debugLog('MongoDB status loading completed');
+
+    } catch (error) {
+        debugError('Error loading MongoDB status:', error);
+
+        // Update timestamp to show error
+        const lastUpdatedElement = document.getElementById('mongodb-last-updated');
+        if (lastUpdatedElement) {
+            lastUpdatedElement.textContent = 'Error';
+            lastUpdatedElement.className = 'badge bg-danger';
+        }
+    }
+}
+
+async function loadEnvironmentMongoDBStatus(environment) {
+    debugLog(`Loading MongoDB status for ${environment}...`);
+
+    const connectionElement = document.getElementById(`${environment}-mongo-connection`);
+    const entriesElement = document.getElementById(`${environment}-mongo-entries`);
+    const categoriesElement = document.getElementById(`${environment}-mongo-categories`);
+    const perfElement = document.getElementById(`${environment}-mongo-perf`);
+
+    try {
+        const response = await fetch(`/api/admin/mongodb/status/${environment}`);
+
+        if (response.ok) {
+            const data = await response.json();
+            debugLog(`MongoDB status response for ${environment}:`, data);
+
+            // Update connection status based on actual status
+            if (connectionElement) {
+                const status = data.status;
+                let badgeClass, statusText;
+
+                switch (status) {
+                    case 'healthy':
+                        badgeClass = 'bg-success';
+                        statusText = 'Healthy';
+                        break;
+                    case 'unavailable':
+                        badgeClass = 'bg-warning';
+                        statusText = 'Unavailable';
+                        break;
+                    case 'error':
+                        badgeClass = 'bg-danger';
+                        statusText = 'Error';
+                        break;
+                    default:
+                        badgeClass = 'bg-secondary';
+                        statusText = 'Unknown';
+                }
+
+                connectionElement.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
+            }
+
+            // Update entries count from statistics
+            if (entriesElement && data.statistics) {
+                const entries = data.statistics.entries || 0;
+                entriesElement.textContent = entries.toLocaleString();
+                entriesElement.className = entries > 0 ? 'text-success fw-bold' : 'text-muted';
+            }
+
+            // Update categories count
+            if (categoriesElement && data.statistics) {
+                const categories = data.statistics.categories || 0;
+                categoriesElement.textContent = categories.toLocaleString();
+                categoriesElement.className = categories > 0 ? 'text-info fw-bold' : 'text-muted';
+            }
+
+            // Update performance metric (FR-015 AC2)
+            if (perfElement && data.performance) {
+                const avgTime = data.performance.avg_query_time;
+                const targetMet = data.performance.performance_target_met;
+
+                if (avgTime !== null) {
+                    const timeText = avgTime < 100 ? '<100ms' : `${Math.round(avgTime)}ms`;
+                    perfElement.textContent = timeText;
+                    perfElement.className = targetMet ? 'text-success fw-bold' : 'text-warning fw-bold';
+
+                    // Add tooltip for performance requirements
+                    perfElement.title = targetMet
+                        ? 'Performance target met (≤1.5s)'
+                        : `Performance target missed (${avgTime}ms > 1500ms)`;
+                } else {
+                    perfElement.textContent = '--';
+                    perfElement.className = 'text-muted';
+                }
+            }
+
+            // Show circuit breaker status if degraded
+            const circuitElement = document.getElementById(`${environment}-mongo-circuit`);
+            if (circuitElement && data.circuit_breaker && data.circuit_breaker.state !== 'closed') {
+                debugLog(`Circuit breaker ${data.circuit_breaker.state} for ${environment}`, data.circuit_breaker);
+                circuitElement.style.display = 'block';
+            } else if (circuitElement) {
+                circuitElement.style.display = 'none';
+            }
+
+        } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+    } catch (error) {
+        debugError(`Error loading MongoDB status for ${environment}:`, error);
+
+        // Show connection error
+        if (connectionElement) {
+            connectionElement.innerHTML = `<span class="badge bg-danger">Unavailable</span>`;
+        }
+
+        // Reset other elements to error state
+        [entriesElement, categoriesElement, perfElement].forEach(element => {
+            if (element) {
+                element.textContent = '--';
+                element.className = 'text-muted';
+            }
+        });
+    }
+}
+
+function getTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSeconds = Math.floor(diffMs / 1000);
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSeconds < 60) {
+        return 'Just now';
+    } else if (diffMinutes < 60) {
+        return `${diffMinutes}m ago`;
+    } else if (diffHours < 24) {
+        return `${diffHours}h ago`;
+    } else if (diffDays < 7) {
+        return `${diffDays}d ago`;
+    } else {
+        return date.toLocaleDateString();
+    }
+}
+
+function viewJobDetails(environment, jobId) {
+    debugLog(`Viewing job details for ${environment}/${jobId}`);
+    // Navigate to logs page with job filter or open modal
+    // For now, we'll navigate to the logs page
+    window.location.href = `/admin/logs?env=${environment}&job=${jobId}`;
+}
+
+async function resetCircuitBreaker(environment) {
+    try {
+        AdminUtils.showToast(`Resetting MongoDB circuit breaker for ${environment}...`, 'info');
+
+        const response = await fetch(`/api/admin/mongodb/${environment}/reset-circuit-breaker`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            AdminUtils.showToast(
+                `Circuit breaker reset for ${environment}. Health check: ${result.health_check_passed ? 'Passed' : 'Failed'}`,
+                result.health_check_passed ? 'success' : 'warning'
+            );
+
+            // Refresh MongoDB status for this environment
+            await loadEnvironmentMongoDBStatus(environment);
+        } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+    } catch (error) {
+        debugError(`Error resetting circuit breaker for ${environment}:`, error);
+        AdminUtils.showToast(`Failed to reset circuit breaker: ${error.message}`, 'danger');
     }
 }
 

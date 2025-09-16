@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JavaScript Syntax Test</title>
+</head>
+<body>
+    <h1>JavaScript Syntax Test</h1>
+    <div id="result"></div>
+
+    <!-- Copy the exact script block from admin_dashboard.html -->
+    <script>
+let dashboardData = {};
+
+// DEBUG: Global debug flag
+window.ADMIN_DEBUG = true;
+
+function debugLog(message, data = null) {
+    if (window.ADMIN_DEBUG) {
+        console.log(`[ADMIN DEBUG] ${message}`, data || '');
+    }
+}
+
+function debugError(message, error = null) {
+    if (window.ADMIN_DEBUG) {
+        console.error(`[ADMIN ERROR] ${message}`, error || '');
+    }
+}
+
+// Test that basic functions work
+try {
+    debugLog('Testing basic functionality');
+
+    // Test template literal with script tag (the problematic area)
+    const testContent = `
+<!DOCTYPE html>
+<html>
+<head><title>Test</title></head>
+<body>
+    <div>Test content</div>
+    <script>
+        function test() {
+            console.log('test');
+        }
+    <\/script>
+</body>
+</html>
+    `;
+
+    debugLog('Template literal with script tag test successful');
+    document.getElementById('result').innerHTML = '<div style="color: green;">✓ JavaScript syntax is valid!</div>';
+
+} catch (error) {
+    console.error('JavaScript syntax error:', error);
+    document.getElementById('result').innerHTML = '<div style="color: red;">✗ JavaScript syntax error: ' + error.message + '</div>';
+}
+    </script>
+</body>
+</html>

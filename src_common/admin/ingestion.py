@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional, AsyncGenerator
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 
 
 logger = get_logger(__name__)
@@ -33,6 +33,7 @@ class IngestionJob:
     current_phase: Optional[str]
     error_message: Optional[str] = None
     artifacts_path: Optional[str] = None
+    process_id: Optional[int] = None
     
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -223,47 +224,68 @@ class AdminIngestionService:
             logger.error(f"Error getting job logs for {environment}/{job_id}: {e}")
             return []
     
-    async def start_ingestion_job(self, environment: str, source_file: str, options: Dict[str, Any] = None) -> str:
+    async def start_ingestion_job(self, environment: str, source_file: str, options: Dict[str, Any] = None, job_type: str = "ad_hoc") -> str:
         """
         Start a new ingestion job (stub implementation)
-        
+
         Args:
             environment: Target environment
             source_file: Path to source PDF file
             options: Additional job options
-            
+            job_type: Type of job ("ad_hoc" or "nightly")
+
         Returns:
             Job ID for the new job
         """
         try:
-            job_id = f"job_{int(time.time())}_{environment}"
-            
+            # Generate job ID and log file name based on job type
+            timestamp = datetime.now()
+
+            if job_type == "nightly":
+                # Nightly jobs use special naming pattern
+                formatted_time = timestamp.strftime("%Y-%m-%d_%H-%M-%S")
+                job_id = f"nightly_{formatted_time}_{environment}"
+                log_filename = f"nightly_ingestion_{formatted_time}.log"
+            else:
+                # Ad-hoc jobs use timestamp-based naming
+                job_id = f"job_{int(timestamp.timestamp())}_{environment}"
+                log_filename = f"{job_id}.log"
+
             # Create job directory
             job_path = Path(f"artifacts/{environment}/{job_id}")
             job_path.mkdir(parents=True, exist_ok=True)
-            
+
+            # Ensure logs directory exists for environment
+            logs_dir = Path(f"env/{environment}/logs")
+            logs_dir.mkdir(parents=True, exist_ok=True)
+
             # Create job manifest
             job_manifest = {
                 "job_id": job_id,
                 "environment": environment,
                 "source_file": source_file,
                 "status": "pending",
-                "created_at": time.time(),
+                "created_at": timestamp.timestamp(),
                 "options": options or {},
+                "job_type": job_type,
+                "log_file": log_filename,
                 "phases": ["parse", "enrich", "compile"]
             }
-            
+
             manifest_file = job_path / "manifest.json"
             with open(manifest_file, 'w', encoding='utf-8') as f:
                 json.dump(job_manifest, f, indent=2)
-            
-            logger.info(f"Created ingestion job {job_id} for {environment}")
-            
+
+            # Create log file path for the job
+            log_file_path = logs_dir / log_filename
+
+            logger.info(f"Created {job_type} ingestion job {job_id} for {environment} with log file {log_filename}")
+
             # In a real implementation, this would trigger the actual ingestion pipeline
             # For now, we just create the job structure
-            
+
             return job_id
-            
+
         except Exception as e:
             logger.error(f"Error starting ingestion job: {e}")
             raise
@@ -422,7 +444,8 @@ class AdminIngestionService:
                 completed_phases=manifest.get("completed_phases", 0),
                 current_phase=manifest.get("current_phase"),
                 error_message=manifest.get("error_message"),
-                artifacts_path=str(job_path)
+                artifacts_path=str(job_path),
+                process_id=manifest.get("process_id")
             )
             
         except Exception as e:
@@ -532,36 +555,136 @@ class AdminIngestionService:
         """
         try:
             sources = []
-            artifacts_path = Path(f"artifacts/{environment}")
 
-            if not artifacts_path.exists():
-                return []
+            # Get sources from local artifacts
+            local_sources = await self._get_local_sources(environment)
 
-            # Check ingest directory for completed jobs
-            ingest_path = artifacts_path / "ingest" / environment
-            if ingest_path.exists():
-                for job_dir in ingest_path.iterdir():
-                    if job_dir.is_dir():
-                        source_info = await self._analyze_source_health(job_dir)
-                        if source_info:
-                            sources.append(source_info)
+            # Get sources from AstraDB (the source of truth)
+            astradb_sources = await self._get_astradb_sources(environment)
 
-            # Also check direct artifacts directory
-            for item in artifacts_path.iterdir():
-                if item.is_dir() and item.name != "ingest":
-                    source_info = await self._analyze_source_health(item)
-                    if source_info:
-                        sources.append(source_info)
+            # Combine and correlate sources from both locations
+            combined_sources = await self._combine_source_data(local_sources, astradb_sources, environment)
 
             # Sort by health (red, yellow, green) then by name
             health_priority = {'red': 0, 'yellow': 1, 'green': 2}
-            sources.sort(key=lambda x: (health_priority.get(x['health'], 0), x['id']))
+            combined_sources.sort(key=lambda x: (health_priority.get(x['health'], 0), x['id']))
 
-            return sources
+            return combined_sources
 
         except Exception as e:
             logger.error(f"Error getting sources health for {environment}: {e}")
             return []
+
+    async def _get_local_sources(self, environment: str) -> List[Dict[str, Any]]:
+        """Get sources from local artifact directories"""
+        sources = []
+        artifacts_path = Path(f"artifacts/{environment}")
+
+        if not artifacts_path.exists():
+            return sources
+
+        # Check ingest directory for completed jobs
+        ingest_path = artifacts_path / "ingest" / environment
+        if ingest_path.exists():
+            for job_dir in ingest_path.iterdir():
+                if job_dir.is_dir():
+                    source_info = await self._analyze_source_health(job_dir)
+                    if source_info:
+                        sources.append(source_info)
+
+        # Also check direct artifacts directory
+        for item in artifacts_path.iterdir():
+            if item.is_dir() and item.name != "ingest":
+                source_info = await self._analyze_source_health(item)
+                if source_info:
+                    sources.append(source_info)
+
+        return sources
+
+    async def _get_astradb_sources(self, environment: str) -> List[Dict[str, Any]]:
+        """Get sources from AstraDB (source of truth)"""
+        try:
+            # Import AstraLoader to query the database
+            from ..astra_loader import AstraLoader
+
+            loader = AstraLoader(env=environment)
+
+            # Get detailed source information with chunk counts
+            sources_data = loader.get_sources_with_chunk_counts()
+
+            if sources_data.get('status') == 'simulation_mode':
+                logger.info(f"AstraDB in simulation mode for {environment}")
+                # Convert simulation data to expected format
+                astra_sources = []
+                for source in sources_data.get('sources', []):
+                    astra_sources.append({
+                        'id': source['source_hash'][:12],  # Truncated hash for display
+                        'source_file': source['source_file'],
+                        'chunk_count': source['chunk_count'],
+                        'health': 'green',
+                        'status': 'ingested',
+                        'source_type': 'astradb',
+                        'source_hash': source['source_hash'],
+                        'last_modified': source['last_updated']
+                    })
+                return astra_sources
+
+            if sources_data.get('status') == 'error':
+                logger.warning(f"Error accessing AstraDB for {environment}: {sources_data.get('error', 'Unknown error')}")
+                return []
+
+            # Convert real AstraDB sources to expected format
+            astra_sources = []
+            for source in sources_data.get('sources', []):
+                # Determine health based on chunk count
+                health = 'green' if source['chunk_count'] >= 5 else 'yellow' if source['chunk_count'] > 0 else 'red'
+
+                astra_sources.append({
+                    'id': source['source_hash'][:12],  # Truncated hash for display
+                    'source_file': source['source_file'],
+                    'chunk_count': source['chunk_count'],
+                    'health': health,
+                    'status': 'ingested',
+                    'source_type': 'astradb',
+                    'source_hash': source['source_hash'],
+                    'last_modified': source['last_updated']
+                })
+
+            logger.info(f"Retrieved {len(astra_sources)} sources from AstraDB for {environment}")
+            return astra_sources
+
+        except Exception as e:
+            logger.warning(f"Could not query AstraDB for {environment}: {e}")
+            return []
+
+    async def _combine_source_data(self, local_sources: List[Dict[str, Any]],
+                                   astradb_sources: List[Dict[str, Any]],
+                                   environment: str) -> List[Dict[str, Any]]:
+        """Combine local and AstraDB source data for comprehensive health view"""
+        combined = []
+
+        # Add all local sources
+        for source in local_sources:
+            combined.append(source)
+
+        # Add AstraDB sources (these represent the actual ingested data)
+        for source in astradb_sources:
+            combined.append(source)
+
+        # If we have AstraDB data but no local sources, it means sources are ingested
+        # but local artifacts may have been cleaned up
+        if astradb_sources and not local_sources:
+            logger.info(f"Found {len(astradb_sources)} sources in AstraDB but no local artifacts for {environment}")
+
+        # If we have local sources but no AstraDB data, it means ingestion may have failed
+        if local_sources and not astradb_sources:
+            logger.warning(f"Found {len(local_sources)} local sources but no AstraDB data for {environment}")
+            # Mark local sources as potentially problematic
+            for source in combined:
+                if source.get('source_type') != 'astradb' and source.get('health') == 'green':
+                    source['health'] = 'yellow'  # Downgrade since not in AstraDB
+
+        return combined
 
     async def remove_source(self, environment: str, source_id: str) -> bool:
         """
@@ -643,6 +766,16 @@ class AdminIngestionService:
             source_file = manifest.get("source_file", job_dir.name)
             status = manifest.get("status", "unknown")
 
+            # Skip placeholder jobs that aren't actual document sources
+            if source_file in ["nightly_run", "placeholder", "test_job"]:
+                logger.debug(f"Skipping placeholder job {source_file} from source health")
+                return None
+
+            # Only consider jobs that have processed actual PDF files
+            if not source_file.endswith('.pdf') and source_file != "unknown":
+                logger.debug(f"Skipping non-PDF source {source_file} from source health")
+                return None
+
             # Count chunks from Pass A output
             chunk_count = 0
             pass_a_file = job_dir / "passA_chunks.json"
@@ -655,6 +788,11 @@ class AdminIngestionService:
                         chunk_count = len(chunks_data["chunks"])
                 except Exception:
                     pass
+
+            # Only include sources that have actually produced chunks
+            if chunk_count == 0:
+                logger.debug(f"Skipping source {source_file} with no chunks from source health")
+                return None
 
             # Calculate health based on status and chunk processing
             health = self._calculate_source_health(status, chunk_count, job_dir)
@@ -722,3 +860,167 @@ class AdminIngestionService:
 
         except Exception:
             return "red"
+
+    async def kill_job(self, environment: str, job_id: str) -> bool:
+        """
+        Kill/cancel a running or pending ingestion job
+
+        Args:
+            environment: Environment name
+            job_id: Job identifier to kill
+
+        Returns:
+            True if job was killed, False if not found or already completed
+        """
+        try:
+            import signal
+            import psutil
+
+            logger.info(f"Attempting to kill job {job_id} in {environment}")
+
+            # First try to find the job artifacts directory
+            artifacts_path = Path(f"artifacts/{environment}/ingest/{environment}")
+            job_dir = artifacts_path / job_id
+
+            if not job_dir.exists():
+                # Try alternative path
+                artifacts_path = Path(f"artifacts/ingest/{environment}")
+                job_dir = artifacts_path / job_id
+
+            if not job_dir.exists():
+                logger.warning(f"Job directory not found for {job_id}")
+                return False
+
+            # Check manifest for job status and process info
+            manifest_file = job_dir / "manifest.json"
+            if manifest_file.exists():
+                try:
+                    manifest = json.loads(manifest_file.read_text())
+                    current_status = manifest.get("status", "unknown")
+                    process_id = manifest.get("process_id")
+
+                    # If already completed/failed, can't kill
+                    if current_status in ["completed", "failed", "killed"]:
+                        logger.info(f"Job {job_id} is already {current_status}, cannot kill")
+                        return False
+
+                    # Try to kill the process if we have a PID
+                    killed_process = False
+                    if process_id:
+                        try:
+                            process = psutil.Process(process_id)
+                            process.terminate()
+                            killed_process = True
+                            logger.info(f"Terminated process {process_id} for job {job_id}")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            logger.warning(f"Could not kill process {process_id}: {e}")
+
+                    # Update manifest to reflect killed status
+                    manifest["status"] = "killed"
+                    manifest["killed_at"] = datetime.now().isoformat()
+                    manifest["error_message"] = "Job manually killed by administrator"
+
+                    with open(manifest_file, 'w') as f:
+                        json.dump(manifest, f, indent=2)
+
+                    logger.info(f"Job {job_id} marked as killed in manifest")
+                    return True
+
+                except Exception as e:
+                    logger.error(f"Error updating manifest for killed job {job_id}: {e}")
+                    return False
+            else:
+                logger.warning(f"No manifest found for job {job_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error killing job {job_id} in {environment}: {e}")
+            return False
+
+    async def get_recent_jobs(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """
+        Get the most recent ingestion jobs across all environments with standardized status
+
+        Args:
+            limit: Maximum number of jobs to return (default 3 for FR-013)
+
+        Returns:
+            List of recent job dictionaries with standardized status
+        """
+        try:
+            all_jobs = []
+
+            # Collect jobs from all environments
+            for environment in self.environments:
+                env_jobs = await self.list_jobs(environment, limit=20)  # Get more to sort globally
+                for job in env_jobs:
+                    # Add standardized status
+                    job['standardized_status'] = self._standardize_job_status(job['status'])
+                    all_jobs.append(job)
+
+            # Sort by creation time (newest first) and take top N
+            all_jobs.sort(key=lambda x: x['created_at'], reverse=True)
+            recent_jobs = all_jobs[:limit]
+
+            logger.info(f"Retrieved {len(recent_jobs)} recent jobs from all environments")
+            return recent_jobs
+
+        except Exception as e:
+            logger.error(f"Error getting recent jobs: {e}")
+            return []
+
+    def _standardize_job_status(self, raw_status: str) -> Dict[str, Any]:
+        """
+        Standardize job status according to FR-013 semantics
+
+        Args:
+            raw_status: Raw status from job manifest
+
+        Returns:
+            Dictionary with standardized status information
+        """
+        status_mapping = {
+            'pending': {
+                'display': 'Pending',
+                'description': 'Scheduled',
+                'category': 'pending',
+                'color': 'warning',
+                'icon': 'clock'
+            },
+            'running': {
+                'display': 'Running',
+                'description': 'Active',
+                'category': 'running',
+                'color': 'primary',
+                'icon': 'play-circle'
+            },
+            'completed': {
+                'display': 'Completed',
+                'description': 'Finished (Success)',
+                'category': 'completed',
+                'color': 'success',
+                'icon': 'check-circle'
+            },
+            'failed': {
+                'display': 'Completed',
+                'description': 'Finished (Failed)',
+                'category': 'completed',
+                'color': 'danger',
+                'icon': 'x-circle'
+            },
+            'killed': {
+                'display': 'Completed',
+                'description': 'Finished (Cancelled)',
+                'category': 'completed',
+                'color': 'secondary',
+                'icon': 'stop-circle'
+            }
+        }
+
+        return status_mapping.get(raw_status, {
+            'display': 'Unknown',
+            'description': raw_status,
+            'category': 'unknown',
+            'color': 'secondary',
+            'icon': 'question-circle'
+        })

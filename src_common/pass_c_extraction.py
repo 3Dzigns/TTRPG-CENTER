@@ -51,7 +51,7 @@ ASTRA_REQUIRE_CREDS = os.getenv('ASTRA_REQUIRE_CREDS', 'true').strip().lower() i
 # Fallback imports
 import pypdf
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 from .astra_loader import AstraLoader
 from .metadata_utils import extract_page_info, extract_coordinates, safe_metadata_get

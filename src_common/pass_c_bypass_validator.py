@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker, Session
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .models import SourceIngestionHistory
 from .ttrpg_secrets import get_all_config
 

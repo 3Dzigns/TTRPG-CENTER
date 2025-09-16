@@ -38,7 +38,7 @@ try:
 except ImportError:
     LLAMAINDEX_AVAILABLE = False
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 from .astra_loader import AstraLoader
 from .dictionary_loader import DictionaryLoader, DictEntry

@@ -18,7 +18,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .logging import get_logger, sanitize_for_logging
+from .ttrpg_logging import get_logger, sanitize_for_logging
 from enum import Enum
 
 

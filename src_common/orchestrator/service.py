@@ -7,7 +7,7 @@ from typing import Any, Dict
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 from ..metadata_utils import safe_metadata_get
 from .classifier import classify_query
 from .policies import load_policies, choose_plan

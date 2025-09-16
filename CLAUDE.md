@@ -268,3 +268,50 @@ All tasks are managed through the `.claude/tasks/` directory structure:
 - Document all assumptions and context
 - Provide clear next steps and dependencies
 - Include troubleshooting guidance for common issues
+
+## 🔁 Playbook: Feature Request (FR) Flow
+**Trigger phrase:** “FR flow <ticket> — <short title>”
+**Goal:** Run the whole FR lifecycle: design → plan → implement → **build+deploy to DEV** → test (in DEV container) → document → commit/push → open PR.
+
+**When I say the trigger:**
+1) Use `/sc:design` to produce a short design brief + acceptance criteria tied to `<ticket>`. Ask 0–2 clarifying questions max.
+2) Use `/sc:workflow` to turn the brief into a checklist (tasks, files to touch, test strategy).
+3) **Checkout a feature branch** (normal git; do NOT skip):
+   - `git checkout -b feat/<ticket>-kebab-title`
+   - (Optional) `git push -u origin feat/<ticket>-kebab-title`
+4) Use `/sc:implement` to create/update code following the plan on the *current feature branch*.
+5) **Build & Deploy to DEV (containerized)**:
+   - Build image: `docker compose -f env/dev/docker-compose.yml build app`
+   - Start/refresh app: `docker compose -f env/dev/docker-compose.yml up -d app`
+   - (Optional) Health: `curl http://localhost:8000/healthz` or `docker compose -f env/dev/docker-compose.yml ps`
+6) Use `/sc:test` and run tests **inside the DEV container**:
+   - Unit/functional: `docker compose -f env/dev/docker-compose.yml exec app pytest -q`
+   - (Optional) Regression (still in DEV): `docker compose -f env/dev/docker-compose.yml exec app pytest tests/regression -q`
+   - If a container isn’t present, generate the minimal compose/services I need.
+7) Use `/sc:document` to update README/CHANGELOG and add any runbooks.
+8) Use `/sc:git` to:
+   - stage changes,
+   - write a Conventional Commit (`feat: <ticket> - <summary>`),
+   - push the branch and open a PR.
+
+### Notes
+- **No TEST promotion right now.** Do not start or deploy any TEST environment containers in this flow.
+- Keep logs and artifacts under `env/<env>/logs` per our repo layout.
+- If any step fails, stop and show a crisp fix-list; don’t proceed until green.
+
+---
+
+## 🐛 Playbook: Bug Fix Flow
+**Trigger phrase:** “Bug flow <ticket> — <short title>”
+
+1) Use `/sc:troubleshoot` to reproduce + isolate the root cause; save a minimal repro.
+2) Create hotfix branch `fix/<ticket>-kebab-title`; apply fix with `/sc:implement`.
+3) **Build & Deploy to DEV (containerized)**:
+   - `docker compose -f env/dev/docker-compose.yml build app`
+   - `docker compose -f env/dev/docker-compose.yml up -d app`
+4) Add/adjust tests that *fail first*, then pass after the fix:
+   - Run tests in **DEV container only**:
+     - `docker compose -f env/dev/docker-compose.yml exec app pytest -q`
+     - (Optional) `docker compose -f env/dev/docker-compose.yml exec app pytest tests/regression -q`
+5) `/sc:document` the root cause & prevention notes.
+6) `/sc:git` conventional commit `fix: <ticket> - <summary>` → push → open PR.

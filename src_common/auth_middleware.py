@@ -13,7 +13,7 @@ import logging
 from .auth_models import UserContext, UserRole
 from .jwt_service import auth_service
 from .auth_database import auth_db
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

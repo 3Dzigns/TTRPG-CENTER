@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
 import pypdf
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .fr1_config import get_fr1_config
 
 logger = get_logger(__name__)

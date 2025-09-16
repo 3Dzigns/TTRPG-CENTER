@@ -8,46 +8,21 @@ import json
 import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 from ..graph.store import GraphStore
+from .dictionary_models import DictionaryTerm, DictionaryStats
 
 
 logger = get_logger(__name__)
 
 
-@dataclass
-class DictionaryTerm:
-    """Dictionary term definition"""
-    term: str
-    definition: str
-    category: str  # 'rule', 'concept', 'procedure', 'entity'
-    environment: str
-    source: str
-    page_reference: Optional[str] = None
-    created_at: float = None
-    updated_at: float = None
-    version: int = 1
-    tags: List[str] = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = time.time()
-        if self.updated_at is None:
-            self.updated_at = self.created_at
-        if self.tags is None:
-            self.tags = []
-
-
-@dataclass
-class DictionaryStats:
-    """Dictionary statistics"""
-    total_terms: int
-    categories: Dict[str, int]
-    sources: Dict[str, int]
-    recent_updates: int
-    environment: str
+# Import MongoDictionaryAdapter after avoiding circular import
+def _import_mongo_adapter():
+    """Lazy import to avoid circular imports"""
+    from .mongo_adapter import MongoDictionaryAdapter
+    return MongoDictionaryAdapter
 
 
 class AdminDictionaryService:
@@ -58,11 +33,29 @@ class AdminDictionaryService:
     environment-specific scoping and version tracking.
     """
     
-    def __init__(self, graph_store: Optional[GraphStore] = None):
+    def __init__(self, graph_store: Optional[GraphStore] = None, use_mongodb: bool = True):
         self.graph_store = graph_store or GraphStore()
         self.environments = ['dev', 'test', 'prod']
-        logger.info("Admin Dictionary Service initialized")
-    
+        self.use_mongodb = use_mongodb
+        self._mongo_adapters = {}  # Cache for environment-specific adapters
+        logger.info(f"Admin Dictionary Service initialized (MongoDB: {use_mongodb})")
+
+    def _get_adapter(self, environment: str):
+        """Get or create MongoDB adapter for environment"""
+        if not self.use_mongodb:
+            return None
+
+        if environment not in self._mongo_adapters:
+            try:
+                MongoDictionaryAdapter = _import_mongo_adapter()
+                self._mongo_adapters[environment] = MongoDictionaryAdapter(environment)
+                logger.debug(f"Created MongoDB adapter for {environment}")
+            except Exception as e:
+                logger.error(f"Failed to create MongoDB adapter for {environment}: {e}")
+                return None
+
+        return self._mongo_adapters[environment]
+
     async def get_dictionary_overview(self) -> Dict[str, Any]:
         """
         Get overview of dictionary content across all environments
@@ -94,33 +87,44 @@ class AdminDictionaryService:
     async def get_environment_stats(self, environment: str) -> DictionaryStats:
         """
         Get statistics for dictionary terms in a specific environment
-        
+
         Args:
             environment: Environment name (dev/test/prod)
-            
+
         Returns:
             DictionaryStats with counts and breakdowns
         """
         try:
-            terms = await self.list_terms(environment)
-            
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    stats = await adapter.get_environment_stats()
+                    logger.debug(f"Retrieved stats from MongoDB for {environment}")
+                    return stats
+                except Exception as e:
+                    logger.warning(f"MongoDB stats failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based calculation
+            terms = await self._load_environment_terms_fallback(environment)
+
             # Calculate statistics
             categories = {}
             sources = {}
             recent_cutoff = time.time() - (7 * 24 * 3600)  # 7 days
             recent_updates = 0
-            
+
             for term in terms:
                 # Category breakdown
                 categories[term.category] = categories.get(term.category, 0) + 1
-                
+
                 # Source breakdown
                 sources[term.source] = sources.get(term.source, 0) + 1
-                
+
                 # Recent updates count
                 if term.updated_at and term.updated_at > recent_cutoff:
                     recent_updates += 1
-            
+
             return DictionaryStats(
                 total_terms=len(terms),
                 categories=categories,
@@ -128,7 +132,7 @@ class AdminDictionaryService:
                 recent_updates=recent_updates,
                 environment=environment
             )
-            
+
         except Exception as e:
             logger.error(f"Error getting stats for {environment}: {e}")
             return DictionaryStats(
@@ -139,38 +143,48 @@ class AdminDictionaryService:
                 environment=environment
             )
     
-    async def list_terms(self, environment: str, category: Optional[str] = None, 
+    async def list_terms(self, environment: str, category: Optional[str] = None,
                         search: Optional[str] = None, limit: int = 100) -> List[DictionaryTerm]:
         """
         List dictionary terms for a specific environment
-        
+
         Args:
             environment: Environment name
             category: Optional category filter
             search: Optional search term
             limit: Maximum number of terms to return
-            
+
         Returns:
             List of DictionaryTerm objects
         """
         try:
-            # Load terms from environment-specific storage
-            terms = await self._load_environment_terms(environment)
-            
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    terms = await adapter.list_terms(category=category, search=search, limit=limit)
+                    logger.debug(f"Retrieved {len(terms)} terms from MongoDB for {environment}")
+                    return terms
+                except Exception as e:
+                    logger.warning(f"MongoDB list_terms failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
+            terms = await self._load_environment_terms_fallback(environment)
+
             # Apply filters
             if category:
                 terms = [term for term in terms if term.category == category]
-            
+
             if search:
                 search_lower = search.lower()
-                terms = [term for term in terms 
-                        if search_lower in term.term.lower() 
+                terms = [term for term in terms
+                        if search_lower in term.term.lower()
                         or search_lower in term.definition.lower()]
-            
+
             # Sort by update time (newest first) and apply limit
             terms.sort(key=lambda x: x.updated_at or 0, reverse=True)
             return terms[:limit]
-            
+
         except Exception as e:
             logger.error(f"Error listing terms for {environment}: {e}")
             return []
@@ -178,23 +192,35 @@ class AdminDictionaryService:
     async def get_term(self, environment: str, term: str) -> Optional[DictionaryTerm]:
         """
         Get a specific term definition
-        
+
         Args:
             environment: Environment name
             term: Term to look up
-            
+
         Returns:
             DictionaryTerm object or None if not found
         """
         try:
-            terms = await self._load_environment_terms(environment)
-            
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    result = await adapter.get_term(term)
+                    if result:
+                        logger.debug(f"Retrieved term '{term}' from MongoDB for {environment}")
+                        return result
+                except Exception as e:
+                    logger.warning(f"MongoDB get_term failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
+            terms = await self._load_environment_terms_fallback(environment)
+
             for dict_term in terms:
                 if dict_term.term.lower() == term.lower():
                     return dict_term
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error getting term {term} from {environment}: {e}")
             return None
@@ -202,11 +228,11 @@ class AdminDictionaryService:
     async def create_term(self, environment: str, term_data: Dict[str, Any]) -> DictionaryTerm:
         """
         Create a new dictionary term
-        
+
         Args:
             environment: Environment name
             term_data: Term data dictionary
-            
+
         Returns:
             Created DictionaryTerm object
         """
@@ -216,13 +242,25 @@ class AdminDictionaryService:
             for field in required_fields:
                 if field not in term_data:
                     raise ValueError(f"Missing required field: {field}")
-            
+
             # Check if term already exists
             existing = await self.get_term(environment, term_data['term'])
             if existing:
                 raise ValueError(f"Term '{term_data['term']}' already exists in {environment}")
-            
-            # Create term object
+
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    term = await adapter.create_term(term_data)
+                    # Also sync to graph store
+                    await self._sync_to_graph_store(term)
+                    logger.info(f"Created term '{term.term}' in MongoDB for {environment}")
+                    return term
+                except Exception as e:
+                    logger.warning(f"MongoDB create_term failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
             term = DictionaryTerm(
                 term=term_data['term'],
                 definition=term_data['definition'],
@@ -235,16 +273,16 @@ class AdminDictionaryService:
                 updated_at=time.time(),
                 version=1
             )
-            
-            # Save to storage
-            await self._save_term(term)
-            
+
+            # Save to file storage
+            await self._save_term_fallback(term)
+
             # Add to graph store as Concept node
             await self._sync_to_graph_store(term)
-            
-            logger.info(f"Created term '{term.term}' in {environment}")
+
+            logger.info(f"Created term '{term.term}' in {environment} (file-based)")
             return term
-            
+
         except Exception as e:
             logger.error(f"Error creating term in {environment}: {e}")
             raise
@@ -252,12 +290,12 @@ class AdminDictionaryService:
     async def update_term(self, environment: str, term_name: str, updates: Dict[str, Any]) -> DictionaryTerm:
         """
         Update an existing dictionary term
-        
+
         Args:
             environment: Environment name
             term_name: Name of term to update
             updates: Dictionary of fields to update
-            
+
         Returns:
             Updated DictionaryTerm object
         """
@@ -266,7 +304,20 @@ class AdminDictionaryService:
             term = await self.get_term(environment, term_name)
             if not term:
                 raise ValueError(f"Term '{term_name}' not found in {environment}")
-            
+
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    updated_term = await adapter.update_term(term_name, updates)
+                    # Also sync to graph store
+                    await self._sync_to_graph_store(updated_term)
+                    logger.info(f"Updated term '{term_name}' in MongoDB for {environment}")
+                    return updated_term
+                except Exception as e:
+                    logger.warning(f"MongoDB update_term failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
             # Apply updates
             if 'definition' in updates:
                 term.definition = updates['definition']
@@ -278,20 +329,20 @@ class AdminDictionaryService:
                 term.page_reference = updates['page_reference']
             if 'tags' in updates:
                 term.tags = updates['tags']
-            
+
             # Update metadata
             term.updated_at = time.time()
             term.version += 1
-            
-            # Save to storage
-            await self._save_term(term)
-            
+
+            # Save to file storage
+            await self._save_term_fallback(term)
+
             # Update in graph store
             await self._sync_to_graph_store(term)
-            
-            logger.info(f"Updated term '{term_name}' in {environment}")
+
+            logger.info(f"Updated term '{term_name}' in {environment} (file-based)")
             return term
-            
+
         except Exception as e:
             logger.error(f"Error updating term {term_name} in {environment}: {e}")
             raise
@@ -299,11 +350,11 @@ class AdminDictionaryService:
     async def delete_term(self, environment: str, term_name: str) -> bool:
         """
         Delete a dictionary term
-        
+
         Args:
             environment: Environment name
             term_name: Name of term to delete
-            
+
         Returns:
             True if deletion successful
         """
@@ -312,18 +363,29 @@ class AdminDictionaryService:
             term = await self.get_term(environment, term_name)
             if not term:
                 return False
-            
-            # Remove from storage
-            await self._delete_term(term)
-            
+
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    success = await adapter.delete_term(term_name)
+                    if success:
+                        logger.info(f"Deleted term '{term_name}' from MongoDB for {environment}")
+                        return True
+                except Exception as e:
+                    logger.warning(f"MongoDB delete_term failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
+            await self._delete_term_fallback(term)
+
             # Remove from graph store
             node_id = f"concept:{environment}:{term_name.lower()}"
             # Note: GraphStore doesn't have delete method in current implementation
             # This would need to be added to the GraphStore class
-            
-            logger.info(f"Deleted term '{term_name}' from {environment}")
+
+            logger.info(f"Deleted term '{term_name}' from {environment} (file-based)")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error deleting term {term_name} from {environment}: {e}")
             return False
@@ -430,36 +492,46 @@ class AdminDictionaryService:
     async def search_terms(self, environment: str, query: str, category: Optional[str] = None) -> List[DictionaryTerm]:
         """
         Search dictionary terms with full-text search
-        
+
         Args:
             environment: Environment name
             query: Search query
             category: Optional category filter
-            
+
         Returns:
             List of matching DictionaryTerm objects
         """
         try:
-            # Simple text search implementation
+            # Try MongoDB first for enhanced search capabilities
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    results = await adapter.search_terms(query, category)
+                    logger.debug(f"Found {len(results)} search results from MongoDB for {environment}")
+                    return results
+                except Exception as e:
+                    logger.warning(f"MongoDB search_terms failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to simple text search implementation
             terms = await self.list_terms(environment, category=category, limit=None)
-            
+
             query_lower = query.lower()
             matching_terms = []
-            
+
             for term in terms:
                 # Search in term name, definition, and tags
                 search_text = f"{term.term} {term.definition} {' '.join(term.tags)}".lower()
-                
+
                 if query_lower in search_text:
                     matching_terms.append(term)
-            
+
             return matching_terms
-            
+
         except Exception as e:
             logger.error(f"Error searching terms in {environment}: {e}")
             return []
     
-    async def _load_environment_terms(self, environment: str) -> List[DictionaryTerm]:
+    async def _load_environment_terms_fallback(self, environment: str) -> List[DictionaryTerm]:
         """Load all terms for an environment from storage"""
         try:
             terms_file = Path(f"env/{environment}/data/dictionary.json")
@@ -481,11 +553,11 @@ class AdminDictionaryService:
             logger.warning(f"Could not load terms for {environment}: {e}")
             return []
     
-    async def _save_term(self, term: DictionaryTerm):
+    async def _save_term_fallback(self, term: DictionaryTerm):
         """Save a term to environment-specific storage"""
         try:
             # Load existing terms
-            terms = await self._load_environment_terms(term.environment)
+            terms = await self._load_environment_terms_fallback(term.environment)
             
             # Update or add term
             updated = False
@@ -515,10 +587,10 @@ class AdminDictionaryService:
             logger.error(f"Error saving term {term.term}: {e}")
             raise
     
-    async def _delete_term(self, term: DictionaryTerm):
+    async def _delete_term_fallback(self, term: DictionaryTerm):
         """Delete a term from storage"""
         try:
-            terms = await self._load_environment_terms(term.environment)
+            terms = await self._load_environment_terms_fallback(term.environment)
             
             # Remove term
             terms = [t for t in terms if t.term.lower() != term.term.lower()]

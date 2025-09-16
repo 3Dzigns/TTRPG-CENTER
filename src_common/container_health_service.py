@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import psutil
 import logging
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .database_config import test_database_connection, get_database_info, get_engine
 from .mongo_dictionary_service import get_dictionary_service
 from .neo4j_graph_service import get_graph_service

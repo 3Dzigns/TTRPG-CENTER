@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 import pypdf
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .toc_parser import TocParser
 from .dictionary_loader import DictionaryLoader, DictEntry
 from .ttrpg_secrets import get_openai_client_config, _load_env_file

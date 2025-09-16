@@ -15,7 +15,17 @@ from pymongo.database import Database
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import logging
 
-from .logging import get_logger
+try:
+    from .ttrpg_logging import get_logger
+except ImportError:
+    # Fallback for direct script execution
+    try:
+        from ttrpg_logging import get_logger
+    except ImportError:
+        # Simple fallback logger
+        import logging
+        def get_logger(name):
+            return logging.getLogger(name)
 
 logger = get_logger(__name__)
 
@@ -64,7 +74,7 @@ class MongoDictionaryService:
         self._connect()
         
         # Ensure indexes are created
-        if self.collection:
+        if self.collection is not None:
             self._ensure_indexes()
     
     def _connect(self) -> None:
@@ -106,34 +116,109 @@ class MongoDictionaryService:
             self.collection = None
     
     def _ensure_indexes(self) -> None:
-        """Create necessary indexes for efficient queries"""
-        if not self.collection:
+        """Create performance-optimized indexes for ≤1.5s search requirement (FR-015 AC2)"""
+        if self.collection is None:
             return
-        
+
         try:
             indexes = [
-                # Text search index on term and definition
-                IndexModel([("term_normalized", TEXT), ("definition", TEXT)], name="text_search"),
-                
-                # Category index for filtering
+                # Primary term lookup index (exact matches) - highest priority
+                IndexModel([("_id", ASCENDING)], name="primary_term_lookup"),
+
+                # Normalized term index for case-insensitive prefix matching
+                IndexModel([("term_normalized", ASCENDING)], name="term_normalized_index"),
+
+                # Compound text search index with weights for relevance scoring
+                IndexModel([
+                    ("term_normalized", TEXT),
+                    ("definition", TEXT),
+                    ("category", TEXT),
+                    ("sources.system", TEXT)
+                ],
+                name="weighted_text_search",
+                weights={
+                    "term_normalized": 10,  # Highest weight for term matches
+                    "definition": 5,        # Medium weight for definition matches
+                    "category": 3,          # Lower weight for category matches
+                    "sources.system": 2     # Lowest weight for source matches
+                }),
+
+                # High-performance category filtering
                 IndexModel([("category", ASCENDING)], name="category_index"),
-                
-                # Source system index for filtering by source
+
+                # Compound index for category + term queries (common pattern)
+                IndexModel([
+                    ("category", ASCENDING),
+                    ("term_normalized", ASCENDING)
+                ], name="category_term_compound"),
+
+                # Source system index for source-specific queries
                 IndexModel([("sources.system", ASCENDING)], name="source_system_index"),
-                
-                # Compound index for category + term queries
-                IndexModel([("category", ASCENDING), ("term_normalized", ASCENDING)], name="category_term_index"),
-                
-                # Updated timestamp for freshness queries
-                IndexModel([("updated_at", ASCENDING)], name="updated_at_index")
+
+                # Confidence scoring index for quality-based retrieval
+                IndexModel([("confidence_score", -1)], name="confidence_score_index"),
+
+                # Search priority index for ranking
+                IndexModel([("search_priority", -1)], name="search_priority_index"),
+
+                # Compound index for search priority + category (performance optimization)
+                IndexModel([
+                    ("search_priority", -1),
+                    ("category", ASCENDING)
+                ], name="priority_category_compound"),
+
+                # Updated timestamp for freshness queries and recent updates
+                IndexModel([("updated_at", -1)], name="updated_at_desc_index"),
+
+                # Created timestamp for chronological ordering
+                IndexModel([("created_at", -1)], name="created_at_desc_index"),
+
+                # Environment-specific index for multi-environment support
+                IndexModel([("environment", ASCENDING)], name="environment_index"),
+
+                # Compound index for environment + category (common admin query)
+                IndexModel([
+                    ("environment", ASCENDING),
+                    ("category", ASCENDING)
+                ], name="env_category_compound"),
+
+                # Tags array index for tag-based searching
+                IndexModel([("tags", ASCENDING)], name="tags_index"),
+
+                # Sparse index for entries with custom cache TTL
+                IndexModel([("cache_ttl", ASCENDING)],
+                          name="cache_ttl_index", sparse=True),
+
+                # Compound index for complex admin queries (environment + updated + category)
+                IndexModel([
+                    ("environment", ASCENDING),
+                    ("updated_at", -1),
+                    ("category", ASCENDING)
+                ], name="admin_query_compound")
             ]
-            
+
             # Create indexes if they don't exist
             self.collection.create_indexes(indexes)
-            logger.info("MongoDB dictionary indexes ensured")
-            
+            logger.info("MongoDB dictionary performance indexes created for ≤1.5s search requirement")
+
+            # Verify index creation and log statistics
+            index_info = self.collection.list_indexes()
+            index_names = [idx.get('name', 'unnamed') for idx in index_info]
+            logger.info(f"Active MongoDB indexes: {', '.join(index_names)}")
+
         except Exception as e:
-            logger.error(f"Failed to create MongoDB indexes: {e}")
+            logger.error(f"Failed to create MongoDB performance indexes: {e}")
+            # Fallback to basic indexes if advanced indexing fails
+            try:
+                basic_indexes = [
+                    IndexModel([("term_normalized", ASCENDING)], name="basic_term_index"),
+                    IndexModel([("category", ASCENDING)], name="basic_category_index"),
+                    IndexModel([("term_normalized", TEXT), ("definition", TEXT)], name="basic_text_search")
+                ]
+                self.collection.create_indexes(basic_indexes)
+                logger.warning("Created basic MongoDB indexes as fallback")
+            except Exception as fallback_error:
+                logger.error(f"Failed to create even basic indexes: {fallback_error}")
     
     def upsert_entries(self, entries: List[DictEntry]) -> int:
         """
@@ -145,7 +230,7 @@ class MongoDictionaryService:
         Returns:
             Number of entries processed
         """
-        if not entries or not self.collection:
+        if not entries or self.collection is None:
             return 0
         
         try:
@@ -192,7 +277,7 @@ class MongoDictionaryService:
         Returns:
             List of matching dictionary entries
         """
-        if not self.collection:
+        if self.collection is None:
             return []
         
         try:
@@ -248,7 +333,7 @@ class MongoDictionaryService:
         Returns:
             Dictionary entry if found, None otherwise
         """
-        if not self.collection:
+        if self.collection is None:
             return None
         
         try:
@@ -271,7 +356,7 @@ class MongoDictionaryService:
         Returns:
             True if deleted, False otherwise
         """
-        if not self.collection:
+        if self.collection is None:
             return False
         
         try:
@@ -292,7 +377,7 @@ class MongoDictionaryService:
         Returns:
             List of category names
         """
-        if not self.collection:
+        if self.collection is None:
             return []
         
         try:
@@ -310,7 +395,7 @@ class MongoDictionaryService:
         Returns:
             Dictionary with statistics
         """
-        if not self.collection:
+        if self.collection is None:
             return {"error": "MongoDB not connected"}
         
         try:
@@ -350,7 +435,7 @@ class MongoDictionaryService:
             self.client.admin.command('ping')
             
             # Test collection access
-            if self.collection:
+            if self.collection is not None:
                 count = self.collection.estimated_document_count()
                 return {
                     "status": "healthy",

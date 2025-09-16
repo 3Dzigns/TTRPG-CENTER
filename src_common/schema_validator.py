@@ -11,7 +11,7 @@ import jsonschema
 from jsonschema import Draft7Validator
 from dataclasses import dataclass
 
-from src_common.logging import get_logger
+from src_common.ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

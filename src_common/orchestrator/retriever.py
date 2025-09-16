@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

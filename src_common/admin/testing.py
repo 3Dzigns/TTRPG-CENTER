@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 
 
 logger = get_logger(__name__)

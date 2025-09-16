@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
-from src_common.logging import get_logger
+from src_common.ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

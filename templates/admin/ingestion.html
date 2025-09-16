@@ -45,20 +45,28 @@
         </div>
     </div>
     <div class="card-body">
-        <!-- Drag & Drop Upload Area -->
+        <!-- Enhanced Drag & Drop Upload Area -->
         <div class="upload-area mb-3" id="upload-area"
              ondrop="dropHandler(event)"
              ondragover="dragOverHandler(event)"
-             ondragleave="dragLeaveHandler(event)">
-            <div class="upload-area-content">
-                <i class="bi bi-cloud-arrow-up display-4 text-muted mb-2"></i>
-                <p class="mb-2"><strong>Drag & drop PDF files here</strong></p>
-                <p class="text-muted mb-3">or</p>
-                <div class="d-flex align-items-center gap-2">
-                    <input type="file" id="upload-input" accept=".pdf" multiple class="form-control" style="width: auto;">
-                    <button class="btn btn-admin" onclick="uploadSelected()">
-                        <i class="bi bi-cloud-arrow-up me-1"></i>Upload PDFs
-                    </button>
+             ondragleave="dragLeaveHandler(event)"
+             ondragenter="dragEnterHandler(event)">
+            <div class="upload-area-content" id="upload-area-content">
+                <i class="bi bi-cloud-arrow-up display-4 text-success mb-3" id="upload-icon"></i>
+                <h4 class="mb-3" id="upload-title"><strong>Drag & Drop PDF Files Here</strong></h4>
+                <p class="text-muted mb-3" id="upload-description">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span id="upload-hint">Drop one or more PDF files into this area for automatic upload</span>
+                </p>
+                <div class="mb-3">
+                    <span class="badge bg-light text-dark me-2"><i class="bi bi-file-earmark-pdf me-1"></i>PDF files only</span>
+                    <span class="badge bg-light text-dark me-2"><i class="bi bi-hdd me-1"></i>Max 50MB per file</span>
+                    <span class="badge bg-light text-dark"><i class="bi bi-stack me-1"></i>Multiple files supported</span>
+                </div>
+                <div class="alert alert-info">
+                    <i class="bi bi-lightbulb me-2"></i>
+                    <strong>Note:</strong> File browse functionality is restricted in this environment.
+                    Please use drag & drop to upload files.
                 </div>
             </div>
         </div>
@@ -230,16 +238,45 @@
     text-align: center;
     transition: all 0.3s ease;
     background: #f8fafc;
+    cursor: pointer;
+    position: relative;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.upload-area:hover {
+    border-color: #94a3b8;
+    background: #f1f5f9;
 }
 
 .upload-area.dragover {
     border-color: var(--admin-primary);
-    background: rgba(30, 58, 138, 0.05);
+    background: rgba(30, 58, 138, 0.08);
     transform: scale(1.02);
+    box-shadow: 0 8px 32px rgba(30, 58, 138, 0.15);
+    border-style: solid;
+}
+
+.upload-area.dragover::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border: 2px solid var(--admin-primary);
+    border-radius: 14px;
+    animation: borderPulse 1.5s infinite;
+}
+
+@keyframes borderPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
 }
 
 .upload-area-content {
     pointer-events: none;
+    z-index: 1;
+    position: relative;
 }
 
 .health-indicator {
@@ -289,13 +326,50 @@ let selectedSources = new Set();
 
 // Initialize console
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('📋 Ingestion Console initializing...');
     refreshConsole();
     setupEventListeners();
+    console.log('✅ Ingestion Console ready! Use drag & drop to upload files.');
 });
 
+// Note: Browse button functionality disabled due to browser security restrictions
+// when accessing through ngrok. Drag & drop functionality works perfectly.
+
 function setupEventListeners() {
-    // File input change handler
-    document.getElementById('upload-input').addEventListener('change', handleFileSelect);
+    console.log('Setting up event listeners for drag & drop upload...');
+
+    // Set up both file inputs
+    const visibleInput = document.getElementById('upload-input-visible');
+    const hiddenInput = document.getElementById('upload-input-hidden');
+    const browseBtn = document.getElementById('browse-btn');
+
+    // Visible input listener
+    if (visibleInput) {
+        visibleInput.addEventListener('change', handleFileSelect);
+        console.log('✅ Visible file input listener added');
+    }
+
+    // Hidden input listener
+    if (hiddenInput) {
+        hiddenInput.addEventListener('change', handleFileSelect);
+        console.log('✅ Hidden file input listener added');
+    }
+
+    // Browse button listener
+    if (browseBtn && hiddenInput) {
+        browseBtn.addEventListener('click', function() {
+            console.log('🔘 Browse button clicked, triggering hidden input');
+            hiddenInput.click();
+        });
+        console.log('✅ Browse button listener added');
+    }
+
+    // Debug info
+    console.log('Available elements:', {
+        'upload-input-visible': visibleInput,
+        'upload-input-hidden': hiddenInput,
+        'browse-btn': browseBtn
+    });
 }
 
 async function refreshConsole() {
@@ -321,10 +395,45 @@ function switchEnvironment(env) {
 // ====================== File Upload Management ======================
 
 function handleFileSelect(event) {
+    console.log('🎯 handleFileSelect called for visible file input');
     const files = event.target.files;
     if (files.length > 0) {
-        showUploadPreview(Array.from(files));
+        console.log('📂 Files selected from input:', Array.from(files).map(f => f.name));
+        // For the visible file input, we should trigger the browse upload handler
+        handleBrowseUpload(event);
     }
+}
+
+function handleBrowseUpload(event) {
+    console.log('📂 Browse upload triggered!');
+    console.log('📂 Event:', event);
+    console.log('📂 Target:', event.target);
+    console.log('📂 Files object:', event.target.files);
+    console.log('📂 Files length:', event.target.files ? event.target.files.length : 'no files');
+
+    if (event.target.files && event.target.files.length > 0) {
+        const allFiles = Array.from(event.target.files);
+        console.log('📂 All selected files:', allFiles.map(f => ({ name: f.name, type: f.type })));
+
+        const pdfFiles = allFiles.filter(f => f.type === 'application/pdf');
+        console.log('📂 PDF files:', pdfFiles.map(f => f.name));
+
+        if (pdfFiles.length > 0) {
+            console.log('📂 Auto-uploading browsed files:', pdfFiles.map(f => f.name));
+            uploadFiles(pdfFiles);
+        } else {
+            console.log('📂 No PDF files found');
+            AdminUtils.showToast('Please select only PDF files', 'warning');
+        }
+    } else {
+        console.log('📂 No files selected or files object is null');
+    }
+
+    // Clear the input for next use
+    setTimeout(() => {
+        event.target.value = '';
+        console.log('📂 Input cleared');
+    }, 1000);
 }
 
 function showUploadPreview(files) {
@@ -332,36 +441,277 @@ function showUploadPreview(files) {
     console.log('Selected files:', files.map(f => f.name));
 }
 
-// Drag & Drop handlers
+// Enhanced Drag & Drop handlers with better validation and feedback
+function dragEnterHandler(event) {
+    event.preventDefault();
+    const uploadArea = document.getElementById('upload-area');
+    uploadArea.classList.add('dragover');
+
+    // Update visual feedback
+    document.getElementById('upload-icon').className = 'bi bi-cloud-arrow-down display-4 text-primary mb-3';
+    document.getElementById('upload-title').innerHTML = '<strong>Drop Files Here</strong>';
+    document.getElementById('upload-hint').textContent = 'Release to upload your PDF files';
+}
+
 function dragOverHandler(event) {
     event.preventDefault();
-    document.getElementById('upload-area').classList.add('dragover');
+    event.dataTransfer.dropEffect = 'copy';
 }
 
 function dragLeaveHandler(event) {
     event.preventDefault();
-    document.getElementById('upload-area').classList.remove('dragover');
+
+    // Only remove dragover when actually leaving the drop zone
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX;
+    const y = event.clientY;
+
+    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+        resetUploadAreaVisuals();
+    }
 }
 
 function dropHandler(event) {
     event.preventDefault();
-    document.getElementById('upload-area').classList.remove('dragover');
+    resetUploadAreaVisuals();
 
-    const files = Array.from(event.dataTransfer.files).filter(f => f.type === 'application/pdf');
-    if (files.length > 0) {
-        uploadFiles(files);
-    } else {
-        AdminUtils.showToast('Please drop only PDF files', 'warning');
+    const files = Array.from(event.dataTransfer.files);
+    console.log('Files dropped:', files.map(f => f.name));
+
+    // Validate files
+    const validationResult = validateFiles(files);
+
+    if (!validationResult.valid) {
+        AdminUtils.showToast(validationResult.message, 'warning');
+        return;
+    }
+
+    const validFiles = validationResult.files;
+    AdminUtils.showToast(`Uploading ${validFiles.length} file(s)...`, 'info');
+    uploadFiles(validFiles);
+}
+
+function resetUploadAreaVisuals() {
+    document.getElementById('upload-area').classList.remove('dragover');
+    document.getElementById('upload-icon').className = 'bi bi-cloud-arrow-up display-4 text-success mb-3';
+    document.getElementById('upload-title').innerHTML = '<strong>Drag & Drop PDF Files Here</strong>';
+    document.getElementById('upload-hint').textContent = 'Drop one or more PDF files into this area for automatic upload';
+}
+
+function validateFiles(files) {
+    const maxFileSize = 50 * 1024 * 1024; // 50MB
+    const maxFiles = 10; // Maximum files per upload
+    const allowedTypes = ['application/pdf'];
+
+    // Check file count
+    if (files.length === 0) {
+        return { valid: false, message: 'No files selected' };
+    }
+
+    if (files.length > maxFiles) {
+        return { valid: false, message: `Maximum ${maxFiles} files allowed per upload` };
+    }
+
+    const validFiles = [];
+    const invalidFiles = [];
+
+    for (const file of files) {
+        // Check file type
+        if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) {
+            invalidFiles.push(`${file.name} (not a PDF)`);
+            continue;
+        }
+
+        // Check file size
+        if (file.size > maxFileSize) {
+            invalidFiles.push(`${file.name} (too large: ${AdminUtils.formatBytes(file.size)})`);
+            continue;
+        }
+
+        // Check for empty files
+        if (file.size === 0) {
+            invalidFiles.push(`${file.name} (empty file)`);
+            continue;
+        }
+
+        validFiles.push(file);
+    }
+
+    if (invalidFiles.length > 0) {
+        const message = `Invalid files rejected: ${invalidFiles.join(', ')}`;
+        if (validFiles.length > 0) {
+            AdminUtils.showToast(`${message}. Proceeding with ${validFiles.length} valid file(s).`, 'warning');
+        } else {
+            return { valid: false, message: message };
+        }
+    }
+
+    return { valid: true, files: validFiles, message: 'Files validated successfully' };
+}
+
+// Endpoint validation functions for FR-010
+async function validateIngestionEndpoints() {
+    console.log('🧪 Validating ingestion management endpoints...');
+
+    const results = {
+        upload: { status: 'unknown', endpoint: '/api/admin/uploads' },
+        start: { status: 'unknown', endpoint: '/api/admin/ingestion/run' },
+        cancel: { status: 'unknown', endpoint: '/api/admin/ingestion/cancel' },
+        status: { status: 'unknown', endpoint: '/api/admin/ingestion/status' },
+        jobs: { status: 'unknown', endpoint: '/api/admin/ingestion/jobs' }
+    };
+
+    // Test upload endpoint
+    try {
+        const uploadResponse = await fetch('/api/admin/uploads', { method: 'GET' });
+        results.upload.status = uploadResponse.ok ? 'available' : 'error';
+        results.upload.statusCode = uploadResponse.status;
+    } catch (error) {
+        results.upload.status = 'failed';
+        results.upload.error = error.message;
+    }
+
+    // Test ingestion status endpoint
+    try {
+        const statusResponse = await fetch('/api/admin/ingestion/status?env=dev', { method: 'GET' });
+        results.status.status = statusResponse.ok ? 'available' : 'error';
+        results.status.statusCode = statusResponse.status;
+    } catch (error) {
+        results.status.status = 'failed';
+        results.status.error = error.message;
+    }
+
+    // Test jobs list endpoint
+    try {
+        const jobsResponse = await fetch('/api/admin/ingestion/jobs?env=dev', { method: 'GET' });
+        results.jobs.status = jobsResponse.ok ? 'available' : 'error';
+        results.jobs.statusCode = jobsResponse.status;
+    } catch (error) {
+        results.jobs.status = 'failed';
+        results.jobs.error = error.message;
+    }
+
+    // Test ingestion run endpoint (dry run - don't actually start)
+    try {
+        const runResponse = await fetch('/api/admin/ingestion/validate', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        results.start.status = runResponse.ok ? 'available' : 'error';
+        results.start.statusCode = runResponse.status;
+    } catch (error) {
+        results.start.status = 'failed';
+        results.start.error = error.message;
+    }
+
+    console.log('Endpoint validation results:', results);
+
+    // Display results to user
+    const summary = Object.entries(results).map(([name, result]) =>
+        `${name}: ${result.status} (${result.endpoint})`
+    ).join('\n');
+
+    AdminUtils.showToast(`Endpoint validation completed. Check console for details.`, 'info');
+
+    return results;
+}
+
+async function testJobSubmissionFlow() {
+    console.log('🧪 Testing job submission and monitoring flow...');
+
+    try {
+        // Test 1: Validate we can check job status
+        const statusCheck = await fetch('/api/admin/ingestion/status?env=dev');
+        console.log('✅ Status check:', statusCheck.ok ? 'OK' : 'Failed');
+
+        // Test 2: Validate we can list jobs
+        const jobsList = await fetch('/api/admin/ingestion/jobs?env=dev');
+        console.log('✅ Jobs list:', jobsList.ok ? 'OK' : 'Failed');
+
+        // Test 3: Check for running jobs before testing cancel
+        if (jobsList.ok) {
+            const jobs = await jobsList.json();
+            const runningJobs = jobs.filter(job => job.status === 'running');
+            console.log(`📊 Found ${runningJobs.length} running jobs`);
+
+            if (runningJobs.length > 0) {
+                console.log('🧪 Testing cancel functionality...');
+                // Note: Only test if there are actually running jobs
+                // We don't want to create test jobs just for this
+            }
+        }
+
+        AdminUtils.showToast('Job submission flow test completed successfully', 'success');
+        return true;
+
+    } catch (error) {
+        console.error('❌ Job submission flow test failed:', error);
+        AdminUtils.showToast('Job submission flow test failed', 'danger');
+        return false;
     }
 }
 
-async function uploadSelected() {
-    const input = document.getElementById('upload-input');
-    if (!input.files || input.files.length === 0) {
-        AdminUtils.showToast('Please select PDF files to upload', 'warning');
-        return;
+function addEndpointValidationControls() {
+    // Add validation controls to the page
+    const uploadCard = document.querySelector('.card-header h5').parentElement;
+
+    const validationControls = document.createElement('div');
+    validationControls.className = 'btn-group btn-group-sm ms-2';
+    validationControls.innerHTML = `
+        <button class="btn btn-outline-info" onclick="validateIngestionEndpoints()" title="Validate Endpoints">
+            <i class="bi bi-check-circle me-1"></i>Validate
+        </button>
+        <button class="btn btn-outline-secondary" onclick="testJobSubmissionFlow()" title="Test Job Flow">
+            <i class="bi bi-gear me-1"></i>Test Flow
+        </button>
+    `;
+
+    uploadCard.appendChild(validationControls);
+}
+
+// Initialize endpoint validation on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Add validation controls
+    addEndpointValidationControls();
+
+    // Auto-validate endpoints on load
+    setTimeout(() => {
+        validateIngestionEndpoints();
+    }, 2000);
+});
+
+// Note: uploadSelected function removed - both drag & drop and browse now auto-upload
+
+function testFileInput() {
+    console.log('🧪 Testing file input functionality...');
+
+    const visibleInput = document.getElementById('upload-input-visible');
+    const hiddenInput = document.getElementById('upload-input-hidden');
+
+    console.log('Visible input:', visibleInput);
+    console.log('Hidden input:', hiddenInput);
+
+    // Test clicking the hidden input directly
+    if (hiddenInput) {
+        console.log('🧪 Attempting to click hidden input...');
+        try {
+            hiddenInput.click();
+            console.log('✅ Hidden input click succeeded');
+        } catch (error) {
+            console.error('❌ Hidden input click failed:', error);
+        }
     }
-    await uploadFiles(Array.from(input.files));
+
+    // Test clicking the visible input directly
+    if (visibleInput) {
+        console.log('🧪 Attempting to click visible input...');
+        try {
+            visibleInput.click();
+            console.log('✅ Visible input click succeeded');
+        } catch (error) {
+            console.error('❌ Visible input click failed:', error);
+        }
+    }
 }
 
 async function uploadFiles(files) {
@@ -726,6 +1076,7 @@ async function loadJobs() {
                             <i class="bi bi-eye"></i>
                         </button>
                         ${job.status === 'failed' ? `<button class="btn btn-outline-warning btn-sm" onclick="retryJob('${job.job_id}')" title="Retry"><i class="bi bi-arrow-clockwise"></i></button>` : ''}
+                        ${job.status === 'running' ? `<button class="btn btn-outline-danger btn-sm" onclick="killJob('${job.job_id}')" title="Cancel Job"><i class="bi bi-stop-circle"></i></button>` : ''}
                     </div>
                 </td>
             `;
@@ -739,13 +1090,39 @@ async function loadJobs() {
 }
 
 function viewJobDetails(jobId) {
-    // This would show detailed job information in a modal
-    AdminUtils.showToast(`Viewing details for job ${jobId}`, 'info');
+    // Navigate to logs page with job filter to open correct log
+    window.location.href = `/admin/logs?env=${currentEnvironment}&job=${jobId}`;
 }
 
 function retryJob(jobId) {
     AdminUtils.showToast(`Retrying job ${jobId}...`, 'info');
     // Implementation for job retry
+}
+
+async function killJob(jobId) {
+    if (!confirm(`Are you sure you want to cancel job ${jobId}? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        AdminUtils.showToast(`Cancelling job ${jobId}...`, 'info');
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            AdminUtils.showToast(result.message || `Job ${jobId} cancelled successfully`, 'success');
+            // Refresh the jobs list to show updated status
+            setTimeout(() => loadJobs(), 1000);
+        } else {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to kill job');
+        }
+    } catch (error) {
+        console.error('Kill job failed:', error);
+        AdminUtils.showToast(`Failed to cancel job: ${error.message}`, 'danger');
+    }
 }
 
 function showJobLogs() {

@@ -191,8 +191,10 @@
                 <nav class="nav flex-column pt-3">
                     <a class="nav-link {% if active_nav=='dashboard' %}active{% endif %}" href="/admin"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
                     <a class="nav-link {% if active_nav=='ingestion' %}active{% endif %}" href="/admin/ingestion"><i class="bi bi-upload me-2"></i>Ingestion Console</a>
+                    <a class="nav-link {% if active_nav=='logs' %}active{% endif %}" href="/admin/logs"><i class="bi bi-file-text me-2"></i>Log Management</a>
                     <a class="nav-link {% if active_nav=='dictionary' %}active{% endif %}" href="/admin/dictionary"><i class="bi bi-book me-2"></i>Dictionary Management</a>
-                    <a class="nav-link {% if active_nav=='testing' %}active{% endif %}" href="/admin/testing"><i class="bi bi-bug me-2"></i>Testing & Bugs</a>
+                    <a class="nav-link {% if active_nav=='testing' %}active{% endif %}" href="/admin/testing"><i class="bi bi-clipboard-check me-2"></i>Testing</a>
+                    <a class="nav-link {% if active_nav=='bugs' %}active{% endif %}" href="/admin/bugs"><i class="bi bi-bug me-2"></i>Bug Tracking</a>
                     <a class="nav-link {% if active_nav=='cache' %}active{% endif %}" href="/admin/cache"><i class="bi bi-lightning me-2"></i>Cache Control</a>
                     <hr>
                     <div class="nav-link text-muted small">Environments</div>

@@ -12,7 +12,7 @@ import os
 import ssl
 import warnings
 from typing import Optional
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

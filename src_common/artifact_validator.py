@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 import tempfile
 import shutil
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

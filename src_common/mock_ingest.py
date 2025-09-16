@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 
-from .logging import get_logger, jlog
+from .ttrpg_logging import get_logger, jlog
 
 
 logger = get_logger(__name__)

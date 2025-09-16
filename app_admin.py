@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src_common.logging import get_logger, setup_logging
+from src_common.ttrpg_logging import get_logger, setup_logging
 from src_common.cors_security import (
     setup_secure_cors,
     validate_cors_startup,

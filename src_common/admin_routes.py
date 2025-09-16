@@ -8,6 +8,8 @@ import os
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from datetime import datetime
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends, Query, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -16,22 +18,24 @@ from pydantic import BaseModel
 import shutil
 import contextlib
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .admin import (
     AdminStatusService,
     AdminIngestionService,
     AdminDictionaryService,
     AdminTestingService,
-    AdminCacheService
+    AdminCacheService,
+    AdminLogService
 )
 
 # Initialize logging and services
 logger = get_logger(__name__)
 status_service = AdminStatusService()
 ingestion_service = AdminIngestionService()
-dictionary_service = AdminDictionaryService()
+dictionary_service = AdminDictionaryService(use_mongodb=True)  # FR-015: Enable MongoDB by default
 testing_service = AdminTestingService()
 cache_service = AdminCacheService()
+log_service = AdminLogService()
 
 # Initialize templates
 templates = Jinja2Templates(directory="templates")
@@ -156,6 +160,27 @@ async def get_ingestion_job_details(environment: str, job_id: str):
         logger.error(f"Job details error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@admin_router.delete("/api/ingestion/{environment}/jobs/{job_id}")
+async def kill_ingestion_job(environment: str, job_id: str):
+    """Kill/cancel a running or pending ingestion job."""
+    try:
+        result = await ingestion_service.kill_job(environment, job_id)
+        if result:
+            await notify_all_admins({
+                "type": "job_killed",
+                "data": {
+                    "job_id": job_id,
+                    "environment": environment,
+                    "timestamp": datetime.now().isoformat()
+                }
+            })
+            return {"success": True, "message": f"Job {job_id} killed successfully"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found or already completed")
+    except Exception as e:
+        logger.error(f"Job kill error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @admin_router.get("/api/dictionary/overview")
 async def get_dictionary_overview():
     """Get dictionary status overview."""
@@ -169,9 +194,265 @@ async def get_dictionary_overview():
 async def get_dictionary_term_details(environment: str, term: str):
     """Get detailed information about a specific term."""
     try:
-        return await dictionary_service.get_term(environment, term)
+        result = await dictionary_service.get_term(environment, term)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Term '{term}' not found in {environment}")
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Term details error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Dictionary Management API - FR-015 MongoDB Integration
+# -------------------------
+
+@admin_router.get("/api/dictionary/{environment}/terms")
+async def list_dictionary_terms(
+    environment: str,
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000)
+):
+    """List dictionary terms with optional filtering."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        terms = await dictionary_service.list_terms(
+            environment=environment,
+            category=category,
+            search=search,
+            limit=limit
+        )
+
+        # Convert to dict format for JSON response
+        return {
+            "environment": environment,
+            "total": len(terms),
+            "terms": [asdict(term) for term in terms],
+            "filters": {
+                "category": category,
+                "search": search,
+                "limit": limit
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"List dictionary terms error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/dictionary/{environment}/terms")
+async def create_dictionary_term(environment: str, term_data: dict):
+    """Create a new dictionary term."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        # Validate required fields
+        required_fields = ['term', 'definition', 'category', 'source']
+        missing_fields = [field for field in required_fields if field not in term_data]
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+
+        term = await dictionary_service.create_term(environment, term_data)
+
+        return {
+            "status": "created",
+            "term": asdict(term),
+            "environment": environment
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Create dictionary term error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.put("/api/dictionary/{environment}/terms/{term_name}")
+async def update_dictionary_term(environment: str, term_name: str, updates: dict):
+    """Update an existing dictionary term."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        updated_term = await dictionary_service.update_term(environment, term_name, updates)
+
+        return {
+            "status": "updated",
+            "term": asdict(updated_term),
+            "environment": environment
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Update dictionary term error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.delete("/api/dictionary/{environment}/terms/{term_name}")
+async def delete_dictionary_term(environment: str, term_name: str):
+    """Delete a dictionary term."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        success = await dictionary_service.delete_term(environment, term_name)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Term '{term_name}' not found in {environment}")
+
+        return {
+            "status": "deleted",
+            "term": term_name,
+            "environment": environment
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete dictionary term error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/dictionary/{environment}/search")
+async def search_dictionary_terms(
+    environment: str,
+    q: str = Query(..., description="Search query"),
+    category: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200)
+):
+    """Search dictionary terms with full-text search capabilities."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        # Record search start time for performance monitoring (AC2)
+        start_time = time.time()
+
+        terms = await dictionary_service.search_terms(
+            environment=environment,
+            query=q,
+            category=category
+        )
+
+        # Apply limit
+        terms = terms[:limit]
+
+        search_time = time.time() - start_time
+
+        return {
+            "environment": environment,
+            "query": q,
+            "category": category,
+            "total": len(terms),
+            "terms": [asdict(term) for term in terms],
+            "search_time_seconds": round(search_time, 3),
+            "performance_target_met": search_time <= 1.5  # AC2 requirement
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Search dictionary terms error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/dictionary/{environment}/stats")
+async def get_dictionary_stats(environment: str):
+    """Get dictionary statistics for a specific environment."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        stats = await dictionary_service.get_environment_stats(environment)
+
+        return {
+            "environment": environment,
+            "stats": asdict(stats),
+            "backend": "mongodb" if dictionary_service.use_mongodb else "file_based"
+        }
+
+    except Exception as e:
+        logger.error(f"Dictionary stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/dictionary/{environment}/import")
+async def import_dictionary_terms(environment: str, file: UploadFile = File(...)):
+    """Bulk import dictionary terms from JSON file."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        if not file.filename.endswith('.json'):
+            raise HTTPException(status_code=400, detail="Only JSON files are supported")
+
+        # Read and parse file
+        content = await file.read()
+        try:
+            import json
+            data = json.loads(content.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON format: {e}")
+
+        # Extract terms data
+        if isinstance(data, dict) and 'terms' in data:
+            terms_data = data['terms']
+        elif isinstance(data, list):
+            terms_data = data
+        else:
+            raise HTTPException(status_code=400, detail="JSON must contain 'terms' array or be an array")
+
+        # Bulk import
+        results = await dictionary_service.bulk_import(environment, terms_data)
+
+        return {
+            "status": "imported",
+            "environment": environment,
+            "results": results
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Import dictionary terms error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/dictionary/{environment}/export")
+async def export_dictionary_terms(environment: str, format: str = Query("json", regex="^(json|csv)$")):
+    """Export dictionary terms in JSON or CSV format."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        export_data = await dictionary_service.export_terms(environment, format)
+
+        if format == "json":
+            from fastapi.responses import JSONResponse
+            import json
+            return JSONResponse(
+                content=json.loads(export_data),
+                headers={"Content-Disposition": f"attachment; filename=dictionary_{environment}.json"}
+            )
+        else:  # CSV
+            from fastapi.responses import Response
+            return Response(
+                content=export_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=dictionary_{environment}.csv"}
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export dictionary terms error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.get("/api/cache/overview")
@@ -511,6 +792,15 @@ async def admin_ingestion_page(request: Request):
     }
     return templates.TemplateResponse("admin/ingestion.html", context)
 
+@admin_router.get("/admin/logs", response_class=HTMLResponse)
+async def admin_logs_page(request: Request):
+    context = {
+        "request": request,
+        "title": "Log Management",
+        "active_nav": "logs",
+    }
+    return templates.TemplateResponse("admin/logs.html", context)
+
 @admin_router.get("/admin/dictionary", response_class=HTMLResponse)
 async def admin_dictionary_page(request: Request):
     context = {
@@ -537,3 +827,410 @@ async def admin_cache_page(request: Request):
         "active_nav": "cache",
     }
     return templates.TemplateResponse("admin/cache.html", context)
+
+# -------------------------
+# Ingestion Job Management
+# -------------------------
+
+class IngestionRunRequest(BaseModel):
+    env: str
+    source_files: Optional[List[str]] = None
+    options: Optional[Dict[str, Any]] = None
+    job_type: Optional[str] = "ad_hoc"  # "ad_hoc" or "nightly"
+
+@admin_router.post("/api/admin/ingestion/run")
+async def run_ingestion_job(request: IngestionRunRequest):
+    """Start an ingestion job for the specified environment."""
+    try:
+        # Determine source file based on job type
+        if request.job_type == "nightly":
+            source_file = "nightly_run"
+        else:
+            # For ad-hoc jobs, use first source file if provided, otherwise placeholder
+            source_file = (request.source_files[0] if request.source_files
+                          else "ad_hoc_run")
+
+        # Start the ingestion job
+        job_id = await ingestion_service.start_ingestion_job(
+            environment=request.env,
+            source_file=source_file,
+            options=request.options or {},
+            job_type=request.job_type or "ad_hoc"
+        )
+
+        # Broadcast job start via WebSocket
+        await manager.broadcast({
+            "type": "ingestion_job_started",
+            "job_id": job_id,
+            "environment": request.env,
+            "timestamp": time.time()
+        })
+
+        # Simulate process ID for compatibility with frontend expectations
+        import os
+        pid = os.getpid()
+
+        return {
+            "job_id": job_id,
+            "env": request.env,
+            "pid": pid,
+            "status": "started",
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to start ingestion job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
+# Log Management - FR-008
+# -------------------------
+
+@admin_router.get("/api/admin/logs/list")
+async def get_logs_list(
+    environment: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None)
+):
+    """Get list of log files with filtering"""
+    try:
+        return await log_service.get_logs_overview(
+            environment=environment,
+            status=status,
+            job_type=job_type,
+            search=search,
+            date_from=date_from,
+            date_to=date_to
+        )
+    except Exception as e:
+        logger.error(f"Error getting logs list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/logs/content")
+async def get_log_content(
+    job_id: str = Query(...),
+    env: str = Query(...),
+    lines: int = Query(1000)
+):
+    """Get content of a specific log file"""
+    try:
+        return await log_service.get_log_content(job_id, env, lines)
+    except Exception as e:
+        logger.error(f"Error getting log content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/logs/status")
+async def get_log_job_status(
+    job_id: str = Query(...),
+    env: str = Query(...)
+):
+    """Get status of a specific job"""
+    try:
+        return await log_service.get_job_status(job_id, env)
+    except Exception as e:
+        logger.error(f"Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/logs/download")
+async def download_log_file(
+    job_id: str = Query(...),
+    env: str = Query(...)
+):
+    """Download a specific log file"""
+    try:
+        # Find the log file
+        env_log_dir = Path("env") / env / "logs"
+        log_files = list(env_log_dir.glob("*.log"))
+
+        target_file = None
+        for log_file in log_files:
+            if job_id in str(log_file):
+                target_file = log_file
+                break
+
+        if not target_file or not target_file.exists():
+            raise HTTPException(status_code=404, detail="Log file not found")
+
+        return FileResponse(
+            path=target_file,
+            filename=target_file.name,
+            media_type='text/plain'
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading log file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/logs/export")
+async def export_all_logs(environment: Optional[str] = Query(None)):
+    """Export all logs as ZIP file"""
+    try:
+        zip_data = await log_service.export_logs(environment)
+
+        # Create a temporary file for the ZIP
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+            tmp_file.write(zip_data)
+            tmp_file_path = tmp_file.name
+
+        filename = f"logs-export-{environment or 'all'}-{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+
+        return FileResponse(
+            path=tmp_file_path,
+            filename=filename,
+            media_type='application/zip'
+        )
+
+    except Exception as e:
+        logger.error(f"Error exporting logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
+# AstraDB Health Status
+# -------------------------
+
+@admin_router.get("/api/admin/astradb/sources/{environment}")
+async def get_astradb_sources(environment: str):
+    """Get sources with chunk counts directly from AstraDB for the specified environment."""
+    try:
+        # Import AstraLoader to query the database
+        from .astra_loader import AstraLoader
+
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        loader = AstraLoader(env=environment)
+        sources_data = loader.get_sources_with_chunk_counts()
+
+        return {
+            "status": "success",
+            "environment": environment,
+            "data": sources_data,
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting AstraDB sources for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/sources/health/{environment}")
+async def get_sources_health_status(environment: str):
+    """Get comprehensive health status combining local artifacts and AstraDB sources."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        sources_health = await ingestion_service.get_sources_health(environment)
+
+        return {
+            "status": "success",
+            "environment": environment,
+            "sources": sources_health,
+            "timestamp": time.time(),
+            "total_sources": len(sources_health)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting sources health for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/ingestion/recent")
+async def get_recent_ingestion_jobs(limit: int = 3):
+    """Get the most recent ingestion jobs across all environments with standardized status."""
+    try:
+        if limit < 1 or limit > 10:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 10")
+
+        recent_jobs = await ingestion_service.get_recent_jobs(limit=limit)
+
+        return {
+            "status": "success",
+            "jobs": recent_jobs,
+            "total_returned": len(recent_jobs),
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting recent ingestion jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
+# MongoDB Dictionary Status - FR-015 Integration
+# -------------------------
+
+@admin_router.get("/api/admin/mongodb/health")
+async def get_mongodb_health():
+    """Get overall MongoDB health status across all environments."""
+    try:
+        health_results = {}
+        overall_healthy = True
+
+        for env in ['dev', 'test', 'prod']:
+            try:
+                # Get MongoDB adapter for each environment
+                adapter = dictionary_service._get_adapter(env)
+
+                if adapter:
+                    # Get health check from MongoDB service
+                    health = adapter.mongo_service.health_check()
+                    circuit_stats = adapter.get_circuit_breaker_stats()
+
+                    health_results[env] = {
+                        "status": health.get("status", "unknown"),
+                        "database": health.get("database"),
+                        "collection": health.get("collection"),
+                        "estimated_documents": health.get("estimated_documents", 0),
+                        "circuit_breaker": {
+                            "state": circuit_stats.get("state", "unknown"),
+                            "failure_count": circuit_stats.get("failure_count", 0),
+                            "last_failure_time": circuit_stats.get("last_failure_time")
+                        },
+                        "error": health.get("error")
+                    }
+
+                    if health.get("status") != "healthy":
+                        overall_healthy = False
+                else:
+                    health_results[env] = {
+                        "status": "unavailable",
+                        "error": "MongoDB adapter not initialized"
+                    }
+                    overall_healthy = False
+
+            except Exception as e:
+                health_results[env] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+                overall_healthy = False
+
+        return {
+            "status": "healthy" if overall_healthy else "degraded",
+            "environments": health_results,
+            "backend_active": dictionary_service.use_mongodb,
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting MongoDB health: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/mongodb/status/{environment}")
+async def get_mongodb_status(environment: str):
+    """Get detailed MongoDB status for a specific environment."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        adapter = dictionary_service._get_adapter(environment)
+
+        if not adapter:
+            return {
+                "status": "unavailable",
+                "environment": environment,
+                "error": "MongoDB adapter not initialized",
+                "backend_active": dictionary_service.use_mongodb,
+                "timestamp": time.time()
+            }
+
+        # Get comprehensive status including performance metrics
+        health = adapter.mongo_service.health_check()
+        stats = adapter.mongo_service.get_stats()
+        circuit_stats = adapter.get_circuit_breaker_stats()
+
+        # Perform a test query to measure performance (AC2 requirement)
+        start_time = time.time()
+        try:
+            # Test query - get one document from collection
+            if adapter.mongo_service.collection:
+                test_result = adapter.mongo_service.collection.find_one()
+                query_time_ms = (time.time() - start_time) * 1000
+                performance_ok = query_time_ms <= 1500  # FR-015 AC2 requirement
+            else:
+                query_time_ms = None
+                performance_ok = False
+        except Exception:
+            query_time_ms = None
+            performance_ok = False
+
+        return {
+            "status": health.get("status", "unknown"),
+            "environment": environment,
+            "connection": {
+                "database": health.get("database"),
+                "collection": health.get("collection"),
+                "estimated_documents": health.get("estimated_documents", 0)
+            },
+            "statistics": {
+                "entries": stats.get("total_entries", 0),
+                "categories": len(stats.get("category_distribution", {})),
+                "category_distribution": stats.get("category_distribution", {})
+            },
+            "performance": {
+                "avg_query_time": query_time_ms,
+                "performance_target_met": performance_ok,
+                "target_threshold_ms": 1500
+            },
+            "circuit_breaker": {
+                "state": circuit_stats.get("state", "unknown"),
+                "failure_count": circuit_stats.get("failure_count", 0),
+                "success_count": circuit_stats.get("success_count", 0),
+                "last_failure_time": circuit_stats.get("last_failure_time"),
+                "last_success_time": circuit_stats.get("last_success_time")
+            },
+            "backend_active": dictionary_service.use_mongodb,
+            "error": health.get("error") or stats.get("error"),
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting MongoDB status for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/api/admin/mongodb/{environment}/reset-circuit-breaker")
+async def reset_mongodb_circuit_breaker(environment: str):
+    """Reset the circuit breaker for MongoDB dictionary service in specified environment."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        adapter = dictionary_service._get_adapter(environment)
+
+        if not adapter:
+            raise HTTPException(status_code=404, detail="MongoDB adapter not found for environment")
+
+        # Reset the circuit breaker
+        adapter.reset_circuit_breaker()
+
+        # Force a health check to verify recovery
+        health_ok = adapter.force_health_check()
+
+        return {
+            "status": "reset",
+            "environment": environment,
+            "health_check_passed": health_ok,
+            "message": f"Circuit breaker reset for MongoDB dictionary in {environment}",
+            "timestamp": time.time()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting MongoDB circuit breaker for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

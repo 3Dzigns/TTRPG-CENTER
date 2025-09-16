@@ -6,7 +6,7 @@ FR1 Configuration Module - Environment-specific settings for FR1 enhancements
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

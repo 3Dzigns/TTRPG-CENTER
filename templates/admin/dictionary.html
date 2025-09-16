@@ -4,7 +4,20 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h1 class="h3 mb-0">Dictionary Management</h1>
+    <div>
+        <h1 class="h3 mb-0">Dictionary Management</h1>
+        <div class="mt-1">
+            <span class="text-muted small me-3">
+                <i class="bi bi-database me-1"></i>
+                Backend:
+                <span id="dict-backend-status" class="badge bg-success">MongoDB</span>
+            </span>
+            <span class="text-muted small me-3" id="dict-connection-status">
+                <i class="bi bi-wifi me-1"></i>
+                <span class="badge bg-secondary">Checking...</span>
+            </span>
+        </div>
+    </div>
     <div class="btn-group" role="group">
         <button class="btn btn-admin" onclick="addNewTerm()">
             <i class="bi bi-plus-circle me-1"></i>Add Term
@@ -25,6 +38,24 @@
         </div>
     </div>
 </div>
+
+<!-- Navigation Tabs -->
+<ul class="nav nav-tabs mb-4" id="dictTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="terms-tab" data-bs-toggle="tab" data-bs-target="#terms-pane" type="button" role="tab">
+            <i class="bi bi-book me-1"></i>Dictionary Terms
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="artifacts-tab" data-bs-toggle="tab" data-bs-target="#artifacts-pane" type="button" role="tab">
+            <i class="bi bi-archive me-1"></i>Artifacts
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="dictTabContent">
+    <!-- Dictionary Terms Tab -->
+    <div class="tab-pane fade show active" id="terms-pane" role="tabpanel">
 
 <!-- Dictionary Statistics -->
 <div class="row mb-4">
@@ -258,6 +289,127 @@
     </div>
 </div>
 
+    </div> <!-- End Dictionary Terms Tab -->
+
+    <!-- Artifacts Tab -->
+    <div class="tab-pane fade" id="artifacts-pane" role="tabpanel">
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-funnel me-2"></i>Filter Artifacts</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label for="artifact-env-filter" class="form-label">Environment</label>
+                                <select class="form-select" id="artifact-env-filter" onchange="filterArtifacts()">
+                                    <option value="all">All Environments</option>
+                                    <option value="dev">Development</option>
+                                    <option value="test">Testing</option>
+                                    <option value="prod">Production</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="artifact-source-filter" class="form-label">Source</label>
+                                <input type="text" class="form-control" id="artifact-source-filter" placeholder="Filter by source..." onkeyup="filterArtifacts()">
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <label for="artifact-entry-filter" class="form-label">Dictionary Entry</label>
+                                <input type="text" class="form-control" id="artifact-entry-filter" placeholder="Filter by entry..." onkeyup="filterArtifacts()">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="artifact-type-filter" class="form-label">Artifact Type</label>
+                                <select class="form-select" id="artifact-type-filter" onchange="filterArtifacts()">
+                                    <option value="all">All Types</option>
+                                    <option value="json">JSON</option>
+                                    <option value="text">Text</option>
+                                    <option value="log">Log</option>
+                                    <option value="metadata">Metadata</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Artifacts Overview</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <div class="metric-value text-primary" id="total-artifacts">--</div>
+                                <div class="metric-label">Total Artifacts</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="metric-value text-success" id="total-artifact-size">--</div>
+                                <div class="metric-label">Total Size</div>
+                            </div>
+                        </div>
+                        <div class="row text-center mt-3">
+                            <div class="col-6">
+                                <div class="metric-value text-info" id="linked-artifacts">--</div>
+                                <div class="metric-label">Linked to Entries</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="metric-value text-warning" id="orphaned-artifacts">--</div>
+                                <div class="metric-label">Orphaned</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Artifacts Table -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-archive me-2"></i>Artifacts</h5>
+                <div class="btn-group">
+                    <button class="btn btn-outline-primary" onclick="refreshArtifacts()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="exportArtifacts()">
+                        <i class="bi bi-download me-1"></i>Export All
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm" id="artifacts-table">
+                        <thead>
+                            <tr>
+                                <th>Artifact Name</th>
+                                <th>Source/Book</th>
+                                <th>Dictionary Entry</th>
+                                <th>Chunk/Page</th>
+                                <th>Type</th>
+                                <th>Size</th>
+                                <th>Environment</th>
+                                <th>Modified</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="artifacts-table-body">
+                            <tr>
+                                <td colspan="9" class="text-center text-muted">
+                                    <div class="loading-spinner"></div>
+                                    Loading artifacts...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div> <!-- End Artifacts Tab -->
+
+</div> <!-- End Tab Content -->
+
 <style>
 .metric-value {
     font-size: 2rem;
@@ -309,15 +461,68 @@ let filteredTerms = [];
 // Initialize dictionary management
 document.addEventListener('DOMContentLoaded', function() {
     refreshDictionary();
+    checkBackendStatus();
 });
 
 async function refreshDictionary() {
     AdminUtils.showToast('Refreshing dictionary...', 'info');
     await Promise.all([
         loadDictionaryStats(),
-        loadDictionaryTerms()
+        loadDictionaryTerms(),
+        checkBackendStatus()
     ]);
     AdminUtils.showToast('Dictionary refreshed', 'success');
+}
+
+async function checkBackendStatus() {
+    const statusElement = document.getElementById('dict-connection-status');
+
+    try {
+        // Check MongoDB connection status
+        const response = await fetch('/api/admin/mongodb/health');
+
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.status === 'healthy') {
+                statusElement.innerHTML = `
+                    <i class="bi bi-wifi me-1"></i>
+                    <span class="badge bg-success">Connected</span>
+                `;
+            } else {
+                statusElement.innerHTML = `
+                    <i class="bi bi-wifi-off me-1"></i>
+                    <span class="badge bg-warning">Degraded</span>
+                `;
+            }
+
+            // Update backend status indicator
+            const backendElement = document.getElementById('dict-backend-status');
+            if (backendElement && data.backend_active) {
+                backendElement.className = 'badge bg-success';
+                backendElement.textContent = 'MongoDB';
+            }
+
+        } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+    } catch (error) {
+        console.error('MongoDB health check failed:', error);
+
+        // Show connection error
+        statusElement.innerHTML = `
+            <i class="bi bi-wifi-off me-1"></i>
+            <span class="badge bg-danger">Error</span>
+        `;
+
+        // Update backend status to show error
+        const backendElement = document.getElementById('dict-backend-status');
+        if (backendElement) {
+            backendElement.className = 'badge bg-danger';
+            backendElement.textContent = 'MongoDB Error';
+        }
+    }
 }
 
 async function loadDictionaryStats() {
@@ -698,6 +903,213 @@ function performImport() {
         refreshDictionary();
     }, 2000);
 }
+
+// Artifacts Management Functions
+let allArtifacts = [];
+let filteredArtifacts = [];
+
+async function refreshArtifacts() {
+    AdminUtils.showToast('Refreshing artifacts...', 'info');
+    await Promise.all([
+        loadArtifactsStats(),
+        loadArtifacts()
+    ]);
+    AdminUtils.showToast('Artifacts refreshed', 'success');
+}
+
+async function loadArtifactsStats() {
+    try {
+        // Mock data for now - replace with actual API call
+        const stats = {
+            total_artifacts: 347,
+            total_size_bytes: 15728640, // ~15MB
+            linked_artifacts: 298,
+            orphaned_artifacts: 49
+        };
+
+        document.getElementById('total-artifacts').textContent = stats.total_artifacts.toLocaleString();
+        document.getElementById('total-artifact-size').textContent = AdminUtils.formatBytes(stats.total_size_bytes);
+        document.getElementById('linked-artifacts').textContent = stats.linked_artifacts.toLocaleString();
+        document.getElementById('orphaned-artifacts').textContent = stats.orphaned_artifacts.toLocaleString();
+
+    } catch (error) {
+        console.error('Failed to load artifacts stats:', error);
+        AdminUtils.showToast('Failed to load artifact statistics', 'danger');
+    }
+}
+
+async function loadArtifacts() {
+    try {
+        // Mock data for now - replace with actual API call
+        allArtifacts = generateMockArtifacts();
+        filteredArtifacts = [...allArtifacts];
+        updateArtifactsDisplay();
+
+    } catch (error) {
+        console.error('Failed to load artifacts:', error);
+        AdminUtils.showToast('Failed to load artifacts', 'danger');
+    }
+}
+
+function generateMockArtifacts() {
+    const environments = ['dev', 'test', 'prod'];
+    const types = ['json', 'text', 'log', 'metadata'];
+    const sources = ['Player\'s Handbook', 'Dungeon Master\'s Guide', 'Monster Manual', 'Xanathar\'s Guide', 'Tasha\'s Cauldron'];
+    const artifacts = [];
+
+    for (let i = 0; i < 50; i++) {
+        const env = environments[i % environments.length];
+        const type = types[i % types.length];
+        const source = sources[i % sources.length];
+
+        artifacts.push({
+            id: i + 1,
+            name: `artifact_${env}_${i.toString().padStart(3, '0')}.${type}`,
+            source: source,
+            dictionary_entry: `Entry ${i + 1}`,
+            chunk_page: `chunk_${i % 10}`,
+            type: type,
+            size_bytes: Math.floor(Math.random() * 1024 * 1024), // Random size up to 1MB
+            environment: env,
+            modified_at: Date.now() - (i * 3600000), // Hours ago
+            linked: Math.random() > 0.2 // 80% linked
+        });
+    }
+
+    return artifacts;
+}
+
+function updateArtifactsDisplay() {
+    const tbody = document.getElementById('artifacts-table-body');
+
+    if (filteredArtifacts.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center text-muted">
+                    <i class="bi bi-archive me-2"></i>
+                    No artifacts found. Try adjusting your filters.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = filteredArtifacts.map(artifact => {
+        const envClass = getEnvClass(artifact.environment);
+        const typeIcon = getTypeIcon(artifact.type);
+        const linkedIcon = artifact.linked ? '<i class="bi bi-link text-success" title="Linked to entry"></i>' : '<i class="bi bi-unlink text-warning" title="Orphaned"></i>';
+
+        return `
+            <tr>
+                <td>
+                    <div class="d-flex align-items-center">
+                        ${typeIcon}
+                        <span class="ms-2">${artifact.name}</span>
+                        <span class="ms-2">${linkedIcon}</span>
+                    </div>
+                </td>
+                <td>${artifact.source}</td>
+                <td>
+                    ${artifact.linked ? `<a href="#" onclick="jumpToEntry('${artifact.dictionary_entry}')">${artifact.dictionary_entry}</a>` : '--'}
+                </td>
+                <td><code class="small">${artifact.chunk_page}</code></td>
+                <td><span class="badge bg-light text-dark">${artifact.type}</span></td>
+                <td>${AdminUtils.formatBytes(artifact.size_bytes)}</td>
+                <td><span class="badge bg-${envClass}">${artifact.environment}</span></td>
+                <td>${AdminUtils.formatTimestamp(artifact.modified_at / 1000)}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary btn-sm" onclick="viewArtifact('${artifact.id}')" title="View Artifact">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <a class="btn btn-outline-secondary btn-sm" href="/api/admin/artifacts/download?id=${artifact.id}" title="Download">
+                            <i class="bi bi-download"></i>
+                        </a>
+                        ${artifact.linked ? '' : `<button class="btn btn-outline-success btn-sm" onclick="linkArtifact('${artifact.id}')" title="Link to Entry"><i class="bi bi-link"></i></button>`}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function getEnvClass(env) {
+    switch (env) {
+        case 'dev': return 'success';
+        case 'test': return 'warning';
+        case 'prod': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+function getTypeIcon(type) {
+    switch (type) {
+        case 'json': return '<i class="bi bi-braces text-primary"></i>';
+        case 'text': return '<i class="bi bi-file-text text-info"></i>';
+        case 'log': return '<i class="bi bi-file-earmark-text text-warning"></i>';
+        case 'metadata': return '<i class="bi bi-tags text-secondary"></i>';
+        default: return '<i class="bi bi-file text-muted"></i>';
+    }
+}
+
+function filterArtifacts() {
+    const envFilter = document.getElementById('artifact-env-filter').value;
+    const sourceFilter = document.getElementById('artifact-source-filter').value.toLowerCase();
+    const entryFilter = document.getElementById('artifact-entry-filter').value.toLowerCase();
+    const typeFilter = document.getElementById('artifact-type-filter').value;
+
+    filteredArtifacts = allArtifacts.filter(artifact => {
+        const matchesEnv = envFilter === 'all' || artifact.environment === envFilter;
+        const matchesSource = !sourceFilter || artifact.source.toLowerCase().includes(sourceFilter);
+        const matchesEntry = !entryFilter || artifact.dictionary_entry.toLowerCase().includes(entryFilter);
+        const matchesType = typeFilter === 'all' || artifact.type === typeFilter;
+
+        return matchesEnv && matchesSource && matchesEntry && matchesType;
+    });
+
+    updateArtifactsDisplay();
+}
+
+function viewArtifact(artifactId) {
+    const artifact = allArtifacts.find(a => a.id == artifactId);
+    if (!artifact) return;
+
+    AdminUtils.showToast(`Viewing artifact: ${artifact.name}`, 'info');
+    // This would open the artifact viewer modal
+}
+
+function linkArtifact(artifactId) {
+    const artifact = allArtifacts.find(a => a.id == artifactId);
+    if (!artifact) return;
+
+    AdminUtils.showToast(`Linking artifact: ${artifact.name}`, 'info');
+    // This would open a modal to select dictionary entry to link to
+}
+
+function jumpToEntry(entryName) {
+    // Switch to dictionary terms tab and filter by entry name
+    document.getElementById('terms-tab').click();
+    document.getElementById('search-terms').value = entryName;
+    filterTerms();
+    AdminUtils.showToast(`Jumped to entry: ${entryName}`, 'info');
+}
+
+function exportArtifacts() {
+    AdminUtils.showToast('Preparing artifacts export...', 'info');
+
+    setTimeout(() => {
+        const filename = `artifacts_export_${new Date().toISOString().split('T')[0]}.zip`;
+        AdminUtils.showToast(`Export ready: ${filename}`, 'success');
+        // Mock download trigger
+    }, 1500);
+}
+
+// Initialize artifacts when tab is shown
+document.getElementById('artifacts-tab').addEventListener('shown.bs.tab', function() {
+    if (allArtifacts.length === 0) {
+        refreshArtifacts();
+    }
+});
 </script>
 {% endblock %}
 
