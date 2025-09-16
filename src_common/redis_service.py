@@ -13,7 +13,7 @@ import redis
 from redis.exceptions import ConnectionError, TimeoutError, RedisError
 import logging
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

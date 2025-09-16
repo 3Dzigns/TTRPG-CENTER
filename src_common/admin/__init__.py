@@ -9,11 +9,13 @@ from .ingestion import AdminIngestionService
 from .dictionary import AdminDictionaryService
 from .testing import AdminTestingService
 from .cache_control import AdminCacheService
+from .logs import AdminLogService
 
 __all__ = [
     'AdminStatusService',
-    'AdminIngestionService', 
+    'AdminIngestionService',
     'AdminDictionaryService',
     'AdminTestingService',
-    'AdminCacheService'
+    'AdminCacheService',
+    'AdminLogService'
 ]

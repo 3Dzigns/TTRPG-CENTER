@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 # Initialize logging
 logger = get_logger(__name__)

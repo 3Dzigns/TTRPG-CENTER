@@ -40,7 +40,7 @@ except ImportError:
 
 # OpenAI for embeddings and NER
 from .ttrpg_secrets import get_openai_client_config
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 from .astra_loader import AstraLoader
 

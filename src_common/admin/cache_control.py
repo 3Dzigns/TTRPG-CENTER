@@ -8,7 +8,7 @@ import time
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
-from ..logging import get_logger
+from ..ttrpg_logging import get_logger
 
 
 logger = get_logger(__name__)

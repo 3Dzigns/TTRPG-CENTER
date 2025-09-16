@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .logging import setup_logging, get_logger, LogContext
+from .ttrpg_logging import setup_logging, get_logger, LogContext
 from .orchestrator.service import rag_router
 
 

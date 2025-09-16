@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse
 
-from src_common.logging import get_logger
+from src_common.ttrpg_logging import get_logger
 from src_common.runtime.state import WorkflowStateStore
 from src_common.runtime.execute import WorkflowExecutor
 

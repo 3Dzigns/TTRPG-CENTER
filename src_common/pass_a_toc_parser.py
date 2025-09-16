@@ -26,7 +26,7 @@ import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .toc_parser import TocParser
 from .dictionary_loader import DictionaryLoader, DictEntry
 from .artifact_validator import write_json_atomically

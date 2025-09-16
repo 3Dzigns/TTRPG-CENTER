@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List, Optional
 from collections import defaultdict
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .ssl_bypass import configure_ssl_bypass_for_development, get_httpx_verify_setting
 
 logger = get_logger(__name__)

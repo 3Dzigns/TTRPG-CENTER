@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import uuid
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .ttrpg_secrets import get_all_config, validate_database_config, load_env
 from pathlib import Path
 import os
@@ -314,12 +314,12 @@ class AstraLoader:
     def get_collection_stats(self) -> Dict[str, Any]:
         """
         Get statistics about the collection
-        
+
         Returns:
             Dictionary with collection statistics
         """
         logger.info(f"Getting stats for collection {self.collection_name}")
-        
+
         if self.client is None:
             logger.info(f"SIMULATION MODE: Collection stats for {self.collection_name}")
             return {
@@ -328,19 +328,19 @@ class AstraLoader:
                 'environment': self.env,
                 'status': 'simulation_mode'
             }
-        
+
         try:
             # Get actual collection stats
             collection = self.client.get_collection(self.collection_name)
             count = collection.count_documents({}, upper_bound=10000)
-            
+
             return {
                 'collection_name': self.collection_name,
                 'document_count': count,
                 'environment': self.env,
                 'status': 'ready'
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting collection stats: {e}")
             return {
@@ -349,6 +349,100 @@ class AstraLoader:
                 'environment': self.env,
                 'status': 'error',
                 'error': str(e)
+            }
+
+    def get_sources_with_chunk_counts(self) -> Dict[str, Any]:
+        """
+        Get list of all sources with their chunk counts from AstraDB
+
+        Returns:
+            Dictionary with sources list and metadata
+        """
+        logger.info(f"Getting sources with chunk counts from collection {self.collection_name}")
+
+        if self.client is None:
+            logger.info(f"SIMULATION MODE: Sources with chunk counts for {self.collection_name}")
+            # Return simulation data for testing
+            return {
+                'status': 'simulation_mode',
+                'environment': self.env,
+                'sources': [
+                    {
+                        'source_hash': 'sim_001234567890',
+                        'source_file': 'D&D 5e Player Handbook.pdf',
+                        'chunk_count': 342,
+                        'last_updated': time.time() - 3600
+                    },
+                    {
+                        'source_hash': 'sim_abcdef123456',
+                        'source_file': 'Pathfinder Core Rulebook.pdf',
+                        'chunk_count': 156,
+                        'last_updated': time.time() - 7200
+                    }
+                ],
+                'total_sources': 2,
+                'total_chunks': 498
+            }
+
+        try:
+            collection = self.client.get_collection(self.collection_name)
+
+            # Use aggregation to get distinct sources and their chunk counts
+            # This is more efficient than multiple queries
+            pipeline = [
+                {
+                    "$group": {
+                        "_id": "$metadata.source_hash",
+                        "chunk_count": {"$sum": 1},
+                        "source_file": {"$first": "$metadata.source_file"},
+                        "last_updated": {"$max": "$loaded_at"}
+                    }
+                },
+                {
+                    "$match": {
+                        "_id": {"$ne": None}  # Filter out chunks without source_hash
+                    }
+                },
+                {
+                    "$sort": {"chunk_count": -1}  # Sort by chunk count descending
+                }
+            ]
+
+            # Execute aggregation
+            result = collection.aggregate(pipeline)
+            sources = []
+            total_chunks = 0
+
+            for doc in result:
+                source_info = {
+                    'source_hash': doc['_id'],
+                    'source_file': doc.get('source_file', 'Unknown Source'),
+                    'chunk_count': doc['chunk_count'],
+                    'last_updated': doc.get('last_updated', time.time())
+                }
+                sources.append(source_info)
+                total_chunks += doc['chunk_count']
+
+            logger.info(f"Found {len(sources)} sources with {total_chunks} total chunks")
+
+            return {
+                'status': 'ready',
+                'environment': self.env,
+                'sources': sources,
+                'total_sources': len(sources),
+                'total_chunks': total_chunks,
+                'collection_name': self.collection_name
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting sources with chunk counts: {e}")
+            return {
+                'status': 'error',
+                'environment': self.env,
+                'error': str(e),
+                'sources': [],
+                'total_sources': 0,
+                'total_chunks': 0
             }
 
     def _enforce_chunk_size_limits(self, content: str, target_chars: int, max_bytes: int) -> List[str]:

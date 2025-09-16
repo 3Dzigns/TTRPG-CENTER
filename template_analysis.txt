@@ -1,0 +1,27 @@
+Template Literal Analysis:
+==============================
+Template literal START: HTML: 305 JS:  9 col:20 - nsole.log(`[ADMIN DEBUG] ${message}`, da
+Template literal END:   HTML: 305 JS:  9 col:45 - ${message}`, data || '');
+Template literal START: HTML: 311 JS: 15 col:22 - ole.error(`[ADMIN ERROR] ${message}`, er
+Template literal END:   HTML: 311 JS: 15 col:47 - ${message}`, error || '');
+Template literal START: HTML: 352 JS: 56 col:28 - new Error(`HTTP ${response.status}: ${re
+Template literal END:   HTML: 352 JS: 56 col:76 - tatusText}`);
+Template literal START: HTML: 368 JS: 72 col:28 - new Error(`Cache API HTTP ${cacheRespons
+Template literal END:   HTML: 368 JS: 72 col:96 - tatusText}`);
+Template literal START: HTML: 383 JS: 87 col:29 - showToast(`Error loading dashboard data:
+Template literal END:   HTML: 383 JS: 87 col:76 - r.message}`, 'danger');
+Template literal START: HTML: 392 JS: 96 col:22 - rorHtml = `
+Template literal END:   HTML: 406 JS:110 col: 4 -     `;
+Template literal START: HTML: 427 JS:131 col:21 -  debugLog(`Testing ${endpoint}...`);
+Template literal END:   HTML: 427 JS:131 col:44 - dpoint}...`);
+Template literal START: HTML: 436 JS:140 col:26 - duration: `${duration}ms`,
+Template literal END:   HTML: 436 JS:140 col:40 - uration}ms`,
+Traceback (most recent call last):
+  File "C:\Users\anzak\Documents\TTRPG_Center\scripts\find_template_literal_issue.py", line 105, in <module>
+    find_template_literal_issue()
+  File "C:\Users\anzak\Documents\TTRPG_Center\scripts\find_template_literal_issue.py", line 73, in find_template_literal_issue
+    print(f"Template literal START: HTML:{html_line:4d} JS:{line_num:3d} col:{i:2d} - {line[max(0, i-10):i+30]}")
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 61: character maps to <undefined>

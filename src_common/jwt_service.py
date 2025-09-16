@@ -31,7 +31,7 @@ def _load_env_config_early():
 _load_env_config_early()
 
 from .auth_models import UserRole, TokenClaims, UserContext
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

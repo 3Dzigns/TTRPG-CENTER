@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 import pypdf
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 
 logger = get_logger(__name__)

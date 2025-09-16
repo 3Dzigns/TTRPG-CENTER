@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -18,7 +18,7 @@ from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, JobExecutionEvent
 import logging
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

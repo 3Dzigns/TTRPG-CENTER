@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, asdict
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 from .artifact_validator import write_json_atomically, load_json_with_retry
 
 logger = get_logger(__name__)

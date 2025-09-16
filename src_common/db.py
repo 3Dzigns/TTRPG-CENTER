@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlmodel import SQLModel
 import logging
 
-from .logging import get_logger
+from .ttrpg_logging import get_logger
 
 logger = get_logger(__name__)
 

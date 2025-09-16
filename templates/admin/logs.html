@@ -1,0 +1,571 @@
+{% extends "base.html" %}
+
+{% block title %}Log Management - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Log Management</h1>
+    <div class="btn-group" role="group">
+        <button type="button" class="btn btn-admin" onclick="refreshLogs()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+        <button type="button" class="btn btn-outline-secondary" onclick="exportLogs()">
+            <i class="bi bi-download me-1"></i>Export All
+        </button>
+    </div>
+</div>
+
+<!-- Environment Selector -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-funnel me-2"></i>Filter & Search</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="environment-filter" class="form-label">Environment</label>
+                        <select class="form-select" id="environment-filter" onchange="filterLogs()">
+                            <option value="all">All Environments</option>
+                            <option value="dev">Development</option>
+                            <option value="test">Testing</option>
+                            <option value="prod">Production</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="status-filter" class="form-label">Status</label>
+                        <select class="form-select" id="status-filter" onchange="filterLogs()">
+                            <option value="all">All Status</option>
+                            <option value="running">Running</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                            <option value="pending">Pending</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <label for="job-type-filter" class="form-label">Job Type</label>
+                        <select class="form-select" id="job-type-filter" onchange="filterLogs()">
+                            <option value="all">All Types</option>
+                            <option value="ad-hoc">Ad-hoc</option>
+                            <option value="nightly">Nightly</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="search-input" class="form-label">Search Job ID / Source</label>
+                        <input type="text" class="form-control" id="search-input" placeholder="Enter Job ID or source..." onkeyup="filterLogs()">
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <label for="date-from" class="form-label">From Date</label>
+                        <input type="date" class="form-control" id="date-from" onchange="filterLogs()">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="date-to" class="form-label">To Date</label>
+                        <input type="date" class="form-control" id="date-to" onchange="filterLogs()">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Log Management Info</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <div class="metric-value" id="total-logs">--</div>
+                        <div class="metric-label">Total Logs</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="metric-value" id="running-jobs">--</div>
+                        <div class="metric-label">Running Jobs</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="metric-value" id="total-size">--</div>
+                        <div class="metric-label">Total Size</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-lightbulb me-1"></i>
+                        Use filters to narrow down results. Running jobs show live updates.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Logs Table -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-table me-2"></i>Ingestion Logs</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm" id="logs-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Job Type</th>
+                        <th>Status</th>
+                        <th>PID</th>
+                        <th>Start Time</th>
+                        <th>End Time</th>
+                        <th>Duration</th>
+                        <th>File Size</th>
+                        <th>Source(s)</th>
+                        <th>Environment</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="logs-table-body">
+                    <tr>
+                        <td colspan="11" class="text-center text-muted">
+                            <div class="loading-spinner"></div>
+                            Loading log data...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Log Viewer Modal -->
+<div class="modal fade" id="logViewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="log-view-title">Log Viewer</h5>
+                <div class="btn-group btn-group-sm ms-2">
+                    <button type="button" class="btn btn-outline-primary" onclick="toggleAutoRefresh()" id="auto-refresh-btn">
+                        <i class="bi bi-play-circle me-1"></i>Auto Refresh
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="downloadCurrentLog()">
+                        <i class="bi bi-download me-1"></i>Download
+                    </button>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="text-muted">Lines:</span>
+                        <select class="form-select form-select-sm d-inline-block w-auto ms-1" id="lines-select" onchange="updateLogView()">
+                            <option value="100">Last 100</option>
+                            <option value="500">Last 500</option>
+                            <option value="1000" selected>Last 1000</option>
+                            <option value="5000">Last 5000</option>
+                            <option value="all">All Lines</option>
+                        </select>
+                    </div>
+                    <div>
+                        <span class="badge bg-info" id="log-status-badge">Static</span>
+                        <span class="text-muted ms-2">Last updated: <span id="last-updated">--</span></span>
+                    </div>
+                </div>
+                <pre id="log-view-content" class="bg-dark text-light p-3" style="height: 500px; overflow-y: auto; white-space: pre-wrap; font-family: 'Courier New', monospace;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentLogData = null;
+let autoRefreshTimer = null;
+let isAutoRefreshing = false;
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle URL parameters for direct navigation from job controls (FR-014)
+    const urlParams = new URLSearchParams(window.location.search);
+    const envParam = urlParams.get('env');
+    const jobParam = urlParams.get('job');
+
+    // Set default date range (last 7 days)
+    const today = new Date();
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    document.getElementById('date-to').value = today.toISOString().split('T')[0];
+    document.getElementById('date-from').value = weekAgo.toISOString().split('T')[0];
+
+    // Apply URL parameters if present
+    if (envParam) {
+        const envSelect = document.getElementById('environment-filter');
+        if (envSelect) {
+            envSelect.value = envParam;
+        }
+    }
+
+    // Load logs data (this will respect the environment filter)
+    loadLogsData();
+
+    // If job parameter is provided, automatically find and open the corresponding log
+    if (jobParam && envParam) {
+        setTimeout(() => {
+            autoOpenJobLog(jobParam, envParam);
+        }, 1000); // Wait for logs to load
+    }
+});
+
+async function loadLogsData() {
+    try {
+        console.log('Loading logs data...');
+        const response = await fetch('/api/admin/logs/list');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data = await response.json();
+
+        updateLogStats(data);
+        populateLogsTable(data.logs || []);
+
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        AdminUtils.showToast('Error loading log data', 'danger');
+        document.getElementById('logs-table-body').innerHTML = `
+            <tr>
+                <td colspan="11" class="text-center text-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Error loading log data: ${error.message}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function updateLogStats(data) {
+    document.getElementById('total-logs').textContent = data.total_count || 0;
+    document.getElementById('running-jobs').textContent = data.running_count || 0;
+    document.getElementById('total-size').textContent = AdminUtils.formatBytes(data.total_size_bytes || 0);
+}
+
+function populateLogsTable(logs) {
+    const tbody = document.getElementById('logs-table-body');
+
+    if (logs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="11" class="text-center text-muted">
+                    <i class="bi bi-info-circle me-2"></i>
+                    No logs found. Try adjusting your filters.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = logs.map(log => {
+        const statusClass = getStatusClass(log.status);
+        const statusIcon = getStatusIcon(log.status);
+        const duration = log.duration_seconds ? AdminUtils.formatDuration(log.duration_seconds) : '--';
+        const endTime = log.end_time ? AdminUtils.formatTimestamp(log.end_time) : '--';
+        const pid = log.pid || '--';
+        const sources = Array.isArray(log.sources) ? log.sources.join(', ') : (log.sources || '--');
+
+        return `
+            <tr>
+                <td><code class="small">${log.job_id}</code></td>
+                <td>
+                    <span class="badge bg-${log.job_type === 'nightly' ? 'primary' : 'secondary'}">
+                        ${log.job_type}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge bg-${statusClass}">
+                        ${statusIcon} ${log.status}
+                    </span>
+                </td>
+                <td>${pid}</td>
+                <td>${AdminUtils.formatTimestamp(log.start_time)}</td>
+                <td>${endTime}</td>
+                <td>${duration}</td>
+                <td>${AdminUtils.formatBytes(log.file_size_bytes || 0)}</td>
+                <td class="small" style="max-width: 200px;" title="${sources}">${AdminUtils.truncate(sources, 30)}</td>
+                <td>
+                    <span class="badge bg-${getEnvClass(log.environment)}">${log.environment}</span>
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary btn-sm" onclick="viewLog('${log.job_id}', '${log.environment}', '${log.log_file}')" title="View Log">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <a class="btn btn-outline-secondary btn-sm" href="/api/admin/logs/download?job_id=${log.job_id}&env=${log.environment}" title="Download">
+                            <i class="bi bi-download"></i>
+                        </a>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function getStatusClass(status) {
+    switch (status?.toLowerCase()) {
+        case 'running': return 'warning';
+        case 'completed': return 'success';
+        case 'failed': return 'danger';
+        case 'pending': return 'info';
+        default: return 'secondary';
+    }
+}
+
+function getStatusIcon(status) {
+    switch (status?.toLowerCase()) {
+        case 'running': return '<i class="bi bi-play-circle"></i>';
+        case 'completed': return '<i class="bi bi-check-circle"></i>';
+        case 'failed': return '<i class="bi bi-x-circle"></i>';
+        case 'pending': return '<i class="bi bi-clock"></i>';
+        default: return '<i class="bi bi-question-circle"></i>';
+    }
+}
+
+function getEnvClass(env) {
+    switch (env) {
+        case 'dev': return 'success';
+        case 'test': return 'warning';
+        case 'prod': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+async function filterLogs() {
+    const filters = {
+        environment: document.getElementById('environment-filter').value,
+        status: document.getElementById('status-filter').value,
+        job_type: document.getElementById('job-type-filter').value,
+        search: document.getElementById('search-input').value,
+        date_from: document.getElementById('date-from').value,
+        date_to: document.getElementById('date-to').value
+    };
+
+    try {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+            if (value && value !== 'all') {
+                params.append(key, value);
+            }
+        });
+
+        const response = await fetch(`/api/admin/logs/list?${params}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data = await response.json();
+
+        updateLogStats(data);
+        populateLogsTable(data.logs || []);
+
+    } catch (error) {
+        console.error('Error filtering logs:', error);
+        AdminUtils.showToast('Error filtering logs', 'danger');
+    }
+}
+
+async function viewLog(jobId, environment, logFile) {
+    try {
+        currentLogData = { jobId, environment, logFile };
+
+        document.getElementById('log-view-title').textContent = `Log: ${jobId} (${environment})`;
+
+        const modal = new bootstrap.Modal(document.getElementById('logViewModal'));
+        modal.show();
+
+        await updateLogView();
+
+        // Check if job is running and enable auto-refresh
+        const isRunning = await checkJobStatus(jobId, environment);
+        if (isRunning) {
+            document.getElementById('log-status-badge').textContent = 'Live';
+            document.getElementById('log-status-badge').className = 'badge bg-warning';
+            startAutoRefresh();
+        } else {
+            document.getElementById('log-status-badge').textContent = 'Static';
+            document.getElementById('log-status-badge').className = 'badge bg-info';
+        }
+
+    } catch (error) {
+        console.error('Error viewing log:', error);
+        AdminUtils.showToast('Error loading log content', 'danger');
+    }
+}
+
+async function updateLogView() {
+    if (!currentLogData) return;
+
+    try {
+        const lines = document.getElementById('lines-select').value;
+        const params = new URLSearchParams({
+            job_id: currentLogData.jobId,
+            env: currentLogData.environment,
+            lines: lines === 'all' ? '0' : lines
+        });
+
+        const response = await fetch(`/api/admin/logs/content?${params}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const content = data.content || 'No log content available';
+
+        document.getElementById('log-view-content').textContent = content;
+        document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+
+        // Auto-scroll to bottom for running jobs
+        const contentElement = document.getElementById('log-view-content');
+        contentElement.scrollTop = contentElement.scrollHeight;
+
+    } catch (error) {
+        console.error('Error updating log view:', error);
+        document.getElementById('log-view-content').textContent = `Error loading log: ${error.message}`;
+    }
+}
+
+async function checkJobStatus(jobId, environment) {
+    try {
+        const response = await fetch(`/api/admin/logs/status?job_id=${jobId}&env=${environment}`);
+        if (!response.ok) return false;
+        const data = await response.json();
+        return data.status === 'running';
+    } catch (error) {
+        console.error('Error checking job status:', error);
+        return false;
+    }
+}
+
+function toggleAutoRefresh() {
+    if (isAutoRefreshing) {
+        stopAutoRefresh();
+    } else {
+        startAutoRefresh();
+    }
+}
+
+function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+
+    isAutoRefreshing = true;
+    document.getElementById('auto-refresh-btn').innerHTML = '<i class="bi bi-pause-circle me-1"></i>Stop Auto';
+    document.getElementById('auto-refresh-btn').className = 'btn btn-warning btn-sm';
+
+    autoRefreshTimer = setInterval(updateLogView, 3000); // Update every 3 seconds
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+
+    isAutoRefreshing = false;
+    document.getElementById('auto-refresh-btn').innerHTML = '<i class="bi bi-play-circle me-1"></i>Auto Refresh';
+    document.getElementById('auto-refresh-btn').className = 'btn btn-outline-primary btn-sm';
+}
+
+function downloadCurrentLog() {
+    if (!currentLogData) {
+        AdminUtils.showToast('No log selected', 'warning');
+        return;
+    }
+
+    const url = `/api/admin/logs/download?job_id=${currentLogData.jobId}&env=${currentLogData.environment}`;
+    window.open(url, '_blank');
+}
+
+function refreshLogs() {
+    AdminUtils.showToast('Refreshing logs...', 'info');
+    loadLogsData();
+}
+
+// Auto-open job log for direct navigation (FR-014)
+async function autoOpenJobLog(jobId, environment) {
+    try {
+        console.log(`Auto-opening log for job ${jobId} in ${environment}...`);
+
+        // Look for the job in the loaded logs table
+        const tableRows = document.querySelectorAll('#logs-table tbody tr');
+        let foundLog = null;
+
+        for (const row of tableRows) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 4) {
+                const rowJobId = cells[1].textContent.trim();
+                const rowEnv = cells[2].textContent.trim();
+
+                if (rowJobId.includes(jobId) && rowEnv === environment) {
+                    // Extract log details from the view button
+                    const viewButton = row.querySelector('button[onclick*="viewLog"]');
+                    if (viewButton) {
+                        const onclickAttr = viewButton.getAttribute('onclick');
+                        const matches = onclickAttr.match(/viewLog\('([^']+)',\s*'([^']+)',\s*'([^']+)'\)/);
+                        if (matches) {
+                            foundLog = {
+                                jobId: matches[1],
+                                environment: matches[2],
+                                logFile: matches[3]
+                            };
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (foundLog) {
+            console.log('Found matching log, opening...', foundLog);
+            await viewLog(foundLog.jobId, foundLog.environment, foundLog.logFile);
+            AdminUtils.showToast(`Opened log for job ${jobId}`, 'success');
+        } else {
+            console.log('No matching log found for job:', jobId);
+            AdminUtils.showToast(`Log for job ${jobId} not found. Try refreshing or check if the job exists.`, 'warning');
+        }
+    } catch (error) {
+        console.error('Error auto-opening job log:', error);
+        AdminUtils.showToast('Error opening job log', 'danger');
+    }
+}
+
+async function exportLogs() {
+    try {
+        AdminUtils.showToast('Preparing export...', 'info');
+        const response = await fetch('/api/admin/logs/export');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `logs-export-${new Date().toISOString().split('T')[0]}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        AdminUtils.showToast('Export downloaded successfully', 'success');
+
+    } catch (error) {
+        console.error('Error exporting logs:', error);
+        AdminUtils.showToast('Error exporting logs', 'danger');
+    }
+}
+
+// Cleanup on modal close
+document.getElementById('logViewModal').addEventListener('hidden.bs.modal', function() {
+    stopAutoRefresh();
+    currentLogData = null;
+});
+
+</script>
+{% endblock %}
