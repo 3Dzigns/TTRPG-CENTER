@@ -819,6 +819,275 @@ async def admin_testing_page(request: Request):
     }
     return templates.TemplateResponse("admin/testing.html", context)
 
+# -------------------------
+# Testing API Endpoints
+# -------------------------
+
+class TestRunRequest(BaseModel):
+    environment: str
+    test_type: Optional[str] = None
+
+class TestCreateRequest(BaseModel):
+    name: str
+    description: str
+    test_type: str
+    command: str
+    expected_result: str
+    tags: Optional[List[str]] = None
+    created_by: Optional[str] = "admin"
+
+class BugCreateRequest(BaseModel):
+    title: str
+    description: str
+    severity: str
+    status: Optional[str] = "open"
+    environment: str
+    expected_behavior: Optional[str] = None
+    actual_behavior: Optional[str] = None
+    steps_to_reproduce: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    created_by: Optional[str] = "admin"
+
+class BugUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    description: Optional[str] = None
+    severity: Optional[str] = None
+    resolution: Optional[str] = None
+
+@admin_router.get("/api/admin/testing/overview")
+async def get_testing_overview():
+    """Get testing overview with statistics across all environments"""
+    try:
+        overview = await testing_service.get_testing_overview()
+        return JSONResponse(content=overview)
+    except Exception as e:
+        logger.error(f"Error getting testing overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/tests")
+async def list_tests(environment: Optional[str] = None, test_type: Optional[str] = None):
+    """List tests, optionally filtered by environment and test type"""
+    try:
+        if environment and environment != 'all':
+            tests = await testing_service.list_tests(environment, test_type)
+        else:
+            # Aggregate tests from all environments
+            all_tests = []
+            for env in ['dev', 'test', 'prod']:
+                env_tests = await testing_service.list_tests(env, test_type)
+                all_tests.extend(env_tests)
+            tests = all_tests
+
+        return JSONResponse(content=tests)
+    except Exception as e:
+        logger.error(f"Error listing tests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/test/{test_id}")
+async def get_test_details(test_id: str, environment: str):
+    """Get detailed information about a specific test"""
+    try:
+        test = await testing_service.get_test(environment, test_id)
+        if not test:
+            raise HTTPException(status_code=404, detail="Test not found")
+        return JSONResponse(content=test)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting test details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/tests")
+async def create_test(request: TestCreateRequest):
+    """Create a new test"""
+    try:
+        test_data = request.dict()
+        environment = test_data.pop('environment', 'dev')
+
+        test = await testing_service.create_test(environment, test_data)
+
+        # Convert TestStatus enum to string for JSON serialization
+        test_dict = asdict(test)
+        test_dict['status'] = test.status.value
+
+        return JSONResponse(content=test_dict)
+    except Exception as e:
+        logger.error(f"Error creating test: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/run-test/{test_id}")
+async def run_single_test(test_id: str, request: TestRunRequest):
+    """Run a single test"""
+    try:
+        execution = await testing_service.run_test(request.environment, test_id)
+        return JSONResponse(content={"execution_id": execution.execution_id, "status": execution.status.value})
+    except Exception as e:
+        logger.error(f"Error running test {test_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/run-suite")
+async def run_test_suite(request: TestRunRequest):
+    """Run a test suite"""
+    try:
+        result = await testing_service.run_test_suite(request.environment, request.test_type)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Error running test suite: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/run-all")
+async def run_all_tests(request: TestRunRequest):
+    """Run all test suites"""
+    try:
+        # Run each test type
+        all_results = {
+            "suite_id": f"all-{int(time.time())}",
+            "environment": request.environment,
+            "started_at": time.time(),
+            "suites": []
+        }
+
+        for test_type in ['unit', 'functional', 'security', 'regression']:
+            try:
+                result = await testing_service.run_test_suite(request.environment, test_type)
+                all_results["suites"].append(result)
+            except Exception as e:
+                logger.error(f"Error running {test_type} tests: {e}")
+
+        all_results["completed_at"] = time.time()
+        all_results["duration_seconds"] = all_results["completed_at"] - all_results["started_at"]
+
+        return JSONResponse(content=all_results)
+    except Exception as e:
+        logger.error(f"Error running all tests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/stop-all")
+async def stop_all_tests(environment: str = "dev"):
+    """Stop all running tests"""
+    try:
+        success = await testing_service.stop_all_tests(environment)
+        return JSONResponse(content={"success": success})
+    except Exception as e:
+        logger.error(f"Error stopping tests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/bugs")
+async def list_bugs(environment: Optional[str] = None, status: Optional[str] = None, severity: Optional[str] = None):
+    """List bugs, optionally filtered by environment, status, and severity"""
+    try:
+        if environment and environment != 'all':
+            bugs = await testing_service.list_bugs(environment, status, severity)
+        else:
+            # Aggregate bugs from all environments
+            all_bugs = []
+            for env in ['dev', 'test', 'prod']:
+                env_bugs = await testing_service.list_bugs(env, status, severity)
+                all_bugs.extend(env_bugs)
+            bugs = all_bugs
+
+        return JSONResponse(content=bugs)
+    except Exception as e:
+        logger.error(f"Error listing bugs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/bug/{bug_id}")
+async def get_bug_details(bug_id: str, environment: str):
+    """Get detailed information about a specific bug"""
+    try:
+        bug = await testing_service.get_bug(environment, bug_id)
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug not found")
+        return JSONResponse(content=bug)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting bug details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/bugs")
+async def create_bug(request: BugCreateRequest):
+    """Create a new bug report"""
+    try:
+        bug_data = request.dict()
+        environment = bug_data.pop('environment')
+
+        bug = await testing_service.create_bug(environment, bug_data)
+
+        # Convert BugSeverity enum to string for JSON serialization
+        bug_dict = asdict(bug)
+        bug_dict['severity'] = bug.severity.value
+
+        return JSONResponse(content=bug_dict)
+    except Exception as e:
+        logger.error(f"Error creating bug: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.put("/api/admin/testing/bug/{bug_id}")
+async def update_bug(bug_id: str, request: BugUpdateRequest, environment: str):
+    """Update an existing bug report"""
+    try:
+        updates = request.dict(exclude_unset=True)
+        bug = await testing_service.update_bug(environment, bug_id, updates)
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug not found")
+
+        # Convert BugSeverity enum to string for JSON serialization
+        bug_dict = asdict(bug)
+        bug_dict['severity'] = bug.severity.value
+
+        return JSONResponse(content=bug_dict)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating bug: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/execution-history")
+async def get_execution_history(environment: Optional[str] = None, limit: int = 50):
+    """Get test execution history"""
+    try:
+        if environment and environment != 'all':
+            executions = await testing_service.get_recent_executions(environment, limit)
+        else:
+            # Aggregate executions from all environments
+            all_executions = []
+            for env in ['dev', 'test', 'prod']:
+                env_executions = await testing_service.get_recent_executions(env, limit // 3)
+                all_executions.extend([testing_service._serialize_execution(exec) for exec in env_executions])
+
+            # Sort by start time and apply limit
+            all_executions.sort(key=lambda x: x['started_at'], reverse=True)
+            return JSONResponse(content=all_executions[:limit])
+
+        executions_dict = [testing_service._serialize_execution(exec) for exec in executions]
+        return JSONResponse(content=executions_dict)
+    except Exception as e:
+        logger.error(f"Error getting execution history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/export-results")
+async def export_test_results(environment: Optional[str] = None):
+    """Export test results and execution history"""
+    try:
+        export_data = await testing_service.export_test_results(environment)
+
+        # Create a downloadable file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"test_results_{timestamp}.json"
+
+        return JSONResponse(
+            content=export_data,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "application/json"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error exporting test results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @admin_router.get("/admin/cache", response_class=HTMLResponse)
 async def admin_cache_page(request: Request):
     context = {

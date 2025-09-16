@@ -41,7 +41,10 @@
       "Bash(docker compose:*)",
       "Bash(move logging.py ttrpg_logging_utils.py)",
       "Bash(netstat:*)",
-      "Bash(docker start:*)"
+      "Bash(docker start:*)",
+      "Bash(gh pr create:*)",
+      "Bash(ss:*)",
+      "Bash(tasklist)"
     ],
     "deny": [],
     "ask": []
