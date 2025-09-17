@@ -33,6 +33,8 @@ from .admin import (
 from .hgrn.runner import HGRNRunner
 from .aehrl.correction_manager import CorrectionManager
 from .aehrl.metrics_tracker import MetricsTracker
+from .personas.manager import PersonaManager
+from .personas.metrics import PersonaMetricsTracker
 from .admin.wireframe_editor import WireframeEditorService
 from .admin.template_generator import TemplateGenerator
 from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
@@ -2837,12 +2839,89 @@ async def get_aehrl_alerts(request: Request, hours: int = 24):
     except Exception as e:
         logger.error(f"Error getting AEHRL alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    environment: Optional[str] = "dev"
-    source_id: str
-    reason: str
-    details: Optional[Dict[str, Any]] = None
-    created_by: Optional[str] = None
 
 
-    environment: Optional[str] = "dev"
-    actor: str
+# =============================================================================
+# PERSONA TESTING ROUTES (FR-023)
+# =============================================================================
+
+@admin_router.get("/admin/personas", response_class=HTMLResponse)
+async def persona_management_page(request: Request):
+    """Render persona testing management page."""
+    try:
+        context = {
+            "request": request,
+            "title": "Persona Testing Management",
+            "environment": os.getenv("APP_ENV", "dev")
+        }
+        return templates.TemplateResponse("admin/persona_management.html", context)
+
+    except Exception as e:
+        logger.error(f"Error rendering persona management page: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/api/personas/metrics")
+async def get_persona_metrics(days_back: int = 7):
+    """Get persona performance metrics."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        metrics_tracker = PersonaMetricsTracker(environment=environment)
+
+        summary = metrics_tracker.get_metrics_summary(days_back=days_back)
+
+        return {
+            "status": "success",
+            "environment": environment,
+            **summary
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting persona metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/api/personas/profiles")
+async def get_persona_profiles():
+    """Get all persona profiles."""
+    try:
+        persona_manager = PersonaManager()
+
+        # Load both default and legacy personas
+        all_personas = list(persona_manager.profiles_cache.values())
+        persona_manager.load_legacy_personas()
+
+        # Convert to serializable format
+        personas_data = []
+        for persona in all_personas:
+            personas_data.append(persona.to_dict())
+
+        return {
+            "status": "success",
+            "personas": personas_data,
+            "total_count": len(personas_data)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting persona profiles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/api/personas/alerts")
+async def get_persona_alerts(hours: int = 24):
+    """Get recent persona alerts."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        metrics_tracker = PersonaMetricsTracker(environment=environment)
+
+        alerts = metrics_tracker.get_recent_alerts(hours_back=hours)
+
+        return {
+            "status": "success",
+            "alerts": alerts,
+            "total_count": len(alerts)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting persona alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

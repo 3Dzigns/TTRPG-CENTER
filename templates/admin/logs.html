@@ -202,6 +202,41 @@ const escapeHtml = (value) => String(value ?? '')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const getStatusClass = (status) => {
+    switch (status ? status.toLowerCase() : '') {
+        case 'running': return 'primary';
+        case 'completed': return 'success';
+        case 'failed': return 'danger';
+        case 'pending': return 'warning';
+        default: return 'secondary';
+    }
+};
+
+const getStatusIcon = (status) => {
+    switch (status ? status.toLowerCase() : '') {
+        case 'running': return '<i class="bi bi-play-circle"></i>';
+        case 'completed': return '<i class="bi bi-check-circle"></i>';
+        case 'failed': return '<i class="bi bi-exclamation-octagon"></i>';
+        case 'pending': return '<i class="bi bi-hourglass-split"></i>';
+        default: return '<i class="bi bi-question-circle"></i>';
+    }
+};
+
+const getEnvClass = (environment) => {
+    switch ((environment || '').toLowerCase()) {
+        case 'dev':
+        case 'development':
+            return 'success';
+        case 'test':
+        case 'testing':
+            return 'warning';
+        case 'prod':
+        case 'production':
+            return 'danger';
+        default:
+            return 'secondary';
+    }
+};
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     // Handle URL parameters for direct navigation from job controls (FR-014)

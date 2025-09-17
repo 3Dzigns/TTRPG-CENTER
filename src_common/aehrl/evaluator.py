@@ -58,7 +58,8 @@ class AEHRLEvaluator:
         model_response: str,
         retrieved_chunks: List[Dict[str, Any]],
         graph_context: Optional[Dict[str, Any]] = None,
-        dictionary_entries: Optional[List[Dict[str, Any]]] = None
+        dictionary_entries: Optional[List[Dict[str, Any]]] = None,
+        persona_context: Optional[Any] = None
     ) -> AEHRLReport:
         """
         Evaluate a query response for hallucinations.
