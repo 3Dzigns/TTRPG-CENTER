@@ -28,6 +28,7 @@ from .admin import (
     AdminCacheService,
     AdminLogService
 )
+from .hgrn.runner import HGRNRunner
 from .admin.wireframe_editor import WireframeEditorService
 from .admin.template_generator import TemplateGenerator
 from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
@@ -2351,4 +2352,168 @@ async def wireframe_health_check():
         return result
     except Exception as e:
         logger.error(f"Wireframe health check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# HGRN Recommendations Routes
+# ============================================================================
+
+@admin_router.get("/admin/hgrn", response_class=HTMLResponse)
+async def hgrn_recommendations_page(request: Request):
+    """Render HGRN recommendations management page."""
+    try:
+        context = {
+            "request": request,
+            "title": "HGRN Recommendations - TTRPG Center Admin",
+            "environment": os.getenv("APP_ENV", "dev"),
+            "active_nav": "hgrn"
+        }
+        return templates.TemplateResponse("admin/hgrn_recommendations.html", context)
+    except Exception as e:
+        logger.error(f"Error rendering HGRN recommendations page: {e}")
+        raise HTTPException(status_code=500, detail="Failed to render HGRN recommendations page")
+
+
+@admin_router.get("/admin/api/hgrn/recommendations")
+async def get_hgrn_recommendations():
+    """Get all HGRN recommendations across environments."""
+    try:
+        all_recommendations = []
+        environments = ['dev', 'test', 'prod']
+
+        for env in environments:
+            hgrn_runner = HGRNRunner(environment=env)
+
+            # Get job directories for environment
+            artifacts_path = Path(f"artifacts/{env}")
+            ingest_path = artifacts_path / "ingest" / env
+
+            job_paths = []
+            if artifacts_path.exists():
+                job_paths.extend([d for d in artifacts_path.iterdir() if d.is_dir() and d.name != "ingest"])
+            if ingest_path.exists():
+                job_paths.extend([d for d in ingest_path.iterdir() if d.is_dir()])
+
+            # Load recommendations from each job
+            for job_path in job_paths:
+                report = hgrn_runner.load_report(job_path / "hgrn_report.json")
+                if report and report.recommendations:
+                    for rec in report.recommendations:
+                        rec_dict = {
+                            "id": rec.id,
+                            "job_id": report.job_id,
+                            "environment": env,
+                            "type": rec.type.value,
+                            "severity": rec.severity.value,
+                            "confidence": rec.confidence,
+                            "title": rec.title,
+                            "description": rec.description,
+                            "evidence": rec.evidence,
+                            "suggested_action": rec.suggested_action,
+                            "page_refs": rec.page_refs,
+                            "chunk_ids": rec.chunk_ids,
+                            "created_at": rec.created_at.isoformat(),
+                            "accepted": rec.accepted,
+                            "rejected": rec.rejected,
+                            "metadata": rec.metadata
+                        }
+                        all_recommendations.append(rec_dict)
+
+        # Sort by severity and confidence
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        all_recommendations.sort(
+            key=lambda x: (severity_order.get(x["severity"], 4), -x["confidence"])
+        )
+
+        return {
+            "status": "success",
+            "recommendations": all_recommendations,
+            "total_count": len(all_recommendations)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting HGRN recommendations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/admin/api/hgrn/recommendations/{recommendation_id}/accept")
+async def accept_hgrn_recommendation(recommendation_id: str):
+    """Accept a specific HGRN recommendation."""
+    try:
+        # Find the recommendation across all environments
+        environments = ['dev', 'test', 'prod']
+
+        for env in environments:
+            hgrn_runner = HGRNRunner(environment=env)
+
+            # Check job directories
+            artifacts_path = Path(f"artifacts/{env}")
+            ingest_path = artifacts_path / "ingest" / env
+
+            job_paths = []
+            if artifacts_path.exists():
+                job_paths.extend([d for d in artifacts_path.iterdir() if d.is_dir() and d.name != "ingest"])
+            if ingest_path.exists():
+                job_paths.extend([d for d in ingest_path.iterdir() if d.is_dir()])
+
+            for job_path in job_paths:
+                if hgrn_runner.update_recommendation_status(
+                    job_id=job_path.name,
+                    artifacts_path=job_path.parent,
+                    recommendation_id=recommendation_id,
+                    accepted=True,
+                    rejected=False
+                ):
+                    logger.info(f"Accepted HGRN recommendation {recommendation_id} in {env}")
+                    return {
+                        "success": True,
+                        "message": f"Recommendation {recommendation_id} accepted successfully"
+                    }
+
+        raise HTTPException(status_code=404, detail=f"Recommendation {recommendation_id} not found")
+
+    except Exception as e:
+        logger.error(f"Error accepting HGRN recommendation {recommendation_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/admin/api/hgrn/recommendations/{recommendation_id}/reject")
+async def reject_hgrn_recommendation(recommendation_id: str):
+    """Reject a specific HGRN recommendation."""
+    try:
+        # Find the recommendation across all environments
+        environments = ['dev', 'test', 'prod']
+
+        for env in environments:
+            hgrn_runner = HGRNRunner(environment=env)
+
+            # Check job directories
+            artifacts_path = Path(f"artifacts/{env}")
+            ingest_path = artifacts_path / "ingest" / env
+
+            job_paths = []
+            if artifacts_path.exists():
+                job_paths.extend([d for d in artifacts_path.iterdir() if d.is_dir() and d.name != "ingest"])
+            if ingest_path.exists():
+                job_paths.extend([d for d in ingest_path.iterdir() if d.is_dir()])
+
+            for job_path in job_paths:
+                if hgrn_runner.update_recommendation_status(
+                    job_id=job_path.name,
+                    artifacts_path=job_path.parent,
+                    recommendation_id=recommendation_id,
+                    accepted=False,
+                    rejected=True
+                ):
+                    logger.info(f"Rejected HGRN recommendation {recommendation_id} in {env}")
+                    return {
+                        "success": True,
+                        "message": f"Recommendation {recommendation_id} rejected successfully"
+                    }
+
+        raise HTTPException(status_code=404, detail=f"Recommendation {recommendation_id} not found")
+
+    except Exception as e:
+        logger.error(f"Error rejecting HGRN recommendation {recommendation_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
