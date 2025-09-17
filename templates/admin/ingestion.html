@@ -63,11 +63,18 @@
                     <span class="badge bg-light text-dark me-2"><i class="bi bi-hdd me-1"></i>Max 50MB per file</span>
                     <span class="badge bg-light text-dark"><i class="bi bi-stack me-1"></i>Multiple files supported</span>
                 </div>
-                <div class="alert alert-info">
-                    <i class="bi bi-lightbulb me-2"></i>
-                    <strong>Note:</strong> File browse functionality is restricted in this environment.
-                    Please use drag & drop to upload files.
+                <div class="mt-3 d-flex flex-column align-items-center gap-2">
+                    <input type="file" id="upload-input-visible" class="form-control" accept="application/pdf" multiple style="max-width: 320px;">
+                    <button class="btn btn-primary" type="button" id="browse-btn">
+                        <i class="bi bi-folder2-open me-1"></i>Select PDF Files
+                    </button>
+                    <input type="file" id="upload-input-hidden" accept="application/pdf" multiple style="display: none;">
                 </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-lightbulb me-2"></i>
+                    <strong>Tip:</strong> You can drag files into this area or click <em>Select PDF Files</em> to browse from your machine.
+                </div>
+
             </div>
         </div>
 

@@ -10,6 +10,8 @@ from .dictionary import AdminDictionaryService
 from .testing import AdminTestingService
 from .cache_control import AdminCacheService
 from .logs import AdminLogService
+from .deletion_service import AdminDeletionService
+from .health import AdminHealthService
 
 __all__ = [
     'AdminStatusService',
@@ -17,5 +19,7 @@ __all__ = [
     'AdminDictionaryService',
     'AdminTestingService',
     'AdminCacheService',
-    'AdminLogService'
+    'AdminLogService',
+    'AdminDeletionService',
+    'AdminHealthService'
 ]

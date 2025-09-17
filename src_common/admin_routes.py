@@ -26,7 +26,9 @@ from .admin import (
     AdminDictionaryService,
     AdminTestingService,
     AdminCacheService,
-    AdminLogService
+    AdminLogService,
+    AdminDeletionService,
+    AdminHealthService
 )
 from .hgrn.runner import HGRNRunner
 from .aehrl.correction_manager import CorrectionManager
@@ -43,6 +45,8 @@ dictionary_service = AdminDictionaryService(use_mongodb=True)  # FR-015: Enable 
 testing_service = AdminTestingService()
 cache_service = AdminCacheService()
 log_service = AdminLogService()
+deletion_service = AdminDeletionService()
+health_service = AdminHealthService()
 
 # FR-019: Initialize wireframe services
 from .mongodb_service import MongoDBService
@@ -74,6 +78,21 @@ class IngestionJobRequest(BaseModel):
     source_path: str
     job_type: Optional[str] = "full"
 
+class HealthRunRequest(BaseModel):
+    environment: Optional[str] = "dev"
+    force: bool = False
+
+class DeletionQueueCreateRequest(BaseModel):
+    environment: Optional[str] = "dev"
+    source_id: str
+    reason: str
+    details: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+
+
+class DeletionQueueActionRequest(BaseModel):
+    environment: Optional[str] = "dev"
+    actor: str
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -222,8 +241,76 @@ async def get_dictionary_term_details(environment: str, term: str):
         logger.error(f"Term details error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@admin_router.post("/api/admin/health/run")
+async def trigger_health_report(request: HealthRunRequest):
+    """Generate (or regenerate) the daily health report for an environment."""
+    try:
+        result = health_service.generate_daily_report(request.environment or "dev", force=request.force)
+        return result
+    except Exception as e:
+        logger.error(f"Error generating health report: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate health report")
+
+
+@admin_router.get("/api/admin/health/reports")
+async def list_health_reports(environment: Optional[str] = Query(None)):
+    """List available health reports."""
+    try:
+        reports = health_service.list_reports(environment)
+        return {"environment": environment, "reports": reports, "count": len(reports)}
+    except Exception as e:
+        logger.error(f"Error listing health reports: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list health reports")
+
+
+@admin_router.get("/api/admin/health/actions")
+async def get_health_actions(environment: Optional[str] = Query(None)):
+    """Return recommended corrective actions from recent health runs."""
+    try:
+        actions = health_service.get_actions(environment)
+        return {"environment": environment, "actions": actions, "count": len(actions)}
+    except Exception as e:
+        logger.error(f"Error retrieving health actions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load health actions")
 # -------------------------
 # Dictionary Management API - FR-015 MongoDB Integration
+
+@admin_router.get("/api/dictionary/{environment}/artifacts/stats")
+async def get_dictionary_artifact_stats(environment: str):
+    """Return artifact statistics for dictionary management."""
+    try:
+        stats = await dictionary_service.get_artifact_stats(environment)
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting artifact stats for {environment}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load artifact stats")
+
+
+@admin_router.get("/api/dictionary/{environment}/artifacts")
+async def list_dictionary_artifacts(
+    environment: str,
+    limit: int = Query(250, ge=1, le=1000),
+    artifact_type: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+):
+    """List artifacts for the dictionary management view."""
+    try:
+        artifacts = await dictionary_service.list_artifacts(
+            environment=environment,
+            limit=limit,
+            artifact_type=artifact_type,
+            source_filter=source,
+        )
+        return {
+            "environment": environment,
+            "limit": limit,
+            "artifacts": artifacts,
+            "count": len(artifacts),
+        }
+    except Exception as e:
+        logger.error(f"Error listing artifacts for {environment}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list artifacts")
+
 # -------------------------
 
 @admin_router.get("/api/dictionary/{environment}/terms")
@@ -996,6 +1083,73 @@ async def cache_websocket_endpoint(websocket: WebSocket):
 # -------------------------
 # Source Health Monitoring (Enhanced Ingestion Console)
 # -------------------------
+
+@admin_router.get("/api/admin/deletion-queue")
+async def get_deletion_queue(environment: str = Query("dev")):
+    """List pending deletion queue items for the given environment."""
+    try:
+        items = deletion_service.list_items(environment)
+        return {"environment": environment, "items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"Error retrieving deletion queue: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load deletion queue")
+
+
+@admin_router.post("/api/admin/deletion-queue")
+async def enqueue_deletion_request(request: DeletionQueueCreateRequest):
+    """Enqueue a new deletion request requiring admin approval."""
+    try:
+        details = request.details or {}
+        if request.created_by:
+            details.setdefault("created_by", request.created_by)
+        request_id = deletion_service.enqueue(request.environment or "dev", request.source_id, request.reason, details)
+        return {"request_id": request_id, "status": "queued"}
+    except Exception as e:
+        logger.error(f"Error enqueuing deletion request: {e}")
+        raise HTTPException(status_code=500, detail="Failed to enqueue deletion request")
+
+
+@admin_router.post("/api/admin/deletion-queue/{request_id}/approve")
+async def approve_deletion_request(request_id: str, request: DeletionQueueActionRequest):
+    """Approve a pending deletion request."""
+    try:
+        if not deletion_service.approve(request.environment or "dev", request_id, request.actor):
+            raise HTTPException(status_code=404, detail="Deletion request not found")
+        return {"request_id": request_id, "status": "approved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving deletion request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to approve deletion request")
+
+
+@admin_router.post("/api/admin/deletion-queue/{request_id}/reject")
+async def reject_deletion_request(request_id: str, request: DeletionQueueActionRequest):
+    """Reject a pending deletion request."""
+    try:
+        if not deletion_service.reject(request.environment or "dev", request_id, request.actor):
+            raise HTTPException(status_code=404, detail="Deletion request not found")
+        return {"request_id": request_id, "status": "rejected"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rejecting deletion request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reject deletion request")
+
+
+@admin_router.post("/api/admin/deletion-queue/{request_id}/execute")
+async def execute_deletion_request(request_id: str, request: DeletionQueueActionRequest):
+    """Execute an approved deletion request."""
+    try:
+        result = deletion_service.execute(request.environment or "dev", request_id, request.actor)
+        if not result.get("executed"):
+            raise HTTPException(status_code=404, detail="Deletion request not found")
+        return {"request_id": request_id, "status": "executed"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing deletion request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to execute deletion request")
 
 @admin_router.get("/api/ingestion/{environment}/sources")
 async def get_ingestion_sources(environment: str):
@@ -2683,3 +2837,12 @@ async def get_aehrl_alerts(request: Request, hours: int = 24):
     except Exception as e:
         logger.error(f"Error getting AEHRL alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    environment: Optional[str] = "dev"
+    source_id: str
+    reason: str
+    details: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+
+
+    environment: Optional[str] = "dev"
+    actor: str
