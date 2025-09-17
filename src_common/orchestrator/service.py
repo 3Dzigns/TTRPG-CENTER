@@ -13,6 +13,7 @@ from ..metadata_utils import safe_metadata_get
 from .classifier import classify_query
 from .policies import load_policies, choose_plan
 from .router import pick_model
+from .query_planner import get_planner
 from .prompts import load_prompt, render_prompt, PromptError
 from .retriever import retrieve
 from ..aehrl.evaluator import AEHRLEvaluator
@@ -57,12 +58,19 @@ async def rag_ask(payload: Dict[str, Any]):
     # 1) Classify
     cls = classify_query(q)
 
-    # 2) Plan selection
-    policies = load_policies()
-    plan = choose_plan(policies, cls)
+    # 2) Query Planning (enhanced plan generation with caching)
+    planner = get_planner(env)
+    query_plan = planner.get_plan(q)
 
-    # 3) Model routing
-    model_cfg = pick_model(cls, plan)
+    # Extract components from optimized plan
+    plan = query_plan.retrieval_strategy
+    model_cfg = query_plan.model_config
+
+    # Legacy fallback for compatibility (if planning fails)
+    if not plan or not model_cfg:
+        policies = load_policies()
+        plan = choose_plan(policies, cls)
+        model_cfg = pick_model(cls, plan)
 
     # 4) Prompt template
     tmpl = load_prompt(cls["intent"], cls["domain"])  # best-effort
@@ -188,6 +196,13 @@ async def rag_ask(payload: Dict[str, Any]):
         "classification": cls,
         "plan": plan,
         "model": model_cfg,
+        "query_planning": {
+            "enabled": True,
+            "plan_cached": query_plan.hit_count > 0 if 'query_plan' in locals() else False,
+            "plan_hash": query_plan.query_hash if 'query_plan' in locals() else None,
+            "cache_hit_count": query_plan.hit_count if 'query_plan' in locals() else 0,
+            "performance_hints": query_plan.performance_hints if 'query_plan' in locals() else {}
+        },
         "metrics": {
             "timer_ms": elapsed_ms,
             "token_count": approx_tokens,
