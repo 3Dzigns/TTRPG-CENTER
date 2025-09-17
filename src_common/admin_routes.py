@@ -29,6 +29,8 @@ from .admin import (
     AdminLogService
 )
 from .hgrn.runner import HGRNRunner
+from .aehrl.correction_manager import CorrectionManager
+from .aehrl.metrics_tracker import MetricsTracker
 from .admin.wireframe_editor import WireframeEditorService
 from .admin.template_generator import TemplateGenerator
 from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
@@ -2516,4 +2518,168 @@ async def reject_hgrn_recommendation(recommendation_id: str):
 
     except Exception as e:
         logger.error(f"Error rejecting HGRN recommendation {recommendation_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AEHRL Management Routes
+# ============================================================================
+
+@admin_router.get("/admin/aehrl", response_class=HTMLResponse)
+async def aehrl_management_page(request: Request):
+    """Render AEHRL management page."""
+    try:
+        context = {
+            "request": request,
+            "title": "AEHRL Management - TTRPG Center Admin",
+            "environment": os.getenv("APP_ENV", "dev"),
+            "active_nav": "aehrl"
+        }
+        return templates.TemplateResponse("admin/aehrl_management.html", context)
+    except Exception as e:
+        logger.error(f"Error rendering AEHRL management page: {e}")
+        raise HTTPException(status_code=500, detail="Failed to render AEHRL management page")
+
+
+@admin_router.get("/admin/api/aehrl/corrections")
+async def get_aehrl_corrections():
+    """Get all AEHRL correction recommendations."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        correction_manager = CorrectionManager(environment=environment)
+
+        # Get pending corrections
+        pending_corrections = correction_manager.get_pending_recommendations()
+
+        # Convert to API format
+        corrections_data = []
+        for correction in pending_corrections:
+            corrections_data.append({
+                "id": correction.id,
+                "type": correction.type.value,
+                "target": correction.target,
+                "description": correction.description,
+                "current_value": correction.current_value,
+                "suggested_value": correction.suggested_value,
+                "confidence": correction.confidence,
+                "impact_assessment": correction.impact_assessment,
+                "created_at": correction.created_at.isoformat(),
+                "job_id": correction.job_id,
+                "environment": correction.environment
+            })
+
+        # Sort by confidence (highest first) then by created date
+        corrections_data.sort(key=lambda x: (-x["confidence"], x["created_at"]))
+
+        return {
+            "status": "success",
+            "corrections": corrections_data,
+            "total_count": len(corrections_data)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting AEHRL corrections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/admin/api/aehrl/corrections/{correction_id}/accept")
+async def accept_aehrl_correction(correction_id: str):
+    """Accept an AEHRL correction recommendation."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        correction_manager = CorrectionManager(environment=environment)
+
+        success = correction_manager.accept_recommendation(
+            recommendation_id=correction_id,
+            admin_user="admin"  # TODO: Get from session/auth
+        )
+
+        if success:
+            return {
+                "success": True,
+                "message": f"Correction {correction_id} accepted successfully"
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Correction {correction_id} not found or already processed")
+
+    except Exception as e:
+        logger.error(f"Error accepting AEHRL correction {correction_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/admin/api/aehrl/corrections/{correction_id}/reject")
+async def reject_aehrl_correction(correction_id: str, rejection_data: Dict[str, Any]):
+    """Reject an AEHRL correction recommendation."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        correction_manager = CorrectionManager(environment=environment)
+
+        reason = rejection_data.get("reason", "No reason provided")
+
+        success = correction_manager.reject_recommendation(
+            recommendation_id=correction_id,
+            reason=reason,
+            admin_user="admin"  # TODO: Get from session/auth
+        )
+
+        if success:
+            return {
+                "success": True,
+                "message": f"Correction {correction_id} rejected successfully"
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Correction {correction_id} not found or already processed")
+
+    except Exception as e:
+        logger.error(f"Error rejecting AEHRL correction {correction_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/api/aehrl/metrics")
+async def get_aehrl_metrics():
+    """Get AEHRL evaluation metrics."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        metrics_tracker = MetricsTracker(environment=environment)
+
+        # Get metrics summary for last 7 days
+        metrics_summary = metrics_tracker.get_metrics_summary(days_back=7)
+
+        # Get recent alerts
+        recent_alerts = metrics_tracker.get_recent_alerts(hours_back=24)
+
+        # Get correction statistics
+        correction_manager = CorrectionManager(environment=environment)
+        correction_stats = correction_manager.get_correction_statistics()
+
+        return {
+            "status": "success",
+            "metrics": metrics_summary,
+            "alerts": recent_alerts,
+            "corrections": correction_stats,
+            "last_updated": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting AEHRL metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/api/aehrl/alerts")
+async def get_aehrl_alerts(request: Request, hours: int = 24):
+    """Get recent AEHRL alerts."""
+    try:
+        environment = os.getenv("APP_ENV", "dev")
+        metrics_tracker = MetricsTracker(environment=environment)
+
+        alerts = metrics_tracker.get_recent_alerts(hours_back=hours)
+
+        return {
+            "status": "success",
+            "alerts": alerts,
+            "total_count": len(alerts)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting AEHRL alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))

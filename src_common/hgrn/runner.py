@@ -15,6 +15,8 @@ from datetime import datetime
 from .models import HGRNReport
 from .validator import HGRNValidator
 from ..ttrpg_logging import get_logger
+from ..aehrl.evaluator import AEHRLEvaluator
+from ..aehrl.correction_manager import CorrectionManager
 
 logger = get_logger(__name__)
 
@@ -94,6 +96,40 @@ class HGRNRunner:
                 environment=self.environment,
                 artifacts_path=artifacts_path
             )
+
+            # Run AEHRL evaluation on ingestion artifacts (if enabled)
+            aehrl_enabled = os.getenv("AEHRL_ENABLED", "true").lower() == "true"
+            if aehrl_enabled:
+                try:
+                    logger.info(f"Running AEHRL evaluation for ingestion job {job_id}")
+
+                    aehrl_evaluator = AEHRLEvaluator(environment=self.environment)
+                    aehrl_report = aehrl_evaluator.evaluate_ingestion_artifacts(
+                        job_id=job_id,
+                        artifacts_path=artifacts_path,
+                        hgrn_report=report.to_dict() if report else None
+                    )
+
+                    # Store correction recommendations
+                    if aehrl_report.correction_recommendations:
+                        correction_manager = CorrectionManager(environment=self.environment)
+                        correction_manager.store_recommendations(
+                            recommendations=aehrl_report.correction_recommendations,
+                            job_id=job_id
+                        )
+
+                    # Save AEHRL report
+                    aehrl_report_file = output_path / "aehrl_report.json" if output_path else artifacts_path / "aehrl_report.json"
+                    with open(aehrl_report_file, 'w', encoding='utf-8') as f:
+                        json.dump(aehrl_report.to_dict(), f, indent=2)
+
+                    logger.info(
+                        f"AEHRL evaluation completed for job {job_id}. "
+                        f"Generated {len(aehrl_report.correction_recommendations)} correction recommendations"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"AEHRL evaluation failed for job {job_id}: {str(e)}")
 
             # Save report
             if output_path is None:

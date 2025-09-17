@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FR-022 AEHRL Integration** - Complete implementation of Automated Evaluation & Hallucination Reduction Layer
+  - Query-time hallucination detection system with fact extraction and evidence gathering
+  - Ingestion-time quality assurance layer integrated with HGRN validation pipeline
+  - Intelligent fact claim extraction using NLP patterns for D&D-specific content (damage, AC, hit points)
+  - Support evidence gathering from retrieved chunks, graph context, and dictionary entries
+  - Correction recommendation system with confidence scoring and automated suggestions
+  - Comprehensive admin UI for AEHRL management with filtering, sorting, and workflow controls
+  - RESTful API endpoints for correction accept/reject operations with audit trails
+  - Real-time metrics tracking with configurable alerting for hallucination rate monitoring
+  - Environment-controlled feature flags with graceful degradation on AEHRL service failures
+  - Comprehensive test coverage including unit and functional end-to-end tests
+
 - **FR-021 HGRN Integration** - Complete implementation of Hierarchical Graph Recurrent Network validation as Pass D
   - HGRN validation pipeline integrated as Pass D in ingestion workflow
   - Intelligent recommendation system for dictionary metadata, graph integrity, and chunk artifacts
@@ -26,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Health monitoring and diagnostic endpoints for operational visibility
 
 ### Changed
+- Query processing pipeline enhanced with AEHRL hallucination detection and fact verification
+- Ingestion pipeline extended with AEHRL quality assurance layer working alongside HGRN validation
+- Admin interface expanded with comprehensive AEHRL management capabilities and metrics dashboard
+- Orchestrator service enhanced with query-time AEHRL evaluation and confidence scoring
+- Environment configuration extended with AEHRL-specific settings and processing timeouts
+
 - Ingestion pipeline enhanced with Pass D HGRN validation for comprehensive quality assurance
 - Admin interface expanded with HGRN recommendation management capabilities
 - Model routing enhanced to support HGRN validation intent classification
@@ -37,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error handling improved with circuit breaker pattern and graceful degradation
 
 ### Technical Details
+- AEHRL integration with dual evaluation modes (query-time and ingestion-time)
+- Fact extraction system with pattern-based D&D content recognition
+- Evidence gathering from multiple sources (chunks, graph, dictionary)
+- Correction recommendation engine with confidence-based suggestion algorithms
+- Metrics tracking with JSON persistence and configurable alerting thresholds
+- Admin UI with AJAX-based API integration and real-time status updates
+- Comprehensive data models for hallucination flags, fact claims, and correction workflows
+
 - HGRN integration with mock implementation for graceful degradation
 - Pass D validation pipeline with configurable confidence thresholds
 - RESTful API design for recommendation workflow management
