@@ -34,6 +34,8 @@ class IngestionJob:
     error_message: Optional[str] = None
     artifacts_path: Optional[str] = None
     process_id: Optional[int] = None
+    hgrn_enabled: bool = False
+    hgrn_report_path: Optional[str] = None
     
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -269,7 +271,8 @@ class AdminIngestionService:
                 "options": options or {},
                 "job_type": job_type,
                 "log_file": log_filename,
-                "phases": ["parse", "enrich", "compile"]
+                "phases": ["parse", "enrich", "compile", "hgrn_validate"],
+                "hgrn_enabled": options.get("hgrn_enabled", True) if options else True
             }
 
             manifest_file = job_path / "manifest.json"
@@ -289,6 +292,60 @@ class AdminIngestionService:
         except Exception as e:
             logger.error(f"Error starting ingestion job: {e}")
             raise
+
+    async def run_pass_d_hgrn(self, job_id: str, environment: str, artifacts_path: Path) -> bool:
+        """
+        Run Pass D HGRN validation on ingestion artifacts.
+
+        Args:
+            job_id: Ingestion job identifier
+            environment: Environment name
+            artifacts_path: Path to job artifacts directory
+
+        Returns:
+            True if HGRN validation completed successfully
+        """
+        try:
+            logger.info(f"Starting Pass D HGRN validation for job {job_id} in {environment}")
+
+            # Import HGRN runner
+            from ..hgrn.runner import HGRNRunner
+
+            # Initialize HGRN runner for environment
+            hgrn_runner = HGRNRunner(environment=environment)
+
+            # Run HGRN validation
+            report = hgrn_runner.run_pass_d_validation(
+                job_id=job_id,
+                artifacts_path=artifacts_path
+            )
+
+            # Update job manifest with HGRN results
+            manifest_file = artifacts_path / "manifest.json"
+            if manifest_file.exists():
+                manifest = json.loads(manifest_file.read_text())
+                manifest["hgrn_enabled"] = hgrn_runner.hgrn_enabled
+                manifest["hgrn_status"] = report.status
+                manifest["hgrn_report_path"] = str(artifacts_path / "hgrn_report.json")
+
+                if report.recommendations:
+                    manifest["hgrn_recommendations_count"] = len(report.recommendations)
+                    manifest["hgrn_high_priority_count"] = len(report.get_high_priority_recommendations())
+
+                with open(manifest_file, 'w', encoding='utf-8') as f:
+                    json.dump(manifest, f, indent=2)
+
+            logger.info(
+                f"Pass D HGRN validation completed for job {job_id}. "
+                f"Status: {report.status}, "
+                f"Recommendations: {len(report.recommendations)}"
+            )
+
+            return report.status != "failed"
+
+        except Exception as e:
+            logger.error(f"Pass D HGRN validation failed for job {job_id}: {str(e)}")
+            return False
     
     async def retry_job(self, environment: str, job_id: str) -> bool:
         """

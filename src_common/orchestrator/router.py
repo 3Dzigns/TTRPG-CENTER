@@ -5,6 +5,10 @@ def pick_model(classification: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str
     intent = classification.get("intent")
     complexity = classification.get("complexity")
 
+    # HGRN validation queries use efficient models for recommendation processing
+    if intent == "hgrn_validation":
+        return {"model": "gpt-4o-mini", "max_tokens": 4000, "temperature": 0.1}
+
     if intent == "code_help":
         return {"model": "gpt-4o-mini", "max_tokens": 2000, "temperature": 0.2}
     if intent in {"multi_hop_reasoning"} and complexity in {"high", "medium"}:
