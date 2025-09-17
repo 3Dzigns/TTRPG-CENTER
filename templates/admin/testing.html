@@ -84,6 +84,47 @@
                         </select>
                     </div>
                 </div>
+                <div class="row mt-3">
+                    <div class="col-md-3">
+                        <label for="bug-priority-filter" class="form-label">Priority</label>
+                        <select class="form-select" id="bug-priority-filter" onchange="filterBugs()">
+                            <option value="all">All Priorities</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="bug-component-filter" class="form-label">Component</label>
+                        <select class="form-select" id="bug-component-filter" onchange="filterBugs()">
+                            <option value="all">All Components</option>
+                            <option value="ui">UI</option>
+                            <option value="api">API</option>
+                            <option value="database">Database</option>
+                            <option value="authentication">Authentication</option>
+                            <option value="security">Security</option>
+                            <option value="performance">Performance</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="bug-assignee-filter" class="form-label">Assignee</label>
+                        <select class="form-select" id="bug-assignee-filter" onchange="filterBugs()">
+                            <option value="all">All Assignees</option>
+                            <option value="unassigned">Unassigned</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="bug-search" class="form-label">Search</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="bug-search" placeholder="Search bugs..." onkeyup="searchBugs()">
+                            <button class="btn btn-outline-secondary" type="button" onclick="clearBugSearch()">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -302,6 +343,18 @@
                     <button class="btn btn-outline-primary" onclick="refreshBugs()">
                         <i class="bi bi-arrow-clockwise me-1"></i>Refresh
                     </button>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="bi bi-three-dots me-1"></i>Bulk Actions
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="showBulkAssignModal()"><i class="bi bi-person-check me-2"></i>Bulk Assign</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showBulkUpdateModal()"><i class="bi bi-pencil-square me-2"></i>Bulk Update</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportBugs()"><i class="bi bi-download me-2"></i>Export Selected</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showBugAnalytics()"><i class="bi bi-graph-up me-2"></i>Analytics</a></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
             <div class="card-body">
@@ -315,12 +368,17 @@
                     <table class="table table-hover table-sm" id="bugs-table">
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="select-all-bugs" onchange="toggleAllBugs()">
+                                </th>
                                 <th>Bug ID</th>
                                 <th>Title</th>
-                                <th style="width: 100px;">Environment</th>
-                                <th style="width: 100px;">Severity</th>
+                                <th style="width: 80px;">Priority</th>
+                                <th style="width: 80px;">Severity</th>
+                                <th style="width: 100px;">Component</th>
                                 <th style="width: 100px;">Status</th>
-                                <th style="width: 150px;">Created</th>
+                                <th style="width: 100px;">Assignee</th>
+                                <th style="width: 120px;">Created</th>
                                 <th style="width: 120px;">Actions</th>
                             </tr>
                         </thead>
@@ -412,28 +470,71 @@
                         </div>
                     </div>
 
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="bugPriority" class="form-label">Priority *</label>
+                            <select class="form-select" id="bugPriority" required>
+                                <option value="">Select Priority</option>
+                                <option value="urgent">Urgent</option>
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bugComponent" class="form-label">Component *</label>
+                            <select class="form-select" id="bugComponent" required>
+                                <option value="">Select Component</option>
+                                <option value="ui">UI</option>
+                                <option value="api">API</option>
+                                <option value="database">Database</option>
+                                <option value="authentication">Authentication</option>
+                                <option value="ingestion">Ingestion</option>
+                                <option value="search">Search</option>
+                                <option value="performance">Performance</option>
+                                <option value="security">Security</option>
+                                <option value="infrastructure">Infrastructure</option>
+                                <option value="testing">Testing</option>
+                                <option value="documentation">Documentation</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bugAssignee" class="form-label">Assignee</label>
+                            <input type="text" class="form-control" id="bugAssignee" placeholder="Assign to user">
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label for="bugDescription" class="form-label">Description *</label>
                         <textarea class="form-control" id="bugDescription" rows="4" required></textarea>
                     </div>
 
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="bugStatus" class="form-label">Status</label>
                             <select class="form-select" id="bugStatus">
                                 <option value="open">Open</option>
                                 <option value="in_progress">In Progress</option>
+                                <option value="needs_info">Needs Info</option>
+                                <option value="testing">Testing</option>
                                 <option value="resolved">Resolved</option>
                                 <option value="closed">Closed</option>
+                                <option value="duplicate">Duplicate</option>
+                                <option value="wont_fix">Won't Fix</option>
                             </select>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="bugEnvSelect" class="form-label">Environment</label>
                             <select class="form-select" id="bugEnvSelect">
                                 <option value="dev">Development</option>
                                 <option value="test">Testing</option>
                                 <option value="prod">Production</option>
                             </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bugMilestone" class="form-label">Milestone</label>
+                            <input type="text" class="form-control" id="bugMilestone" placeholder="Target milestone">
                         </div>
                     </div>
 
@@ -453,14 +554,40 @@
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="bugTags" class="form-label">Tags</label>
-                        <input type="text" class="form-control" id="bugTags" placeholder="ui, performance, security">
-                        <div class="form-text">Comma-separated tags for categorization</div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="bugTags" class="form-label">Tags</label>
+                            <input type="text" class="form-control" id="bugTags" placeholder="ui, performance, security">
+                            <div class="form-text">Comma-separated tags for categorization</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="bugLabels" class="form-label">Labels</label>
+                            <input type="text" class="form-control" id="bugLabels" placeholder="frontend, critical-path">
+                            <div class="form-text">Additional labels for organization</div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="bugEstimation" class="form-label">Estimation (hours)</label>
+                            <input type="number" class="form-control" id="bugEstimation" step="0.5" min="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bugVersionFound" class="form-label">Version Found</label>
+                            <input type="text" class="form-control" id="bugVersionFound" placeholder="v1.2.3">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="bugRelatedBugs" class="form-label">Related Bug IDs</label>
+                            <input type="text" class="form-control" id="bugRelatedBugs" placeholder="BUG-123, BUG-456">
+                            <div class="form-text">Comma-separated bug IDs</div>
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-outline-info" id="view-bug-activity" onclick="viewBugActivity()" style="display: none;">
+                    <i class="bi bi-clock-history me-1"></i>View Activity
+                </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-admin" onclick="saveBug()">Save Bug Report</button>
             </div>
@@ -534,6 +661,147 @@
     </div>
 </div>
 
+<!-- Bulk Operations Modals -->
+<div class="modal fade" id="bulkAssignModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk Assign Bugs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Assign <span id="bulk-assign-count">0</span> selected bugs to:</p>
+                <div class="mb-3">
+                    <label for="bulkAssignee" class="form-label">Assignee</label>
+                    <input type="text" class="form-control" id="bulkAssignee" placeholder="Enter username" required>
+                </div>
+                <div id="bulk-assign-bug-list" class="mb-3">
+                    <!-- Selected bugs will be listed here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="executeBulkAssign()">Assign Bugs</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="bulkUpdateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk Update Bugs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Update <span id="bulk-update-count">0</span> selected bugs:</p>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="bulkStatus" class="form-label">Status</label>
+                        <select class="form-select" id="bulkStatus">
+                            <option value="">Keep Current</option>
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="needs_info">Needs Info</option>
+                            <option value="testing">Testing</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="bulkPriority" class="form-label">Priority</label>
+                        <select class="form-select" id="bulkPriority">
+                            <option value="">Keep Current</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="bulkSeverity" class="form-label">Severity</label>
+                        <select class="form-select" id="bulkSeverity">
+                            <option value="">Keep Current</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="bulkComponent" class="form-label">Component</label>
+                        <select class="form-select" id="bulkComponent">
+                            <option value="">Keep Current</option>
+                            <option value="ui">UI</option>
+                            <option value="api">API</option>
+                            <option value="database">Database</option>
+                            <option value="authentication">Authentication</option>
+                            <option value="security">Security</option>
+                            <option value="performance">Performance</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="bulkAssigneeUpdate" class="form-label">Assignee</label>
+                    <input type="text" class="form-control" id="bulkAssigneeUpdate" placeholder="Leave empty to keep current">
+                </div>
+                <div id="bulk-update-bug-list" class="mb-3">
+                    <!-- Selected bugs will be listed here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="executeBulkUpdate()">Update Bugs</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="bugActivityModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="activityModalTitle">Bug Activity Log</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bug-activity-content">
+                    <!-- Activity log will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary" onclick="addBugComment()">
+                    <i class="bi bi-chat-left-text me-1"></i>Add Comment
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="bugAnalyticsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bug Analytics</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bug-analytics-content">
+                    <!-- Analytics charts and data will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
 .metric-value {
     font-size: 2rem;
@@ -564,6 +832,15 @@
 .bug-severity-high { background: #fed7aa; color: #9a3412; }
 .bug-severity-medium { background: #fef3c7; color: #92400e; }
 .bug-severity-low { background: #f3f4f6; color: #374151; }
+
+.bug-priority-urgent { background: #ef4444; color: white; font-weight: bold; }
+.bug-priority-high { background: #f97316; color: white; }
+.bug-priority-medium { background: #eab308; color: white; }
+.bug-priority-low { background: #84cc16; color: white; }
+
+.activity-item {
+    border-left-color: #3b82f6 !important;
+}
 
 .execution-item {
     border-left: 4px solid #e5e7eb;
@@ -611,6 +888,9 @@ let testsData = [];
 let bugsData = [];
 let executionHistory = [];
 let currentTestId = null;
+let currentBugId = null;
+let selectedBugs = new Set();
+let filterOptions = {};
 let activeTestExecutions = new Map();
 
 // WebSocket connection for real-time test updates
@@ -869,23 +1149,34 @@ function updateBugsDisplay() {
 
     tbody.innerHTML = bugsData.map(bug => {
         const severityClass = `bug-severity-${bug.severity}`;
+        const priorityClass = `bug-priority-${bug.priority}`;
         const statusClass = getStatusClass(bug.status);
         const created = AdminUtils.formatTimestamp(bug.created_at);
+        const assignee = bug.assigned_to || 'Unassigned';
+        const isSelected = selectedBugs.has(bug.bug_id);
 
         return `
-            <tr>
+            <tr class="${isSelected ? 'table-active' : ''}">
+                <td>
+                    <input type="checkbox" class="form-check-input bug-checkbox"
+                           value="${bug.bug_id}" ${isSelected ? 'checked' : ''}
+                           onchange="toggleBugSelection('${bug.bug_id}')">
+                </td>
                 <td><code>${bug.bug_id.substring(0, 8)}...</code></td>
                 <td>
                     <div>
                         <strong>${bug.title}</strong>
                         <br>
                         <small class="text-muted">${bug.description.substring(0, 60)}${bug.description.length > 60 ? '...' : ''}</small>
+                        ${bug.test_failure_id ? '<br><span class="badge bg-warning text-dark"><i class="bi bi-bug me-1"></i>Auto-created</span>' : ''}
                     </div>
                 </td>
-                <td><span class="badge bg-info">${bug.environment}</span></td>
+                <td><span class="badge ${priorityClass}">${bug.priority}</span></td>
                 <td><span class="badge ${severityClass}">${bug.severity}</span></td>
+                <td><span class="badge bg-secondary">${bug.component}</span></td>
                 <td><span class="badge ${statusClass}">${bug.status.replace('_', ' ')}</span></td>
-                <td>${created}</td>
+                <td><small>${assignee}</small></td>
+                <td><small>${created}</small></td>
                 <td>
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-outline-info btn-sm" onclick="viewBugDetails('${bug.bug_id}')" title="View Details">
@@ -894,11 +1185,17 @@ function updateBugsDisplay() {
                         <button class="btn btn-outline-primary btn-sm" onclick="editBug('${bug.bug_id}')" title="Edit">
                             <i class="bi bi-pencil"></i>
                         </button>
+                        <button class="btn btn-outline-success btn-sm" onclick="viewBugActivity('${bug.bug_id}')" title="Activity Log">
+                            <i class="bi bi-clock-history"></i>
+                        </button>
                     </div>
                 </td>
             </tr>
         `;
     }).join('');
+
+    // Update selection count
+    updateSelectionCount();
 }
 
 function getStatusClass(status) {
@@ -1159,16 +1456,43 @@ function createBugFromTestId(testId) {
     document.getElementById('bugId').value = '';
     document.getElementById('bugTitle').value = `Test Failure: ${test.name}`;
     document.getElementById('bugDescription').value = `Test "${test.name}" is failing.\n\nTest Type: ${test.test_type}\nCommand: ${test.command}\nExpected: ${test.expected_result}`;
-    document.getElementById('bugSeverity').value = test.test_type === 'security' ? 'high' : 'medium';
+    document.getElementById('bugSeverity').value = test.test_type === 'security' ? 'critical' : 'medium';
+    document.getElementById('bugPriority').value = test.test_type === 'security' ? 'urgent' : 'high';
+    document.getElementById('bugComponent').value = getComponentFromTestType(test.test_type, test.tags || []);
     document.getElementById('bugStatus').value = 'open';
     document.getElementById('bugEnvSelect').value = test.environment;
     document.getElementById('bugExpected').value = test.expected_result;
     document.getElementById('bugActual').value = test.last_result || 'Test execution failed';
     document.getElementById('bugSteps').value = `1. Run test: ${test.command}\n2. Observe failure\n3. Check test output`;
     document.getElementById('bugTags').value = `test-failure,${test.test_type},automated`;
+    document.getElementById('bugLabels').value = `test-type:${test.test_type}`;
 
     document.getElementById('bugModalTitle').textContent = 'Create Bug from Test Failure';
     new bootstrap.Modal(document.getElementById('bugModal')).show();
+}
+
+function getComponentFromTestType(testType, tags) {
+    const componentMap = {
+        'security': 'security',
+        'api': 'api',
+        'ui': 'ui',
+        'database': 'database',
+        'performance': 'performance'
+    };
+
+    // Check test type first
+    if (componentMap[testType]) {
+        return componentMap[testType];
+    }
+
+    // Check tags
+    for (const tag of tags) {
+        if (componentMap[tag.toLowerCase()]) {
+            return componentMap[tag.toLowerCase()];
+        }
+    }
+
+    return 'other';
 }
 
 function createBug() {
@@ -1176,10 +1500,55 @@ function createBug() {
     document.getElementById('bugForm').reset();
     document.getElementById('bugId').value = '';
     document.getElementById('bugStatus').value = 'open';
+    document.getElementById('bugPriority').value = 'medium';
+    document.getElementById('bugComponent').value = 'other';
     document.getElementById('bugEnvSelect').value = currentEnvironment === 'all' ? 'dev' : currentEnvironment;
+
+    // Hide activity button for new bugs
+    document.getElementById('view-bug-activity').style.display = 'none';
 
     document.getElementById('bugModalTitle').textContent = 'Create New Bug Report';
     new bootstrap.Modal(document.getElementById('bugModal')).show();
+}
+
+async function editBug(bugId) {
+    try {
+        const bug = bugsData.find(b => b.bug_id === bugId);
+        if (!bug) {
+            AdminUtils.showToast('Bug not found', 'danger');
+            return;
+        }
+
+        // Populate form with bug data
+        document.getElementById('bugId').value = bug.bug_id;
+        document.getElementById('bugTitle').value = bug.title;
+        document.getElementById('bugDescription').value = bug.description;
+        document.getElementById('bugSeverity').value = bug.severity;
+        document.getElementById('bugPriority').value = bug.priority;
+        document.getElementById('bugComponent').value = bug.component;
+        document.getElementById('bugStatus').value = bug.status;
+        document.getElementById('bugEnvSelect').value = bug.environment;
+        document.getElementById('bugAssignee').value = bug.assigned_to || '';
+        document.getElementById('bugExpected').value = bug.expected_behavior || '';
+        document.getElementById('bugActual').value = bug.actual_behavior || '';
+        document.getElementById('bugSteps').value = (bug.steps_to_reproduce || []).join('\n');
+        document.getElementById('bugTags').value = (bug.tags || []).join(', ');
+        document.getElementById('bugLabels').value = (bug.labels || []).join(', ');
+        document.getElementById('bugMilestone').value = bug.milestone || '';
+        document.getElementById('bugEstimation').value = bug.estimation_hours || '';
+        document.getElementById('bugVersionFound').value = bug.version_found || '';
+        document.getElementById('bugRelatedBugs').value = (bug.related_bugs || []).join(', ');
+
+        // Show activity button for existing bugs
+        document.getElementById('view-bug-activity').style.display = 'inline-block';
+        currentBugId = bugId;
+
+        document.getElementById('bugModalTitle').textContent = `Edit Bug: ${bug.title}`;
+        new bootstrap.Modal(document.getElementById('bugModal')).show();
+    } catch (error) {
+        console.error('Error loading bug for edit:', error);
+        AdminUtils.showToast('Failed to load bug details', 'danger');
+    }
 }
 
 async function saveBug() {
@@ -1193,20 +1562,37 @@ async function saveBug() {
         title: document.getElementById('bugTitle').value,
         description: document.getElementById('bugDescription').value,
         severity: document.getElementById('bugSeverity').value,
+        priority: document.getElementById('bugPriority').value,
+        component: document.getElementById('bugComponent').value,
         status: document.getElementById('bugStatus').value,
         environment: document.getElementById('bugEnvSelect').value,
+        assigned_to: document.getElementById('bugAssignee').value || null,
         expected_behavior: document.getElementById('bugExpected').value,
         actual_behavior: document.getElementById('bugActual').value,
         steps_to_reproduce: document.getElementById('bugSteps').value.split('\n').filter(s => s.trim()),
-        tags: document.getElementById('bugTags').value.split(',').map(t => t.trim()).filter(t => t)
+        tags: document.getElementById('bugTags').value.split(',').map(t => t.trim()).filter(t => t),
+        labels: document.getElementById('bugLabels').value.split(',').map(t => t.trim()).filter(t => t),
+        milestone: document.getElementById('bugMilestone').value || null,
+        estimation_hours: parseFloat(document.getElementById('bugEstimation').value) || null,
+        version_found: document.getElementById('bugVersionFound').value || null,
+        related_bugs: document.getElementById('bugRelatedBugs').value.split(',').map(t => t.trim()).filter(t => t)
     };
 
     try {
         const bugId = document.getElementById('bugId').value;
         const isEdit = !!bugId;
 
-        const response = await fetch(isEdit ? `/api/admin/testing/bug/${bugId}` : '/api/admin/testing/bugs', {
-            method: isEdit ? 'PUT' : 'POST',
+        let url, method;
+        if (isEdit) {
+            url = `/api/admin/testing/bug/${bugId}?environment=${bugData.environment}&updated_by=admin`;
+            method = 'PUT';
+        } else {
+            url = '/api/admin/testing/bugs';
+            method = 'POST';
+        }
+
+        const response = await fetch(url, {
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(bugData)
         });
@@ -1269,7 +1655,7 @@ async function saveTest() {
     }
 }
 
-// Filter functions
+// Enhanced Filter functions
 function filterByEnvironment(environment) {
     currentEnvironment = environment;
     document.getElementById('test-environment').textContent = environment === 'all' ? 'All' : environment.toUpperCase();
@@ -1284,8 +1670,323 @@ function filterTests() {
 }
 
 function filterBugs() {
-    // Client-side filtering implementation
+    // Apply client-side filtering
+    const filters = {
+        severity: document.getElementById('bug-severity-filter').value,
+        priority: document.getElementById('bug-priority-filter').value,
+        component: document.getElementById('bug-component-filter').value,
+        assignee: document.getElementById('bug-assignee-filter').value,
+        search: document.getElementById('bug-search').value
+    };
+
+    let filteredBugs = [...bugsData];
+
+    // Apply filters
+    if (filters.severity && filters.severity !== 'all') {
+        filteredBugs = filteredBugs.filter(bug => bug.severity === filters.severity);
+    }
+    if (filters.priority && filters.priority !== 'all') {
+        filteredBugs = filteredBugs.filter(bug => bug.priority === filters.priority);
+    }
+    if (filters.component && filters.component !== 'all') {
+        filteredBugs = filteredBugs.filter(bug => bug.component === filters.component);
+    }
+    if (filters.assignee && filters.assignee !== 'all') {
+        if (filters.assignee === 'unassigned') {
+            filteredBugs = filteredBugs.filter(bug => !bug.assigned_to);
+        } else {
+            filteredBugs = filteredBugs.filter(bug => bug.assigned_to === filters.assignee);
+        }
+    }
+    if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        filteredBugs = filteredBugs.filter(bug =>
+            bug.title.toLowerCase().includes(searchLower) ||
+            bug.description.toLowerCase().includes(searchLower) ||
+            (bug.tags && bug.tags.some(tag => tag.toLowerCase().includes(searchLower)))
+        );
+    }
+
+    // Update display with filtered data
+    const originalBugsData = bugsData;
+    bugsData = filteredBugs;
     updateBugsDisplay();
+    bugsData = originalBugsData; // Restore original data
+}
+
+function searchBugs() {
+    // Trigger filtering when search input changes
+    filterBugs();
+}
+
+function clearBugSearch() {
+    document.getElementById('bug-search').value = '';
+    filterBugs();
+}
+
+// Bug selection management
+function toggleBugSelection(bugId) {
+    if (selectedBugs.has(bugId)) {
+        selectedBugs.delete(bugId);
+    } else {
+        selectedBugs.add(bugId);
+    }
+    updateBugsDisplay();
+}
+
+function toggleAllBugs() {
+    const selectAllCheckbox = document.getElementById('select-all-bugs');
+    const bugCheckboxes = document.querySelectorAll('.bug-checkbox');
+
+    if (selectAllCheckbox.checked) {
+        bugCheckboxes.forEach(checkbox => {
+            selectedBugs.add(checkbox.value);
+        });
+    } else {
+        selectedBugs.clear();
+    }
+    updateBugsDisplay();
+}
+
+function updateSelectionCount() {
+    const count = selectedBugs.size;
+    document.getElementById('bulk-assign-count').textContent = count;
+    document.getElementById('bulk-update-count').textContent = count;
+}
+
+// Bulk operations
+function showBulkAssignModal() {
+    if (selectedBugs.size === 0) {
+        AdminUtils.showToast('Please select bugs to assign', 'warning');
+        return;
+    }
+
+    // Populate selected bugs list
+    const bugList = document.getElementById('bulk-assign-bug-list');
+    const selectedBugsList = Array.from(selectedBugs).map(bugId => {
+        const bug = bugsData.find(b => b.bug_id === bugId);
+        return bug ? `<small class="badge bg-light text-dark me-1">${bug.bug_id.substring(0, 8)}... - ${bug.title.substring(0, 30)}</small>` : '';
+    }).join('');
+
+    bugList.innerHTML = `<div class="text-muted mb-2">Selected bugs:</div><div>${selectedBugsList}</div>`;
+
+    new bootstrap.Modal(document.getElementById('bulkAssignModal')).show();
+}
+
+function showBulkUpdateModal() {
+    if (selectedBugs.size === 0) {
+        AdminUtils.showToast('Please select bugs to update', 'warning');
+        return;
+    }
+
+    // Populate selected bugs list
+    const bugList = document.getElementById('bulk-update-bug-list');
+    const selectedBugsList = Array.from(selectedBugs).map(bugId => {
+        const bug = bugsData.find(b => b.bug_id === bugId);
+        return bug ? `<small class="badge bg-light text-dark me-1">${bug.bug_id.substring(0, 8)}... - ${bug.title.substring(0, 30)}</small>` : '';
+    }).join('');
+
+    bugList.innerHTML = `<div class="text-muted mb-2">Selected bugs:</div><div>${selectedBugsList}</div>`;
+
+    new bootstrap.Modal(document.getElementById('bulkUpdateModal')).show();
+}
+
+async function executeBulkAssign() {
+    const assignee = document.getElementById('bulkAssignee').value.trim();
+    if (!assignee) {
+        AdminUtils.showToast('Please enter an assignee', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/admin/testing/bugs/bulk-assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bug_ids: Array.from(selectedBugs),
+                assignee: assignee,
+                environment: currentEnvironment === 'all' ? 'dev' : currentEnvironment,
+                assigned_by: 'admin'
+            })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = await response.json();
+        AdminUtils.showToast(`Assigned ${result.updated.length} bugs successfully`, 'success');
+
+        bootstrap.Modal.getInstance(document.getElementById('bulkAssignModal')).hide();
+        selectedBugs.clear();
+        loadBugs();
+
+    } catch (error) {
+        console.error('Error in bulk assign:', error);
+        AdminUtils.showToast('Failed to assign bugs', 'danger');
+    }
+}
+
+async function executeBulkUpdate() {
+    const updates = {};
+
+    // Collect non-empty updates
+    const status = document.getElementById('bulkStatus').value;
+    const priority = document.getElementById('bulkPriority').value;
+    const severity = document.getElementById('bulkSeverity').value;
+    const component = document.getElementById('bulkComponent').value;
+    const assignee = document.getElementById('bulkAssigneeUpdate').value.trim();
+
+    if (status) updates.status = status;
+    if (priority) updates.priority = priority;
+    if (severity) updates.severity = severity;
+    if (component) updates.component = component;
+    if (assignee) updates.assigned_to = assignee;
+
+    if (Object.keys(updates).length === 0) {
+        AdminUtils.showToast('Please specify at least one update', 'warning');
+        return;
+    }
+
+    updates.environment = currentEnvironment === 'all' ? 'dev' : currentEnvironment;
+
+    try {
+        const response = await fetch('/api/admin/testing/bugs/bulk-update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bug_ids: Array.from(selectedBugs),
+                updates: updates,
+                updated_by: 'admin'
+            })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = await response.json();
+        AdminUtils.showToast(`Updated ${result.updated.length} bugs successfully`, 'success');
+
+        bootstrap.Modal.getInstance(document.getElementById('bulkUpdateModal')).hide();
+        selectedBugs.clear();
+        loadBugs();
+
+    } catch (error) {
+        console.error('Error in bulk update:', error);
+        AdminUtils.showToast('Failed to update bugs', 'danger');
+    }
+}
+
+// Bug activity and analytics
+async function viewBugActivity(bugId) {
+    if (!bugId && currentBugId) {
+        bugId = currentBugId;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/testing/bugs/${bugId}/activity?environment=${currentEnvironment === 'all' ? 'dev' : currentEnvironment}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+
+        document.getElementById('activityModalTitle').textContent = `Bug Activity: ${bugId.substring(0, 8)}...`;
+
+        const activityContent = document.getElementById('bug-activity-content');
+        if (data.activity_log.length === 0) {
+            activityContent.innerHTML = '<p class="text-muted">No activity recorded for this bug.</p>';
+        } else {
+            activityContent.innerHTML = data.activity_log.map(activity => {
+                const timestamp = new Date(activity.timestamp * 1000).toLocaleString();
+                return `
+                    <div class="activity-item border-start border-3 ps-3 pb-3 mb-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${activity.user}</strong>
+                                <span class="text-muted">• ${activity.activity_type}</span>
+                            </div>
+                            <small class="text-muted">${timestamp}</small>
+                        </div>
+                        <div class="mt-1">${activity.description}</div>
+                        ${activity.details ? `<small class="text-muted">Details: ${JSON.stringify(activity.details)}</small>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        new bootstrap.Modal(document.getElementById('bugActivityModal')).show();
+
+    } catch (error) {
+        console.error('Error loading bug activity:', error);
+        AdminUtils.showToast('Failed to load bug activity', 'danger');
+    }
+}
+
+async function showBugAnalytics() {
+    try {
+        const env = currentEnvironment === 'all' ? 'dev' : currentEnvironment;
+        const response = await fetch(`/api/admin/testing/bugs/analytics/${env}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const analytics = await response.json();
+
+        const content = document.getElementById('bug-analytics-content');
+        content.innerHTML = `
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h3 class="text-primary">${analytics.total_bugs}</h3>
+                            <small class="text-muted">Total Bugs</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h3 class="text-success">${analytics.resolution_rate_percent}%</h3>
+                            <small class="text-muted">Resolution Rate</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h3 class="text-info">${analytics.timing_metrics.avg_resolution_time_hours}h</h3>
+                            <small class="text-muted">Avg Resolution Time</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <h5>Status Distribution</h5>
+                    <div class="chart-container">
+                        ${Object.entries(analytics.distributions.status).map(([status, count]) => `
+                            <div class="d-flex justify-content-between">
+                                <span>${status.replace('_', ' ')}</span>
+                                <span class="badge bg-secondary">${count}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h5>Priority Distribution</h5>
+                    <div class="chart-container">
+                        ${Object.entries(analytics.distributions.priority).map(([priority, count]) => `
+                            <div class="d-flex justify-content-between">
+                                <span>${priority}</span>
+                                <span class="badge bg-secondary">${count}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        new bootstrap.Modal(document.getElementById('bugAnalyticsModal')).show();
+
+    } catch (error) {
+        console.error('Error loading bug analytics:', error);
+        AdminUtils.showToast('Failed to load bug analytics', 'danger');
+    }
 }
 
 // Utility functions
