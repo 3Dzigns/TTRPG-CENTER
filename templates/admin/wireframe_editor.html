@@ -1,0 +1,404 @@
+{% extends "base.html" %}
+
+{% block title %}Wireframe Editor - TTRPG Center Admin{% endblock %}
+
+{% block head %}
+<link href="{{ url_for('static', path='css/wireframe/editor.css') }}" rel="stylesheet">
+<link href="{{ url_for('static', path='css/wireframe/lcars-theme.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid vh-100 d-flex flex-column">
+        <!-- Toolbar -->
+        <div class="wireframe-toolbar bg-white border-bottom p-2 d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-3">
+                <div class="dropdown">
+                    <button class="btn btn-primary dropdown-toggle" type="button" id="projectDropdown" data-bs-toggle="dropdown">
+                        <i class="fas fa-file-alt me-2"></i>
+                        <span id="currentProjectName">Select Project</span>
+                    </button>
+                    <ul class="dropdown-menu" id="projectsList">
+                        <li><a class="dropdown-item" href="#" id="newProjectBtn"><i class="fas fa-plus me-2"></i>New Project</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                    </ul>
+                </div>
+
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-outline-secondary" id="saveBtn" title="Save Project">
+                        <i class="fas fa-save"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="undoBtn" title="Undo">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="redoBtn" title="Redo">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                </div>
+
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-outline-info" id="gridToggleBtn" title="Toggle Grid">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-info" id="snapToggleBtn" title="Toggle Snap to Grid">
+                        <i class="fas fa-magnet"></i>
+                    </button>
+                </div>
+
+                <div class="zoom-controls d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="zoomOutBtn">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <span id="zoomLevel" class="text-muted">100%</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="zoomInBtn">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-3">
+                <div class="btn-group" role="group">
+                    <input type="radio" class="btn-check" name="theme" id="adminTheme" value="admin" checked>
+                    <label class="btn btn-outline-primary btn-sm" for="adminTheme">Admin</label>
+
+                    <input type="radio" class="btn-check" name="theme" id="lcarsTheme" value="lcars">
+                    <label class="btn btn-outline-warning btn-sm" for="lcarsTheme">LCARS</label>
+                </div>
+
+                <button type="button" class="btn btn-success" id="exportBtn">
+                    <i class="fas fa-download me-2"></i>Export HTML/CSS
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="wireframe-main flex-grow-1 d-flex">
+            <!-- Component Palette -->
+            <div class="component-palette bg-light border-end" style="width: 250px;">
+                <div class="p-3">
+                    <h6 class="mb-3">Component Library</h6>
+
+                    <!-- Search Components -->
+                    <div class="mb-3">
+                        <input type="text" class="form-control form-control-sm" id="componentSearch" placeholder="Search components...">
+                    </div>
+
+                    <!-- Component Categories -->
+                    <div class="component-categories">
+                        <!-- LCARS Components -->
+                        <div class="component-category mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0 text-warning">LCARS Components</h6>
+                                <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#lcarsComponents">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="collapse show" id="lcarsComponents">
+                                <div class="component-list">
+                                    <div class="component-item" data-type="lcars_status_light" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="lcars-status-light-preview"></div>
+                                        </div>
+                                        <span class="component-name">Status Light</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="lcars_button" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="lcars-button-preview">Button</div>
+                                        </div>
+                                        <span class="component-name">LCARS Button</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="lcars_panel" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="lcars-panel-preview">Panel</div>
+                                        </div>
+                                        <span class="component-name">LCARS Panel</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="lcars_progress_bar" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="lcars-progress-preview"></div>
+                                        </div>
+                                        <span class="component-name">Progress Bar</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="lcars_dropdown" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="lcars-dropdown-preview">Dropdown ▼</div>
+                                        </div>
+                                        <span class="component-name">Dropdown</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Admin Components -->
+                        <div class="component-category mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0 text-primary">Admin Components</h6>
+                                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#adminComponents">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="collapse show" id="adminComponents">
+                                <div class="component-list">
+                                    <div class="component-item" data-type="admin_card" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="admin-card-preview">Card</div>
+                                        </div>
+                                        <span class="component-name">Bootstrap Card</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="admin_form" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="admin-form-preview">Form Input</div>
+                                        </div>
+                                        <span class="component-name">Form Group</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="admin_table" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="admin-table-preview">Table</div>
+                                        </div>
+                                        <span class="component-name">Data Table</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="admin_button" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="admin-button-preview">Button</div>
+                                        </div>
+                                        <span class="component-name">Admin Button</span>
+                                    </div>
+
+                                    <div class="component-item" data-type="admin_navigation" draggable="true">
+                                        <div class="component-preview">
+                                            <div class="admin-nav-preview">Navigation</div>
+                                        </div>
+                                        <span class="component-name">Navigation</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div class="canvas-area flex-grow-1 d-flex flex-column">
+                <div class="canvas-container flex-grow-1 position-relative overflow-auto" id="canvasContainer">
+                    <canvas id="wireframeCanvas" class="wireframe-canvas"></canvas>
+                    <div id="componentsLayer" class="components-layer"></div>
+                    <div id="selectionLayer" class="selection-layer"></div>
+                </div>
+            </div>
+
+            <!-- Properties Panel -->
+            <div class="properties-panel bg-light border-start" style="width: 280px;">
+                <div class="p-3">
+                    <h6 class="mb-3">Properties</h6>
+
+                    <div id="noSelection" class="text-muted text-center py-4">
+                        <i class="fas fa-mouse-pointer fa-2x mb-2"></i>
+                        <p>Select a component to edit properties</p>
+                    </div>
+
+                    <div id="componentProperties" class="d-none">
+                        <!-- Position & Size -->
+                        <div class="property-group mb-3">
+                            <h6 class="property-group-title">Position & Size</h6>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label form-label-sm">X</label>
+                                    <input type="number" class="form-control form-control-sm" id="propX" min="0">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label form-label-sm">Y</label>
+                                    <input type="number" class="form-control form-control-sm" id="propY" min="0">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label form-label-sm">Width</label>
+                                    <input type="number" class="form-control form-control-sm" id="propWidth" min="1">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label form-label-sm">Height</label>
+                                    <input type="number" class="form-control form-control-sm" id="propHeight" min="1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Component-Specific Properties -->
+                        <div class="property-group mb-3">
+                            <h6 class="property-group-title">Component Properties</h6>
+                            <div id="specificProperties">
+                                <!-- Dynamic content based on component type -->
+                            </div>
+                        </div>
+
+                        <!-- Styling -->
+                        <div class="property-group mb-3">
+                            <h6 class="property-group-title">Styling</h6>
+                            <div class="mb-2">
+                                <label class="form-label form-label-sm">Z-Index</label>
+                                <input type="number" class="form-control form-control-sm" id="propZIndex" min="1">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label form-label-sm">Rotation</label>
+                                <input type="range" class="form-range" id="propRotation" min="0" max="360" step="1">
+                                <div class="text-center small text-muted"><span id="rotationValue">0</span>°</div>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="property-group">
+                            <div class="d-grid gap-2">
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="duplicateBtn">
+                                    <i class="fas fa-copy me-1"></i>Duplicate
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="toFrontBtn">
+                                    <i class="fas fa-layer-group me-1"></i>Bring to Front
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="toBackBtn">
+                                    <i class="fas fa-layer-group me-1"></i>Send to Back
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="deleteBtn">
+                                    <i class="fas fa-trash me-1"></i>Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- New Project Modal -->
+    <div class="modal fade" id="newProjectModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Wireframe Project</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="newProjectForm">
+                        <div class="mb-3">
+                            <label for="projectName" class="form-label">Project Name</label>
+                            <input type="text" class="form-control" id="projectName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="projectDescription" class="form-label">Description</label>
+                            <textarea class="form-control" id="projectDescription" rows="3"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="projectTags" class="form-label">Tags (comma-separated)</label>
+                            <input type="text" class="form-control" id="projectTags" placeholder="wireframe, ui, design">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="createProjectBtn">Create Project</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal fade" id="exportModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Export Wireframe</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Export Settings</h6>
+                            <form id="exportForm">
+                                <div class="mb-3">
+                                    <label for="exportFormat" class="form-label">Format</label>
+                                    <select class="form-select" id="exportFormat">
+                                        <option value="html_css">HTML + CSS</option>
+                                        <option value="react" disabled>React Components (Future)</option>
+                                        <option value="vue" disabled>Vue Components (Future)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="cssFramework" class="form-label">CSS Framework</label>
+                                    <select class="form-select" id="cssFramework">
+                                        <option value="bootstrap">Bootstrap 5</option>
+                                        <option value="lcars">LCARS Only</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="includeResponsive" checked>
+                                    <label class="form-check-label" for="includeResponsive">
+                                        Include responsive design
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="includeAccessibility" checked>
+                                    <label class="form-check-label" for="includeAccessibility">
+                                        Include accessibility attributes
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="includeComments" checked>
+                                    <label class="form-check-label" for="includeComments">
+                                        Include code comments
+                                    </label>
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="minifyOutput">
+                                    <label class="form-check-label" for="minifyOutput">
+                                        Minify output
+                                    </label>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Preview</h6>
+                            <div class="export-preview bg-light p-3 rounded" style="height: 300px; overflow-y: auto;">
+                                <div id="exportPreview" class="small">
+                                    <p class="text-muted">Click "Generate Preview" to see the exported code</p>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="previewBtn">
+                                    <i class="fas fa-eye me-1"></i>Generate Preview
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="downloadBtn">
+                        <i class="fas fa-download me-1"></i>Download Files
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', path='js/wireframe/editor.js') }}"></script>
+    <script src="{{ url_for('static', path='js/wireframe/canvas.js') }}"></script>
+    <script src="{{ url_for('static', path='js/wireframe/drag-drop.js') }}"></script>
+    <script src="{{ url_for('static', path='js/wireframe/components/lcars.js') }}"></script>
+    <script src="{{ url_for('static', path='js/wireframe/components/admin.js') }}"></script>
+    <script src="{{ url_for('static', path='js/wireframe/export.js') }}"></script>
+
+    <script>
+        // Initialize wireframe editor
+        document.addEventListener('DOMContentLoaded', function() {
+            window.wireframeEditor = new WireframeEditor();
+            window.wireframeEditor.initialize();
+        });
+    </script>
+</div>
+{% endblock %}

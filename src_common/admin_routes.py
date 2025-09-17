@@ -28,6 +28,8 @@ from .admin import (
     AdminCacheService,
     AdminLogService
 )
+from .admin.wireframe_editor import WireframeEditorService
+from .admin.template_generator import TemplateGenerator
 from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
 
 # Initialize logging and services
@@ -38,6 +40,17 @@ dictionary_service = AdminDictionaryService(use_mongodb=True)  # FR-015: Enable 
 testing_service = AdminTestingService()
 cache_service = AdminCacheService()
 log_service = AdminLogService()
+
+# FR-019: Initialize wireframe services
+from .mongodb_service import MongoDBService
+mongodb_service = MongoDBService()
+wireframe_service = WireframeEditorService(mongodb_service)
+template_generator = TemplateGenerator()
+
+# Initialize MongoDB connection on startup
+async def initialize_wireframe_services():
+    """Initialize MongoDB connection for wireframe services."""
+    await mongodb_service.connect()
 
 # Initialize templates
 templates = Jinja2Templates(directory="templates")
@@ -1041,6 +1054,31 @@ async def admin_testing_page(request: Request):
         "active_nav": "testing",
     }
     return templates.TemplateResponse("admin/testing.html", context)
+
+# -------------------------
+# FR-019: Wireframe Editor Routes
+# -------------------------
+
+@admin_router.get("/admin/wireframe", response_class=HTMLResponse)
+async def admin_wireframe_dashboard(request: Request):
+    """Wireframe dashboard page."""
+    context = {
+        "request": request,
+        "title": "Wireframe Dashboard",
+        "active_nav": "wireframe",
+    }
+    return templates.TemplateResponse("admin/wireframe_dashboard.html", context)
+
+@admin_router.get("/admin/wireframe/editor", response_class=HTMLResponse)
+async def admin_wireframe_editor(request: Request, project: Optional[str] = Query(None)):
+    """Wireframe editor page."""
+    context = {
+        "request": request,
+        "title": "Wireframe Editor",
+        "active_nav": "wireframe",
+        "project_id": project
+    }
+    return templates.TemplateResponse("admin/wireframe_editor.html", context)
 
 # -------------------------
 # Testing API Endpoints
@@ -2063,4 +2101,254 @@ async def reset_mongodb_circuit_breaker(environment: str):
         raise
     except Exception as e:
         logger.error(f"Error resetting MongoDB circuit breaker for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# FR-019: Wireframe API Endpoints
+# -------------------------
+
+# Pydantic models for wireframe API
+class WireframeProjectCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    tags: Optional[List[str]] = []
+
+class WireframeProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    components: Optional[List[Dict]] = None
+    canvas_settings: Optional[Dict] = None
+    export_settings: Optional[Dict] = None
+    tags: Optional[List[str]] = None
+
+class ComponentCreate(BaseModel):
+    type: str
+    category: str
+    name: str
+    x: float = 0.0
+    y: float = 0.0
+    width: float = 100.0
+    height: float = 50.0
+    properties: Optional[Dict] = {}
+    styles: Optional[Dict] = {}
+
+class ComponentUpdate(BaseModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    rotation: Optional[float] = None
+    z_index: Optional[int] = None
+    properties: Optional[Dict] = None
+    styles: Optional[Dict] = None
+
+# Initialize wireframe collections
+@admin_router.post("/admin/api/wireframe/init")
+async def initialize_wireframe_collections():
+    """Initialize wireframe MongoDB collections."""
+    try:
+        result = await wireframe_service.initialize_collections()
+        return result
+    except Exception as e:
+        logger.error(f"Failed to initialize wireframe collections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Project management endpoints
+@admin_router.get("/admin/api/wireframe/projects")
+async def get_wireframe_projects(
+    user: str = "admin",
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """Get wireframe projects."""
+    try:
+        result = await wireframe_service.get_projects(user, limit, offset)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get wireframe projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/admin/api/wireframe/projects")
+async def create_wireframe_project(project: WireframeProjectCreate, user: str = "admin"):
+    """Create new wireframe project."""
+    try:
+        result = await wireframe_service.create_project(project.dict(), user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to create wireframe project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/admin/api/wireframe/projects/{project_id}")
+async def get_wireframe_project(project_id: str, user: str = "admin"):
+    """Get specific wireframe project."""
+    try:
+        result = await wireframe_service.get_project(project_id, user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get wireframe project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.put("/admin/api/wireframe/projects/{project_id}")
+async def update_wireframe_project(project_id: str, updates: WireframeProjectUpdate, user: str = "admin"):
+    """Update wireframe project."""
+    try:
+        result = await wireframe_service.update_project(project_id, updates.dict(exclude_unset=True), user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to update wireframe project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.delete("/admin/api/wireframe/projects/{project_id}")
+async def delete_wireframe_project(project_id: str, user: str = "admin"):
+    """Delete wireframe project."""
+    try:
+        result = await wireframe_service.delete_project(project_id, user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to delete wireframe project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Component management endpoints
+@admin_router.get("/admin/api/wireframe/components")
+async def get_component_library(category: Optional[str] = None):
+    """Get component library."""
+    try:
+        result = await wireframe_service.get_component_library(category)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get component library: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/admin/api/wireframe/projects/{project_id}/components")
+async def add_component_to_project(project_id: str, component: ComponentCreate, user: str = "admin"):
+    """Add component to wireframe project."""
+    try:
+        result = await wireframe_service.add_component_to_project(project_id, component.dict(), user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to add component to project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.put("/admin/api/wireframe/projects/{project_id}/components/{component_id}")
+async def update_component(project_id: str, component_id: str, updates: ComponentUpdate, user: str = "admin"):
+    """Update component in wireframe project."""
+    try:
+        result = await wireframe_service.update_component(project_id, component_id, updates.dict(exclude_unset=True), user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to update component {component_id} in project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.delete("/admin/api/wireframe/projects/{project_id}/components/{component_id}")
+async def delete_component(project_id: str, component_id: str, user: str = "admin"):
+    """Delete component from wireframe project."""
+    try:
+        result = await wireframe_service.delete_component(project_id, component_id, user)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to delete component {component_id} from project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Export endpoints
+@admin_router.post("/admin/api/wireframe/projects/{project_id}/export")
+async def export_wireframe_project(project_id: str, user: str = "admin"):
+    """Export wireframe project to HTML/CSS."""
+    try:
+        # Get project data
+        project_result = await wireframe_service.get_project(project_id, user)
+        project_data = project_result["project"]
+
+        # Generate export package
+        export_package = template_generator.generate_export_package(project_data)
+
+        # Log activity
+        await wireframe_service._log_activity(project_id, user, "exported", {
+            "export_format": "html_css",
+            "files_count": len(export_package["files"])
+        })
+
+        return {
+            "status": "success",
+            "export_package": export_package
+        }
+    except Exception as e:
+        logger.error(f"Failed to export wireframe project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Activity and stats endpoints
+@admin_router.get("/admin/api/wireframe/projects/{project_id}/activities")
+async def get_project_activities(project_id: str, user: str = "admin", limit: int = Query(50, ge=1, le=100)):
+    """Get project activity log."""
+    try:
+        result = await wireframe_service.get_project_activities(project_id, user, limit)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get activities for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/admin/api/wireframe/activity")
+async def get_recent_activity(limit: int = Query(20, ge=1, le=100)):
+    """Get recent wireframe activity across all projects."""
+    try:
+        # Get activities from all projects (simplified for now)
+        activities = await mongodb_service.find_documents(
+            "wireframe_activities",
+            {},
+            sort=[("timestamp", -1)],
+            limit=limit
+        )
+
+        return {
+            "status": "success",
+            "activities": list(activities)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get recent activity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/admin/api/wireframe/stats")
+async def get_wireframe_stats():
+    """Get wireframe dashboard statistics."""
+    try:
+        # Get basic stats
+        total_projects = await mongodb_service.count_documents("wireframe_projects", {})
+
+        # Count recent projects (last 7 days)
+        from datetime import datetime, timedelta
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_projects = await mongodb_service.count_documents(
+            "wireframe_projects",
+            {"created_at": {"$gte": week_ago}}
+        )
+
+        # Count total components across all projects
+        projects = await mongodb_service.find_documents("wireframe_projects", {})
+        total_components = sum(len(project.get("components", [])) for project in projects)
+
+        # Count exports (from activity log)
+        total_exports = await mongodb_service.count_documents(
+            "wireframe_activities",
+            {"action": "exported"}
+        )
+
+        return {
+            "status": "success",
+            "total_projects": total_projects,
+            "recent_projects": recent_projects,
+            "total_components": total_components,
+            "total_exports": total_exports
+        }
+    except Exception as e:
+        logger.error(f"Failed to get wireframe stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Health check
+@admin_router.get("/admin/api/wireframe/health")
+async def wireframe_health_check():
+    """Check wireframe editor service health."""
+    try:
+        result = await wireframe_service.health_check()
+        return result
+    except Exception as e:
+        logger.error(f"Wireframe health check failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
