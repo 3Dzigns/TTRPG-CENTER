@@ -44,7 +44,8 @@
       "Bash(docker start:*)",
       "Bash(gh pr create:*)",
       "Bash(ss:*)",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dataclasses import asdict
+import asyncio
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Depends, Query, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -730,6 +731,25 @@ async def enable_cache(environment: str):
         ok = await cache_service.enable_cache(environment)
         if not ok:
             raise HTTPException(status_code=500, detail="Failed to enable cache")
+
+        # Broadcast cache operation via WebSocket
+        await manager.broadcast({
+            "type": "cache_operation_completed",
+            "data": {
+                "operation": "enable",
+                "environment": environment,
+                "result": {"status": "enabled"},
+                "timestamp": time.time()
+            }
+        })
+
+        await manager.broadcast({
+            "type": "cache_activity",
+            "message": f"Cache enabled for {environment} environment",
+            "level": "success",
+            "timestamp": time.time()
+        })
+
         return {"status": "enabled", "environment": environment}
     except Exception as e:
         logger.error(f"Enable cache error: {e}")
@@ -741,19 +761,221 @@ async def disable_cache(environment: str):
         ok = await cache_service.disable_cache(environment)
         if not ok:
             raise HTTPException(status_code=500, detail="Failed to disable cache")
+
+        # Broadcast cache operation via WebSocket
+        await manager.broadcast({
+            "type": "cache_operation_completed",
+            "data": {
+                "operation": "disable",
+                "environment": environment,
+                "result": {"status": "disabled"},
+                "timestamp": time.time()
+            }
+        })
+
+        await manager.broadcast({
+            "type": "cache_activity",
+            "message": f"Cache disabled for {environment} environment",
+            "level": "warning",
+            "timestamp": time.time()
+        })
+
         return {"status": "disabled", "environment": environment}
     except Exception as e:
         logger.error(f"Disable cache error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.post("/api/cache/{environment}/clear")
-async def clear_cache(environment: str):
+async def clear_cache(environment: str, request: Request):
     try:
-        result = await cache_service.clear_cache(environment)
+        # Get pattern from request body if provided
+        body = await request.json() if request.headers.get('content-type') == 'application/json' else {}
+        pattern = body.get('pattern')
+
+        result = await cache_service.clear_cache(environment, pattern)
+
+        # Broadcast cache operation via WebSocket
+        await manager.broadcast({
+            "type": "cache_operation_completed",
+            "data": {
+                "operation": "clear",
+                "environment": environment,
+                "pattern": pattern,
+                "result": result,
+                "timestamp": time.time()
+            }
+        })
+
+        # Broadcast activity update
+        activity_message = f"Cache cleared for {environment}"
+        if pattern:
+            activity_message += f" (pattern: {pattern})"
+        await manager.broadcast({
+            "type": "cache_activity",
+            "message": activity_message,
+            "level": "info",
+            "timestamp": time.time()
+        })
+
         return result
     except Exception as e:
         logger.error(f"Clear cache error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Additional cache management endpoints for FR-018
+
+@admin_router.get("/api/cache/{environment}/policy")
+async def get_cache_policy(environment: str):
+    """Get cache policy for a specific environment"""
+    try:
+        policy = await cache_service.get_cache_policy(environment)
+        return asdict(policy)
+    except Exception as e:
+        logger.error(f"Get cache policy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.put("/api/cache/{environment}/policy")
+async def update_cache_policy(environment: str, updates: dict):
+    """Update cache policy for a specific environment"""
+    try:
+        policy = await cache_service.update_cache_policy(environment, updates, updated_by="admin")
+
+        # Broadcast policy update via WebSocket
+        await manager.broadcast({
+            "type": "cache_policy_updated",
+            "data": {
+                "environment": environment,
+                "policy": asdict(policy),
+                "timestamp": time.time()
+            }
+        })
+
+        return asdict(policy)
+    except Exception as e:
+        logger.error(f"Update cache policy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/cache/{environment}/metrics")
+async def get_cache_metrics(environment: str):
+    """Get cache metrics for a specific environment"""
+    try:
+        metrics = await cache_service.get_cache_metrics(environment)
+        return asdict(metrics) if metrics else None
+    except Exception as e:
+        logger.error(f"Get cache metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/cache/{environment}/compliance")
+async def validate_cache_compliance(environment: str):
+    """Validate cache compliance for a specific environment"""
+    try:
+        compliance = await cache_service.validate_compliance(environment)
+        return compliance
+    except Exception as e:
+        logger.error(f"Cache compliance validation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/cache/export-metrics")
+async def export_cache_metrics():
+    """Export cache metrics for all environments"""
+    try:
+        overview = await cache_service.get_cache_overview()
+
+        # Create export data
+        export_data = {
+            "export_timestamp": time.time(),
+            "export_date": datetime.now().isoformat(),
+            "cache_overview": overview,
+            "compliance_status": {}
+        }
+
+        # Add compliance data for each environment
+        for env in ['dev', 'test', 'prod']:
+            try:
+                compliance = await cache_service.validate_compliance(env)
+                export_data["compliance_status"][env] = compliance
+            except Exception as e:
+                export_data["compliance_status"][env] = {
+                    "error": str(e),
+                    "timestamp": time.time()
+                }
+
+        # Return as JSON for download
+        import json
+        from fastapi.responses import Response
+
+        json_data = json.dumps(export_data, indent=2, default=str)
+
+        return Response(
+            content=json_data,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=cache-metrics-{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Export cache metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket endpoint for real-time cache updates
+@admin_router.websocket("/ws/admin/cache")
+async def cache_websocket_endpoint(websocket: WebSocket):
+    """WebSocket for real-time cache updates and monitoring"""
+    await manager.connect(websocket)
+    try:
+        # Send initial cache overview
+        overview = await cache_service.get_cache_overview()
+        await manager.send_personal_message({
+            "type": "cache_metrics_update",
+            "data": overview,
+            "timestamp": time.time()
+        }, websocket)
+
+        # Send welcome activity message
+        await manager.send_personal_message({
+            "type": "cache_activity",
+            "message": "Connected to real-time cache monitoring",
+            "level": "info",
+            "timestamp": time.time()
+        }, websocket)
+
+        # Set up periodic metrics updates
+        last_metrics_update = time.time()
+
+        while True:
+            # Wait for incoming data with timeout for periodic updates
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+
+                # Echo back for heartbeat
+                response = {
+                    "type": "heartbeat",
+                    "data": "pong",
+                    "timestamp": time.time()
+                }
+                await manager.send_personal_message(response, websocket)
+
+            except asyncio.TimeoutError:
+                # Send periodic metrics update every 5 seconds
+                current_time = time.time()
+                if current_time - last_metrics_update >= 5:
+                    try:
+                        overview = await cache_service.get_cache_overview()
+                        await manager.send_personal_message({
+                            "type": "cache_metrics_update",
+                            "data": overview,
+                            "timestamp": current_time
+                        }, websocket)
+                        last_metrics_update = current_time
+                    except Exception as metrics_error:
+                        logger.error(f"Error sending metrics update: {metrics_error}")
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"Cache WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 # -------------------------
 # Source Health Monitoring (Enhanced Ingestion Console)
