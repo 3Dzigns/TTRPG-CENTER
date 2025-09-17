@@ -185,6 +185,59 @@ let currentLogData = null;
 let autoRefreshTimer = null;
 let isAutoRefreshing = false;
 
+const encodeDataAttr = (value) => encodeURIComponent(String(value ?? ''));
+const decodeDataAttr = (value) => {
+    if (!value) return '';
+    try {
+        return decodeURIComponent(value);
+    } catch (error) {
+        console.warn('Failed to decode data attribute value', value, error);
+        return value;
+    }
+};
+const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const getStatusClass = (status) => {
+    switch (status ? status.toLowerCase() : '') {
+        case 'running': return 'primary';
+        case 'completed': return 'success';
+        case 'failed': return 'danger';
+        case 'pending': return 'warning';
+        default: return 'secondary';
+    }
+};
+
+const getStatusIcon = (status) => {
+    switch (status ? status.toLowerCase() : '') {
+        case 'running': return '<i class="bi bi-play-circle"></i>';
+        case 'completed': return '<i class="bi bi-check-circle"></i>';
+        case 'failed': return '<i class="bi bi-exclamation-octagon"></i>';
+        case 'pending': return '<i class="bi bi-hourglass-split"></i>';
+        default: return '<i class="bi bi-question-circle"></i>';
+    }
+};
+
+const getEnvClass = (environment) => {
+    switch ((environment || '').toLowerCase()) {
+        case 'dev':
+        case 'development':
+            return 'success';
+        case 'test':
+        case 'testing':
+            return 'warning';
+        case 'prod':
+        case 'production':
+            return 'danger';
+        default:
+            return 'secondary';
+    }
+};
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     // Handle URL parameters for direct navigation from job controls (FR-014)
@@ -208,6 +261,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load logs data (this will respect the environment filter)
     loadLogsData();
+
+    const logsTableBody = document.getElementById('logs-table-body');
+    if (logsTableBody) {
+        logsTableBody.addEventListener('click', handleLogTableClick);
+    }
 
     // If job parameter is provided, automatically find and open the corresponding log
     if (jobParam && envParam) {
@@ -267,75 +325,63 @@ function populateLogsTable(logs) {
     tbody.innerHTML = logs.map(log => {
         const statusClass = getStatusClass(log.status);
         const statusIcon = getStatusIcon(log.status);
-        const duration = log.duration_seconds ? AdminUtils.formatDuration(log.duration_seconds) : '--';
-        const endTime = log.end_time ? AdminUtils.formatTimestamp(log.end_time) : '--';
-        const pid = log.pid || '--';
-        const sources = Array.isArray(log.sources) ? log.sources.join(', ') : (log.sources || '--');
+        const durationRaw = log.duration_seconds ? AdminUtils.formatDuration(log.duration_seconds) : '--';
+        const endTimeRaw = log.end_time ? AdminUtils.formatTimestamp(log.end_time) : '--';
+        const pidRaw = log.pid || '--';
+        const sourcesRaw = Array.isArray(log.sources) ? log.sources.join(', ') : (log.sources || '--');
+        const truncatedSources = escapeHtml(AdminUtils.truncate(sourcesRaw, 30));
+        const sourcesTitle = escapeHtml(sourcesRaw);
+        const jobIdAttr = encodeDataAttr(log.job_id || '');
+        const envAttr = encodeDataAttr(log.environment || '');
+        const logFileAttr = encodeDataAttr(log.log_file || '');
+        const jobTypeDisplay = escapeHtml(log.job_type || '--');
+        const statusTextDisplay = escapeHtml(log.status || '--');
+        const pidDisplay = escapeHtml(pidRaw);
+        const startTimestamp = escapeHtml(AdminUtils.formatTimestamp(log.start_time));
+        const endTimestamp = escapeHtml(endTimeRaw);
+        const durationDisplay = escapeHtml(durationRaw);
+        const fileSizeDisplay = escapeHtml(AdminUtils.formatBytes(log.file_size_bytes || 0));
+        const environmentBadge = getEnvClass(log.environment);
+        const environmentDisplay = escapeHtml(log.environment || '--');
+        const jobIdDisplay = escapeHtml(log.job_id || '--');
 
         return `
             <tr>
-                <td><code class="small">${log.job_id}</code></td>
+                <td><code class="small">${jobIdDisplay}</code></td>
                 <td>
                     <span class="badge bg-${log.job_type === 'nightly' ? 'primary' : 'secondary'}">
-                        ${log.job_type}
+                        ${jobTypeDisplay}
                     </span>
                 </td>
                 <td>
                     <span class="badge bg-${statusClass}">
-                        ${statusIcon} ${log.status}
+                        ${statusIcon} ${statusTextDisplay}
                     </span>
                 </td>
-                <td>${pid}</td>
-                <td>${AdminUtils.formatTimestamp(log.start_time)}</td>
-                <td>${endTime}</td>
-                <td>${duration}</td>
-                <td>${AdminUtils.formatBytes(log.file_size_bytes || 0)}</td>
-                <td class="small" style="max-width: 200px;" title="${sources}">${AdminUtils.truncate(sources, 30)}</td>
+                <td>${pidDisplay}</td>
+                <td>${startTimestamp}</td>
+                <td>${endTimestamp}</td>
+                <td>${durationDisplay}</td>
+                <td>${fileSizeDisplay}</td>
+                <td class="small" style="max-width: 200px;" title="${sourcesTitle}">${truncatedSources}</td>
                 <td>
-                    <span class="badge bg-${getEnvClass(log.environment)}">${log.environment}</span>
+                    <span class="badge bg-${environmentBadge}">${environmentDisplay}</span>
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary btn-sm" onclick="viewLog('${log.job_id}', '${log.environment}', '${log.log_file}')" title="View Log">
+                        <button type="button"
+                                class="btn btn-outline-primary btn-sm view-log-btn"
+                                data-job-id="${jobIdAttr}"
+                                data-env="${envAttr}"
+                                data-log-file="${logFileAttr}"
+                                title="View Log">
                             <i class="bi bi-eye"></i>
                         </button>
-                        <a class="btn btn-outline-secondary btn-sm" href="/api/admin/logs/download?job_id=${log.job_id}&env=${log.environment}" title="Download">
-                            <i class="bi bi-download"></i>
-                        </a>
                     </div>
                 </td>
             </tr>
         `;
     }).join('');
-}
-
-function getStatusClass(status) {
-    switch (status?.toLowerCase()) {
-        case 'running': return 'warning';
-        case 'completed': return 'success';
-        case 'failed': return 'danger';
-        case 'pending': return 'info';
-        default: return 'secondary';
-    }
-}
-
-function getStatusIcon(status) {
-    switch (status?.toLowerCase()) {
-        case 'running': return '<i class="bi bi-play-circle"></i>';
-        case 'completed': return '<i class="bi bi-check-circle"></i>';
-        case 'failed': return '<i class="bi bi-x-circle"></i>';
-        case 'pending': return '<i class="bi bi-clock"></i>';
-        default: return '<i class="bi bi-question-circle"></i>';
-    }
-}
-
-function getEnvClass(env) {
-    switch (env) {
-        case 'dev': return 'success';
-        case 'test': return 'warning';
-        case 'prod': return 'danger';
-        default: return 'secondary';
-    }
 }
 
 async function filterLogs() {
@@ -369,6 +415,23 @@ async function filterLogs() {
         console.error('Error filtering logs:', error);
         AdminUtils.showToast('Error filtering logs', 'danger');
     }
+}
+
+function handleLogTableClick(event) {
+    const button = event.target.closest('.view-log-btn');
+    if (!button) {
+        return;
+    }
+
+    event.preventDefault();
+    const jobId = decodeDataAttr(button.dataset.jobId);
+    const environment = decodeDataAttr(button.dataset.env);
+    const logFile = decodeDataAttr(button.dataset.logFile);
+
+    viewLog(jobId, environment, logFile).catch(error => {
+        console.error('Error opening log from table click:', error);
+        AdminUtils.showToast('Error opening log', 'danger');
+    });
 }
 
 async function viewLog(jobId, environment, logFile) {
@@ -503,19 +566,14 @@ async function autoOpenJobLog(jobId, environment) {
                 const rowEnv = cells[2].textContent.trim();
 
                 if (rowJobId.includes(jobId) && rowEnv === environment) {
-                    // Extract log details from the view button
-                    const viewButton = row.querySelector('button[onclick*="viewLog"]');
+                    const viewButton = row.querySelector('button.view-log-btn');
                     if (viewButton) {
-                        const onclickAttr = viewButton.getAttribute('onclick');
-                        const matches = onclickAttr.match(/viewLog\('([^']+)',\s*'([^']+)',\s*'([^']+)'\)/);
-                        if (matches) {
-                            foundLog = {
-                                jobId: matches[1],
-                                environment: matches[2],
-                                logFile: matches[3]
-                            };
-                            break;
-                        }
+                        foundLog = {
+                            jobId: decodeDataAttr(viewButton.dataset.jobId),
+                            environment: decodeDataAttr(viewButton.dataset.env),
+                            logFile: decodeDataAttr(viewButton.dataset.logFile)
+                        };
+                        break;
                     }
                 }
             }

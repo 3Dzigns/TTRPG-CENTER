@@ -312,7 +312,7 @@
             showToast: showToast,
             
             formatBytes: function(bytes) {
-                if (bytes === 0) return '0 B';
+                if (!bytes) return '0 B';
                 const k = 1024;
                 const sizes = ['B', 'KB', 'MB', 'GB'];
                 const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -320,13 +320,28 @@
             },
             
             formatDuration: function(seconds) {
+                if (!seconds || seconds < 0) return '--';
                 if (seconds < 60) return `${Math.round(seconds)}s`;
                 if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
                 return `${Math.round(seconds / 3600)}h`;
             },
             
             formatTimestamp: function(timestamp) {
-                return new Date(timestamp * 1000).toLocaleString();
+                if (!timestamp) return '--';
+                try {
+                    return new Date(timestamp * 1000).toLocaleString();
+                } catch (error) {
+                    console.warn('Failed to format timestamp', timestamp, error);
+                    return '--';
+                }
+            },
+            
+            truncate: function(text, maxLength) {
+                const value = String(text ?? '');
+                if (!maxLength || value.length <= maxLength) {
+                    return value;
+                }
+                return value.slice(0, Math.max(0, maxLength - 1)) + '...';
             }
         };
     </script>
