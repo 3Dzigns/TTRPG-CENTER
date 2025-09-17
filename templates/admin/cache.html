@@ -1,7 +1,1257 @@
 {% extends "base.html" %}
 {% block title %}Cache Control - TTRPG Center Admin{% endblock %}
 {% block content %}
-<h1 class="h3">Cache Control</h1>
-<p class="text-muted">Use the Dashboard for quick toggles; dedicated controls will be added here.</p>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Cache Management</h1>
+        <div class="mt-1">
+            <span class="text-muted small me-3">
+                <i class="bi bi-server me-1"></i>
+                Environment:
+                <span id="cache-environment" class="badge bg-primary">All</span>
+            </span>
+            <span class="text-muted small me-3" id="cache-global-status">
+                <i class="bi bi-lightning me-1"></i>
+                <span class="badge bg-secondary">Loading...</span>
+            </span>
+        </div>
+    </div>
+    <div class="btn-group" role="group">
+        <button class="btn btn-admin" onclick="refreshCacheData()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-gear me-1"></i>Actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="emergencyDisableAll()"><i class="bi bi-exclamation-triangle me-2"></i>Emergency Disable All</a></li>
+                <li><a class="dropdown-item" href="#" onclick="clearAllCaches()"><i class="bi bi-trash me-2"></i>Clear All Caches</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" onclick="exportCacheMetrics()"><i class="bi bi-download me-2"></i>Export Metrics</a></li>
+                <li><a class="dropdown-item" href="#" onclick="validateCompliance()"><i class="bi bi-shield-check me-2"></i>Validate Compliance</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Environment Filter -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-3">
+                        <label for="env-filter" class="form-label">Environment</label>
+                        <select class="form-select" id="env-filter" onchange="filterByEnvironment(this.value)">
+                            <option value="all">All Environments</option>
+                            <option value="dev">Development</option>
+                            <option value="test">Testing</option>
+                            <option value="prod">Production</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Real-time Metrics</label>
+                        <div class="d-flex gap-3">
+                            <div class="text-center">
+                                <div class="metric-value text-primary" id="global-hit-ratio">--</div>
+                                <div class="metric-label">Hit Ratio</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="metric-value text-info" id="global-response-time">--</div>
+                                <div class="metric-label">Avg Response</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="metric-value text-success" id="global-cache-hits">--</div>
+                                <div class="metric-label">Cache Hits</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Compliance Status</label>
+                        <div id="compliance-indicator" class="badge bg-secondary fs-6">Checking...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cache Overview Dashboard -->
+<div class="row mb-4">
+    <div class="col-lg-4">
+        <div class="card env-card env-dev">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-circle-fill text-success me-2" style="font-size: 0.5rem;"></i>Development</h5>
+                <span class="badge" id="dev-status-badge">Loading...</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="metric-value text-primary" id="dev-hit-ratio">--</div>
+                        <div class="metric-label">Hit Ratio</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="metric-value text-info" id="dev-response-time">--</div>
+                        <div class="metric-label">Response Time</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="d-flex justify-content-between text-sm">
+                        <span>Requests: <span class="fw-bold" id="dev-requests">--</span></span>
+                        <span>TTL: <span class="fw-bold" id="dev-ttl">--</span>s</span>
+                    </div>
+                    <div class="mt-2">
+                        <div class="btn-group btn-group-sm w-100">
+                            <button class="btn btn-outline-success" onclick="enableCache('dev')">
+                                <i class="bi bi-play"></i> Enable
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="disableCache('dev')">
+                                <i class="bi bi-stop"></i> Disable
+                            </button>
+                            <button class="btn btn-outline-warning" onclick="clearCache('dev')">
+                                <i class="bi bi-trash"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card env-card env-test">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-circle-fill text-warning me-2" style="font-size: 0.5rem;"></i>Testing</h5>
+                <span class="badge" id="test-status-badge">Loading...</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="metric-value text-primary" id="test-hit-ratio">--</div>
+                        <div class="metric-label">Hit Ratio</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="metric-value text-info" id="test-response-time">--</div>
+                        <div class="metric-label">Response Time</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="d-flex justify-content-between text-sm">
+                        <span>Requests: <span class="fw-bold" id="test-requests">--</span></span>
+                        <span>TTL: <span class="fw-bold" id="test-ttl">--</span>s</span>
+                    </div>
+                    <div class="mt-2">
+                        <div class="btn-group btn-group-sm w-100">
+                            <button class="btn btn-outline-success" onclick="enableCache('test')">
+                                <i class="bi bi-play"></i> Enable
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="disableCache('test')">
+                                <i class="bi bi-stop"></i> Disable
+                            </button>
+                            <button class="btn btn-outline-warning" onclick="clearCache('test')">
+                                <i class="bi bi-trash"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card env-card env-prod">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Production</h5>
+                <span class="badge" id="prod-status-badge">Loading...</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="metric-value text-primary" id="prod-hit-ratio">--</div>
+                        <div class="metric-label">Hit Ratio</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="metric-value text-info" id="prod-response-time">--</div>
+                        <div class="metric-label">Response Time</div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="d-flex justify-content-between text-sm">
+                        <span>Requests: <span class="fw-bold" id="prod-requests">--</span></span>
+                        <span>TTL: <span class="fw-bold" id="prod-ttl">--</span>s</span>
+                    </div>
+                    <div class="mt-2">
+                        <div class="btn-group btn-group-sm w-100">
+                            <button class="btn btn-outline-success" onclick="enableCache('prod')">
+                                <i class="bi bi-play"></i> Enable
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="disableCache('prod')">
+                                <i class="bi bi-stop"></i> Disable
+                            </button>
+                            <button class="btn btn-outline-warning" onclick="clearCache('prod')">
+                                <i class="bi bi-trash"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cache Control Tabs -->
+<ul class="nav nav-tabs mb-4" id="cacheTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics-pane" type="button" role="tab">
+            <i class="bi bi-graph-up me-1"></i>Real-time Metrics
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="policies-tab" data-bs-toggle="tab" data-bs-target="#policies-pane" type="button" role="tab">
+            <i class="bi bi-gear me-1"></i>Cache Policies
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="compliance-tab" data-bs-toggle="tab" data-bs-target="#compliance-pane" type="button" role="tab">
+            <i class="bi bi-shield-check me-1"></i>Compliance Dashboard
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="operations-tab" data-bs-toggle="tab" data-bs-target="#operations-pane" type="button" role="tab">
+            <i class="bi bi-tools me-1"></i>Cache Operations
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="cacheTabContent">
+    <!-- Real-time Metrics Tab -->
+    <div class="tab-pane fade show active" id="metrics-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Performance Metrics</h5>
+                        <span class="badge bg-info" id="metrics-update-indicator">Live</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="metrics-chart-container">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Hit Ratio Trends</h6>
+                                    <div id="hit-ratio-chart" class="chart-placeholder">
+                                        <div class="text-center text-muted py-4">
+                                            <i class="bi bi-graph-up display-4 mb-2"></i>
+                                            <p>Real-time hit ratio data will appear here</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Response Time Trends</h6>
+                                    <div id="response-time-chart" class="chart-placeholder">
+                                        <div class="text-center text-muted py-4">
+                                            <i class="bi bi-speedometer2 display-4 mb-2"></i>
+                                            <p>Real-time response time data will appear here</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Live Cache Activity</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="cache-activity-feed" style="max-height: 400px; overflow-y: auto;">
+                            <!-- Real-time activity feed will be populated here -->
+                            <div class="text-center text-muted py-4">
+                                <div class="loading-spinner mb-2"></div>
+                                <small>Connecting to real-time feed...</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cache Policies Tab -->
+    <div class="tab-pane fade" id="policies-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-gear me-2"></i>Environment Cache Policies</h5>
+                        <button class="btn btn-admin btn-sm" onclick="savePolicyChanges()">
+                            <i class="bi bi-save me-1"></i>Save Changes
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="policy-editors">
+                            <!-- Policy editors will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compliance Dashboard Tab -->
+    <div class="tab-pane fade" id="compliance-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Phase 0 Cache Compliance</h5>
+                        <button class="btn btn-outline-primary btn-sm" onclick="validateCompliance()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Re-validate
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="compliance-results">
+                            <div class="text-center text-muted py-4">
+                                <div class="loading-spinner mb-2"></div>
+                                <p>Validating compliance...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cache Operations Tab -->
+    <div class="tab-pane fade" id="operations-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-tools me-2"></i>Cache Operations</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="operation-environment" class="form-label">Target Environment</label>
+                            <select class="form-select" id="operation-environment">
+                                <option value="dev">Development</option>
+                                <option value="test">Testing</option>
+                                <option value="prod">Production</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="clear-pattern" class="form-label">Clear Pattern (optional)</label>
+                            <input type="text" class="form-control" id="clear-pattern" placeholder="e.g., /api/* or leave empty for all">
+                            <div class="form-text">Use * for wildcards. Leave empty to clear all cache entries.</div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-outline-success" onclick="performCacheOperation('enable')">
+                                <i class="bi bi-play me-1"></i>Enable Cache
+                            </button>
+                            <button class="btn btn-outline-warning" onclick="performCacheOperation('disable')">
+                                <i class="bi bi-stop me-1"></i>Disable Cache
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="performCacheOperation('clear')">
+                                <i class="bi bi-trash me-1"></i>Clear Cache
+                            </button>
+                            <hr>
+                            <button class="btn btn-danger" onclick="performCacheOperation('emergency-disable')">
+                                <i class="bi bi-exclamation-triangle me-1"></i>Emergency Disable
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Recent Operations</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="operation-history" style="max-height: 400px; overflow-y: auto;">
+                            <!-- Operation history will be populated here -->
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-clock-history display-4 mb-2"></i>
+                                <p>No recent operations</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Operation Confirmation Modal -->
+<div class="modal fade" id="operationConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="operationConfirmTitle">Confirm Operation</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="operation-confirm-content">
+                    <!-- Confirmation content will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" id="confirm-operation-btn" onclick="executeConfirmedOperation()">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Policy Editor Modal -->
+<div class="modal fade" id="policyEditorModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="policyEditorTitle">Edit Cache Policy</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="policy-form">
+                    <input type="hidden" id="policy-environment" value="">
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="policy-cache-enabled" class="form-label">Cache Enabled</label>
+                            <select class="form-select" id="policy-cache-enabled">
+                                <option value="true">Enabled</option>
+                                <option value="false">Disabled</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="policy-admin-override" class="form-label">Admin Override</label>
+                            <select class="form-select" id="policy-admin-override">
+                                <option value="false">Normal</option>
+                                <option value="true">Override Active</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="policy-default-ttl" class="form-label">Default TTL (seconds)</label>
+                            <input type="number" class="form-control" id="policy-default-ttl" min="0" max="86400">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="policy-short-ttl" class="form-label">Short TTL (seconds)</label>
+                            <input type="number" class="form-control" id="policy-short-ttl" min="0" max="3600">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="policy-no-store-pages" class="form-label">No-Store Pages</label>
+                        <textarea class="form-control" id="policy-no-store-pages" rows="3" placeholder="One pattern per line, e.g.: /admin/*"></textarea>
+                        <div class="form-text">Page patterns that should never be cached. Use * for wildcards.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="policy-short-ttl-pages" class="form-label">Short TTL Pages</label>
+                        <textarea class="form-control" id="policy-short-ttl-pages" rows="3" placeholder="One pattern per line, e.g.: /api/ask"></textarea>
+                        <div class="form-text">Page patterns that should use short TTL caching.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="savePolicyForm()">Save Policy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.chart-placeholder {
+    min-height: 200px;
+    border: 1px dashed #e2e8f0;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cache-activity-item {
+    padding: 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.875rem;
+}
+
+.cache-activity-item:last-child {
+    border-bottom: none;
+}
+
+.cache-activity-timestamp {
+    color: #64748b;
+    font-size: 0.75rem;
+}
+
+.policy-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.policy-section h6 {
+    margin-bottom: 0.75rem;
+    color: var(--admin-primary);
+}
+
+.compliance-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+}
+
+.compliance-item.compliant {
+    border-color: #10b981;
+    background-color: #f0fdf4;
+}
+
+.compliance-item.non-compliant {
+    border-color: #ef4444;
+    background-color: #fef2f2;
+}
+
+.operation-log-item {
+    padding: 0.75rem;
+    border-left: 4px solid #e5e7eb;
+    margin-bottom: 0.5rem;
+    background: #f9fafb;
+    border-radius: 0.25rem;
+}
+
+.operation-log-item.success { border-left-color: #10b981; }
+.operation-log-item.warning { border-left-color: #f59e0b; }
+.operation-log-item.error { border-left-color: #ef4444; }
+</style>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentEnvironment = 'all';
+let cacheData = {};
+let metricsInterval = null;
+let cacheWs = null;
+let pendingOperation = null;
+
+// WebSocket connection for real-time cache updates
+function connectCacheWebSocket() {
+    if (cacheWs && cacheWs.readyState === WebSocket.OPEN) {
+        return;
+    }
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    cacheWs = new WebSocket(`${protocol}//${location.host}/ws/admin/cache`);
+
+    cacheWs.onopen = function() {
+        console.log('Cache WebSocket connected');
+        updateActivityFeed('Connected to real-time cache monitoring', 'info');
+    };
+
+    cacheWs.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        handleCacheWebSocketMessage(data);
+    };
+
+    cacheWs.onclose = function() {
+        console.log('Cache WebSocket disconnected, reconnecting...');
+        updateActivityFeed('Reconnecting to cache monitoring...', 'warning');
+        setTimeout(connectCacheWebSocket, 5000);
+    };
+
+    cacheWs.onerror = function(error) {
+        console.error('Cache WebSocket error:', error);
+        updateActivityFeed('WebSocket connection error', 'error');
+    };
+}
+
+function handleCacheWebSocketMessage(data) {
+    switch(data.type) {
+        case 'cache_metrics_update':
+            updateMetricsDisplay(data.data);
+            break;
+        case 'cache_operation_completed':
+            handleCacheOperationCompleted(data.data);
+            break;
+        case 'cache_policy_updated':
+            handlePolicyUpdate(data.data);
+            break;
+        case 'cache_activity':
+            updateActivityFeed(data.message, data.level);
+            break;
+    }
+}
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    loadCacheData();
+    connectCacheWebSocket();
+    startMetricsPolling();
+
+    // Setup tab change handlers
+    document.querySelectorAll('#cacheTabs button[data-bs-toggle="tab"]').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function(event) {
+            const target = event.target.getAttribute('data-bs-target');
+            if (target === '#policies-pane') {
+                loadPolicyEditors();
+            } else if (target === '#compliance-pane') {
+                loadComplianceData();
+            }
+        });
+    });
+});
+
+async function loadCacheData() {
+    AdminUtils.showToast('Loading cache data...', 'info');
+    try {
+        const response = await fetch('/api/cache/overview');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        cacheData = await response.json();
+        updateCacheOverview();
+        updateMetricsDisplay(cacheData);
+        AdminUtils.showToast('Cache data loaded', 'success');
+    } catch (error) {
+        console.error('Error loading cache data:', error);
+        AdminUtils.showToast('Failed to load cache data', 'danger');
+    }
+}
+
+function updateCacheOverview() {
+    const environments = ['dev', 'test', 'prod'];
+
+    environments.forEach(env => {
+        const envData = cacheData.environments?.[env];
+        if (!envData) return;
+
+        const policy = envData.policy;
+        const metrics = envData.metrics;
+
+        // Update status badge
+        const statusBadge = document.getElementById(`${env}-status-badge`);
+        if (policy?.cache_enabled) {
+            statusBadge.className = 'badge bg-success';
+            statusBadge.textContent = 'Enabled';
+        } else {
+            statusBadge.className = 'badge bg-danger';
+            statusBadge.textContent = 'Disabled';
+        }
+
+        if (policy?.admin_override) {
+            statusBadge.className = 'badge bg-warning';
+            statusBadge.textContent = 'Override';
+        }
+
+        // Update metrics
+        if (metrics) {
+            document.getElementById(`${env}-hit-ratio`).textContent =
+                `${(metrics.hit_ratio * 100).toFixed(1)}%`;
+            document.getElementById(`${env}-response-time`).textContent =
+                `${metrics.average_response_time_ms.toFixed(1)}ms`;
+            document.getElementById(`${env}-requests`).textContent =
+                metrics.total_requests.toLocaleString();
+        }
+
+        // Update TTL
+        if (policy) {
+            document.getElementById(`${env}-ttl`).textContent = policy.default_ttl_seconds;
+        }
+    });
+
+    // Update global metrics
+    updateGlobalMetrics();
+}
+
+function updateGlobalMetrics() {
+    let totalRequests = 0;
+    let totalHits = 0;
+    let avgResponseTime = 0;
+    let envCount = 0;
+
+    Object.values(cacheData.environments || {}).forEach(envData => {
+        if (envData.metrics) {
+            totalRequests += envData.metrics.total_requests;
+            totalHits += envData.metrics.cache_hits;
+            avgResponseTime += envData.metrics.average_response_time_ms;
+            envCount++;
+        }
+    });
+
+    const hitRatio = totalRequests > 0 ? (totalHits / totalRequests) * 100 : 0;
+    avgResponseTime = envCount > 0 ? avgResponseTime / envCount : 0;
+
+    document.getElementById('global-hit-ratio').textContent = `${hitRatio.toFixed(1)}%`;
+    document.getElementById('global-response-time').textContent = `${avgResponseTime.toFixed(1)}ms`;
+    document.getElementById('global-cache-hits').textContent = totalHits.toLocaleString();
+
+    // Update global status
+    const globalStatus = document.getElementById('cache-global-status');
+    const enabledEnvs = Object.values(cacheData.environments || {})
+        .filter(env => env.policy?.cache_enabled).length;
+
+    if (enabledEnvs === 3) {
+        globalStatus.innerHTML = '<i class="bi bi-lightning me-1"></i><span class="badge bg-success">All Enabled</span>';
+    } else if (enabledEnvs === 0) {
+        globalStatus.innerHTML = '<i class="bi bi-lightning me-1"></i><span class="badge bg-danger">All Disabled</span>';
+    } else {
+        globalStatus.innerHTML = `<i class="bi bi-lightning me-1"></i><span class="badge bg-warning">${enabledEnvs}/3 Enabled</span>`;
+    }
+}
+
+function updateMetricsDisplay(data) {
+    // This would be expanded to update charts and real-time metrics
+    // For now, just update the overview
+    if (data.environments) {
+        Object.assign(cacheData.environments || {}, data.environments);
+        updateCacheOverview();
+    }
+}
+
+function startMetricsPolling() {
+    // Poll for metrics every 5 seconds
+    metricsInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/cache/overview');
+            if (response.ok) {
+                const data = await response.json();
+                updateMetricsDisplay(data);
+            }
+        } catch (error) {
+            console.error('Metrics polling error:', error);
+        }
+    }, 5000);
+}
+
+// Cache Operations
+async function enableCache(environment) {
+    await performCacheOperation('enable', environment);
+}
+
+async function disableCache(environment) {
+    await performCacheOperation('disable', environment);
+}
+
+async function clearCache(environment, pattern = null) {
+    await performCacheOperation('clear', environment, { pattern });
+}
+
+async function performCacheOperation(operation, environment = null, options = {}) {
+    if (!environment) {
+        environment = document.getElementById('operation-environment')?.value || 'dev';
+    }
+
+    // Show confirmation for destructive operations
+    if (['clear', 'disable', 'emergency-disable'].includes(operation)) {
+        showOperationConfirmation(operation, environment, options);
+        return;
+    }
+
+    await executeOperation(operation, environment, options);
+}
+
+function showOperationConfirmation(operation, environment, options) {
+    const modal = new bootstrap.Modal(document.getElementById('operationConfirmModal'));
+    const title = document.getElementById('operationConfirmTitle');
+    const content = document.getElementById('operation-confirm-content');
+
+    pendingOperation = { operation, environment, options };
+
+    let titleText = '';
+    let contentText = '';
+
+    switch(operation) {
+        case 'clear':
+            titleText = 'Confirm Cache Clear';
+            contentText = `Are you sure you want to clear cache for <strong>${environment}</strong> environment?`;
+            if (options.pattern) {
+                contentText += `<br><br>Pattern: <code>${options.pattern}</code>`;
+            } else {
+                contentText += '<br><br><span class="text-warning">This will clear ALL cache entries.</span>';
+            }
+            break;
+        case 'disable':
+            titleText = 'Confirm Cache Disable';
+            contentText = `Are you sure you want to disable cache for <strong>${environment}</strong> environment?`;
+            break;
+        case 'emergency-disable':
+            titleText = 'Emergency Cache Disable';
+            contentText = `<div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Emergency Operation</strong><br>
+                This will immediately disable caching for <strong>${environment}</strong> environment
+                and set admin override. Use only in emergency situations.
+            </div>`;
+            break;
+    }
+
+    title.textContent = titleText;
+    content.innerHTML = contentText;
+    modal.show();
+}
+
+async function executeConfirmedOperation() {
+    if (!pendingOperation) return;
+
+    const { operation, environment, options } = pendingOperation;
+    bootstrap.Modal.getInstance(document.getElementById('operationConfirmModal')).hide();
+
+    await executeOperation(operation, environment, options);
+    pendingOperation = null;
+}
+
+async function executeOperation(operation, environment, options = {}) {
+    try {
+        AdminUtils.showToast(`Executing ${operation} for ${environment}...`, 'info');
+
+        let url, method, body = null;
+
+        switch(operation) {
+            case 'enable':
+                url = `/api/cache/${environment}/enable`;
+                method = 'POST';
+                break;
+            case 'disable':
+            case 'emergency-disable':
+                url = `/api/cache/${environment}/disable`;
+                method = 'POST';
+                break;
+            case 'clear':
+                url = `/api/cache/${environment}/clear`;
+                method = 'POST';
+                if (options.pattern) {
+                    body = JSON.stringify({ pattern: options.pattern });
+                }
+                break;
+        }
+
+        const fetchOptions = { method };
+        if (body) {
+            fetchOptions.headers = { 'Content-Type': 'application/json' };
+            fetchOptions.body = body;
+        }
+
+        const response = await fetch(url, fetchOptions);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = await response.json();
+        AdminUtils.showToast(`${operation} completed successfully`, 'success');
+
+        // Log operation
+        logOperation(operation, environment, options, 'success');
+
+        // Refresh data
+        await loadCacheData();
+
+    } catch (error) {
+        console.error(`Error executing ${operation}:`, error);
+        AdminUtils.showToast(`Failed to execute ${operation}`, 'danger');
+        logOperation(operation, environment, options, 'error', error.message);
+    }
+}
+
+// Emergency Operations
+async function emergencyDisableAll() {
+    if (!confirm('Emergency disable cache for ALL environments? This should only be used in critical situations.')) {
+        return;
+    }
+
+    const environments = ['dev', 'test', 'prod'];
+    const results = [];
+
+    for (const env of environments) {
+        try {
+            await executeOperation('emergency-disable', env);
+            results.push(`${env}: Success`);
+        } catch (error) {
+            results.push(`${env}: Failed - ${error.message}`);
+        }
+    }
+
+    AdminUtils.showToast(`Emergency disable completed. Results: ${results.join(', ')}`, 'warning');
+}
+
+async function clearAllCaches() {
+    if (!confirm('Clear cache for ALL environments? This will remove all cached data.')) {
+        return;
+    }
+
+    const environments = ['dev', 'test', 'prod'];
+
+    for (const env of environments) {
+        await executeOperation('clear', env);
+    }
+
+    AdminUtils.showToast('All caches cleared', 'success');
+}
+
+// Policy Management
+async function loadPolicyEditors() {
+    const container = document.getElementById('policy-editors');
+
+    container.innerHTML = `
+        <div class="row">
+            ${['dev', 'test', 'prod'].map(env => `
+                <div class="col-lg-4">
+                    <div class="policy-section">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6><i class="bi bi-circle-fill text-${env === 'dev' ? 'success' : env === 'test' ? 'warning' : 'danger'} me-2" style="font-size: 0.5rem;"></i>${env.toUpperCase()}</h6>
+                            <button class="btn btn-outline-primary btn-sm" onclick="editPolicy('${env}')">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                        </div>
+                        <div id="policy-summary-${env}">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    // Load policy summaries
+    ['dev', 'test', 'prod'].forEach(env => {
+        updatePolicySummary(env);
+    });
+}
+
+function updatePolicySummary(environment) {
+    const envData = cacheData.environments?.[environment];
+    const policy = envData?.policy;
+
+    if (!policy) return;
+
+    const summary = document.getElementById(`policy-summary-${environment}`);
+
+    summary.innerHTML = `
+        <div class="small">
+            <div class="d-flex justify-content-between">
+                <span>Status:</span>
+                <span class="badge ${policy.cache_enabled ? 'bg-success' : 'bg-danger'}">${policy.cache_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div class="d-flex justify-content-between mt-1">
+                <span>Default TTL:</span>
+                <span>${policy.default_ttl_seconds}s</span>
+            </div>
+            <div class="d-flex justify-content-between mt-1">
+                <span>Short TTL:</span>
+                <span>${policy.short_ttl_seconds}s</span>
+            </div>
+            <div class="d-flex justify-content-between mt-1">
+                <span>Override:</span>
+                <span class="badge ${policy.admin_override ? 'bg-warning' : 'bg-secondary'}">${policy.admin_override ? 'Active' : 'None'}</span>
+            </div>
+            <div class="mt-2">
+                <small class="text-muted">No-Store: ${policy.no_store_pages.length} patterns</small><br>
+                <small class="text-muted">Short TTL: ${policy.short_ttl_pages.length} patterns</small>
+            </div>
+        </div>
+    `;
+}
+
+function editPolicy(environment) {
+    const envData = cacheData.environments?.[environment];
+    const policy = envData?.policy;
+
+    if (!policy) return;
+
+    // Populate form
+    document.getElementById('policy-environment').value = environment;
+    document.getElementById('policy-cache-enabled').value = policy.cache_enabled.toString();
+    document.getElementById('policy-admin-override').value = policy.admin_override.toString();
+    document.getElementById('policy-default-ttl').value = policy.default_ttl_seconds;
+    document.getElementById('policy-short-ttl').value = policy.short_ttl_seconds;
+    document.getElementById('policy-no-store-pages').value = policy.no_store_pages.join('\\n');
+    document.getElementById('policy-short-ttl-pages').value = policy.short_ttl_pages.join('\\n');
+
+    // Show modal
+    document.getElementById('policyEditorTitle').textContent = `Edit ${environment.toUpperCase()} Cache Policy`;
+    new bootstrap.Modal(document.getElementById('policyEditorModal')).show();
+}
+
+async function savePolicyForm() {
+    const environment = document.getElementById('policy-environment').value;
+
+    const updates = {
+        cache_enabled: document.getElementById('policy-cache-enabled').value === 'true',
+        admin_override: document.getElementById('policy-admin-override').value === 'true',
+        default_ttl_seconds: parseInt(document.getElementById('policy-default-ttl').value),
+        short_ttl_seconds: parseInt(document.getElementById('policy-short-ttl').value),
+        no_store_pages: document.getElementById('policy-no-store-pages').value.split('\\n').filter(p => p.trim()),
+        short_ttl_pages: document.getElementById('policy-short-ttl-pages').value.split('\\n').filter(p => p.trim())
+    };
+
+    try {
+        const response = await fetch(`/api/cache/${environment}/policy`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        AdminUtils.showToast(`Policy updated for ${environment}`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('policyEditorModal')).hide();
+
+        // Refresh data
+        await loadCacheData();
+        updatePolicySummary(environment);
+
+    } catch (error) {
+        console.error('Error saving policy:', error);
+        AdminUtils.showToast('Failed to save policy', 'danger');
+    }
+}
+
+// Compliance Validation
+async function loadComplianceData() {
+    const container = document.getElementById('compliance-results');
+
+    container.innerHTML = `
+        <div class="text-center text-muted py-4">
+            <div class="loading-spinner mb-2"></div>
+            <p>Validating compliance...</p>
+        </div>
+    `;
+
+    await validateCompliance();
+}
+
+async function validateCompliance() {
+    try {
+        const environments = ['dev', 'test', 'prod'];
+        const results = await Promise.all(
+            environments.map(env =>
+                fetch(`/api/cache/${env}/compliance`).then(r => r.json())
+            )
+        );
+
+        displayComplianceResults(results);
+
+    } catch (error) {
+        console.error('Error validating compliance:', error);
+        document.getElementById('compliance-results').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Failed to validate compliance: ${error.message}
+            </div>
+        `;
+    }
+}
+
+function displayComplianceResults(results) {
+    const container = document.getElementById('compliance-results');
+
+    const overall = results.every(r => r.compliant);
+
+    container.innerHTML = `
+        <div class="alert ${overall ? 'alert-success' : 'alert-warning'} mb-4">
+            <div class="d-flex align-items-center">
+                <i class="bi bi-${overall ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+                <strong>Overall Compliance: ${overall ? 'COMPLIANT' : 'ISSUES FOUND'}</strong>
+            </div>
+        </div>
+
+        <div class="row">
+            ${results.map(result => `
+                <div class="col-lg-4">
+                    <div class="card ${result.compliant ? 'border-success' : 'border-warning'}">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">${result.environment.toUpperCase()}</h6>
+                            <span class="badge ${result.compliant ? 'bg-success' : 'bg-warning'}">
+                                ${result.compliant ? 'Compliant' : 'Issues'}
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            ${result.issues.length === 0 ?
+                                '<p class="text-success small mb-0"><i class="bi bi-check-circle me-1"></i>All requirements met</p>' :
+                                `<div class="small">
+                                    ${result.issues.map(issue => `
+                                        <div class="text-warning mb-1">
+                                            <i class="bi bi-exclamation-triangle me-1"></i>${issue}
+                                        </div>
+                                    `).join('')}
+                                </div>`
+                            }
+                            <hr class="my-2">
+                            <div class="small text-muted">
+                                Validated: ${AdminUtils.formatTimestamp(result.timestamp)}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    // Update global compliance indicator
+    const indicator = document.getElementById('compliance-indicator');
+    if (overall) {
+        indicator.className = 'badge bg-success fs-6';
+        indicator.innerHTML = '<i class="bi bi-check-circle me-1"></i>Compliant';
+    } else {
+        indicator.className = 'badge bg-warning fs-6';
+        indicator.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Issues Found';
+    }
+}
+
+// Activity Feed
+function updateActivityFeed(message, level = 'info') {
+    const feed = document.getElementById('cache-activity-feed');
+    const timestamp = new Date().toLocaleTimeString();
+
+    const icon = {
+        'info': 'bi-info-circle',
+        'success': 'bi-check-circle',
+        'warning': 'bi-exclamation-triangle',
+        'error': 'bi-x-circle'
+    }[level] || 'bi-info-circle';
+
+    const color = {
+        'info': 'text-primary',
+        'success': 'text-success',
+        'warning': 'text-warning',
+        'error': 'text-danger'
+    }[level] || 'text-primary';
+
+    const activityHtml = `
+        <div class="cache-activity-item">
+            <div class="d-flex align-items-start">
+                <i class="bi ${icon} ${color} me-2 mt-1"></i>
+                <div class="flex-grow-1">
+                    <div>${message}</div>
+                    <div class="cache-activity-timestamp">${timestamp}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Clear loading state if present
+    if (feed.innerHTML.includes('Connecting to real-time feed')) {
+        feed.innerHTML = '';
+    }
+
+    feed.insertAdjacentHTML('afterbegin', activityHtml);
+
+    // Keep only last 50 entries
+    const items = feed.querySelectorAll('.cache-activity-item');
+    if (items.length > 50) {
+        items[items.length - 1].remove();
+    }
+}
+
+// Operation Logging
+function logOperation(operation, environment, options, status, error = null) {
+    const history = document.getElementById('operation-history');
+    const timestamp = new Date().toLocaleTimeString();
+
+    const statusClass = {
+        'success': 'success',
+        'error': 'error',
+        'warning': 'warning'
+    }[status] || 'success';
+
+    const operationHtml = `
+        <div class="operation-log-item ${statusClass}">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <strong>${operation.toUpperCase()}</strong> on ${environment}
+                    ${options.pattern ? `<br><small>Pattern: ${options.pattern}</small>` : ''}
+                    ${error ? `<br><small class="text-danger">Error: ${error}</small>` : ''}
+                </div>
+                <small class="text-muted">${timestamp}</small>
+            </div>
+        </div>
+    `;
+
+    // Clear empty state if present
+    if (history.innerHTML.includes('No recent operations')) {
+        history.innerHTML = '';
+    }
+
+    history.insertAdjacentHTML('afterbegin', operationHtml);
+
+    // Keep only last 20 entries
+    const items = history.querySelectorAll('.operation-log-item');
+    if (items.length > 20) {
+        items[items.length - 1].remove();
+    }
+
+    // Also add to activity feed
+    const activityMessage = `${operation} operation ${status} on ${environment}`;
+    updateActivityFeed(activityMessage, status);
+}
+
+// Environment Filtering
+function filterByEnvironment(environment) {
+    currentEnvironment = environment;
+    document.getElementById('cache-environment').textContent = environment === 'all' ? 'All' : environment.toUpperCase();
+    document.getElementById('cache-environment').className = `badge bg-${environment === 'all' ? 'primary' : 'info'}`;
+
+    // Refresh data for filtered view
+    loadCacheData();
+}
+
+// Export Functions
+async function exportCacheMetrics() {
+    try {
+        AdminUtils.showToast('Preparing cache metrics export...', 'info');
+
+        const response = await fetch('/api/cache/export-metrics');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cache-metrics-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        AdminUtils.showToast('Cache metrics exported successfully', 'success');
+
+    } catch (error) {
+        console.error('Error exporting metrics:', error);
+        AdminUtils.showToast('Failed to export metrics', 'danger');
+    }
+}
+
+// Refresh function
+async function refreshCacheData() {
+    AdminUtils.showToast('Refreshing cache data...', 'info');
+    await loadCacheData();
+    if (document.querySelector('#policies-pane.active')) {
+        loadPolicyEditors();
+    }
+    if (document.querySelector('#compliance-pane.active')) {
+        loadComplianceData();
+    }
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (metricsInterval) {
+        clearInterval(metricsInterval);
+    }
+    if (cacheWs) {
+        cacheWs.close();
+    }
+});
+</script>
 {% endblock %}
 
