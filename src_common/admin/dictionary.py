@@ -631,3 +631,75 @@ class AdminDictionaryService:
         except Exception as e:
             logger.warning(f"Could not sync term to graph store: {e}")
             # Don't fail the operation if graph sync fails
+
+    async def get_artifact_stats(self, environment: str) -> Dict[str, Any]:
+        """Return aggregate statistics for ingestion artifacts."""
+        env = environment.lower()
+        files = list(self._iter_artifact_files(env))
+        total_size = sum(item["size_bytes"] for item in files)
+        linked = [f for f in files if f.get("is_linked")]
+        return {
+            "environment": env,
+            "total_artifacts": len(files),
+            "total_size_bytes": total_size,
+            "linked_artifacts": len(linked),
+            "orphaned_artifacts": max(0, len(files) - len(linked)),
+            "sampled_at": time.time(),
+        }
+
+    async def list_artifacts(
+        self,
+        environment: str,
+        limit: int = 250,
+        artifact_type: Optional[str] = None,
+        source_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List artifacts (limited) for the requested environment."""
+        env = environment.lower()
+        results: List[Dict[str, Any]] = []
+        for record in self._iter_artifact_files(env):
+            if artifact_type and record["type"].lower() != artifact_type.lower():
+                continue
+            if source_filter and source_filter.lower() not in (record.get("source_id") or "").lower():
+                continue
+            results.append(record)
+            if len(results) >= limit:
+                break
+        return results
+
+    def _iter_artifact_files(self, environment: str) -> List[Dict[str, Any]]:
+        root = Path("artifacts") / "ingest" / environment
+        if not root.exists():
+            return []
+
+        records: List[Dict[str, Any]] = []
+        for job_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+            manifest = job_dir / "manifest.json"
+            source_id = None
+            if manifest.exists():
+                try:
+                    data = json.loads(manifest.read_text(encoding="utf-8"))
+                    source_id = data.get("source_file")
+                except Exception as exc:
+                    logger.debug(f"Failed to parse manifest {manifest}: {exc}")
+            for file_path in job_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                stat = file_path.stat()
+                rel_path = file_path.relative_to(job_dir)
+                record = {
+                    "id": f"{job_dir.name}:{rel_path.as_posix()}",
+                    "environment": environment,
+                    "job_id": job_dir.name,
+                    "source_id": source_id,
+                    "source": source_id or job_dir.name,
+                    "dictionary_entry": (source_id or rel_path.stem or job_dir.name),
+                    "name": file_path.name,
+                    "path": rel_path.as_posix(),
+                    "type": file_path.suffix.lstrip('.').lower() or 'unknown',
+                    "size_bytes": stat.st_size,
+                    "modified_at": stat.st_mtime,
+                    "is_linked": 'dictionary' in rel_path.parts or 'pass_e' in rel_path.as_posix(),
+                }
+                records.append(record)
+        return records

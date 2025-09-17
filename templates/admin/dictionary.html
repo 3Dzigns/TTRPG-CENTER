@@ -303,7 +303,7 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <label for="artifact-env-filter" class="form-label">Environment</label>
-                                <select class="form-select" id="artifact-env-filter" onchange="filterArtifacts()">
+                                <select class="form-select" id="artifact-env-filter" onchange="refreshArtifacts()">
                                     <option value="all">All Environments</option>
                                     <option value="dev">Development</option>
                                     <option value="test">Testing</option>
@@ -918,66 +918,92 @@ async function refreshArtifacts() {
 }
 
 async function loadArtifactsStats() {
-    try {
-        // Mock data for now - replace with actual API call
-        const stats = {
-            total_artifacts: 347,
-            total_size_bytes: 15728640, // ~15MB
-            linked_artifacts: 298,
-            orphaned_artifacts: 49
-        };
+      try {
+          const envFilter = document.getElementById('artifact-env-filter');
+          const selectedEnv = envFilter ? envFilter.value : 'dev';
+          const environments = selectedEnv === 'all' ? ['dev', 'test', 'prod'] : [selectedEnv];
 
-        document.getElementById('total-artifacts').textContent = stats.total_artifacts.toLocaleString();
-        document.getElementById('total-artifact-size').textContent = AdminUtils.formatBytes(stats.total_size_bytes);
-        document.getElementById('linked-artifacts').textContent = stats.linked_artifacts.toLocaleString();
-        document.getElementById('orphaned-artifacts').textContent = stats.orphaned_artifacts.toLocaleString();
+          let totalArtifacts = 0;
+          let totalSize = 0;
+          let linked = 0;
 
-    } catch (error) {
-        console.error('Failed to load artifacts stats:', error);
-        AdminUtils.showToast('Failed to load artifact statistics', 'danger');
-    }
-}
+          for (const env of environments) {
+              const response = await fetch(`/admin/api/dictionary/${env}/artifacts/stats`);
+              if (!response.ok) {
+                  throw new Error(`Failed to fetch artifact stats for ${env}`);
+              }
+              const stats = await response.json();
+              totalArtifacts += stats.total_artifacts || 0;
+              totalSize += stats.total_size_bytes || 0;
+              linked += stats.linked_artifacts || 0;
+          }
+
+          const orphaned = Math.max(0, totalArtifacts - linked);
+
+          document.getElementById('total-artifacts').textContent = totalArtifacts.toLocaleString();
+          document.getElementById('total-artifact-size').textContent = AdminUtils.formatBytes(totalSize);
+          document.getElementById('linked-artifacts').textContent = linked.toLocaleString();
+          document.getElementById('orphaned-artifacts').textContent = orphaned.toLocaleString();
+
+      } catch (error) {
+          console.error('Failed to load artifacts stats:', error);
+          AdminUtils.showToast('Failed to load artifact statistics', 'danger');
+      }
+  }
+
+
 
 async function loadArtifacts() {
-    try {
-        // Mock data for now - replace with actual API call
-        allArtifacts = generateMockArtifacts();
-        filteredArtifacts = [...allArtifacts];
-        updateArtifactsDisplay();
+      try {
+          const envFilter = document.getElementById('artifact-env-filter');
+          const typeFilter = document.getElementById('artifact-type-filter');
+          const sourceFilter = document.getElementById('artifact-source-filter');
+          const entryFilter = document.getElementById('artifact-entry-filter');
 
-    } catch (error) {
-        console.error('Failed to load artifacts:', error);
-        AdminUtils.showToast('Failed to load artifacts', 'danger');
-    }
-}
+          const selectedEnv = envFilter ? envFilter.value : 'dev';
+          const environments = selectedEnv === 'all' ? ['dev', 'test', 'prod'] : [selectedEnv];
+          const typeValue = typeFilter && typeFilter.value !== 'all' ? typeFilter.value : null;
+          const sourceValue = sourceFilter ? sourceFilter.value.trim() : '';
+          const entryValue = entryFilter ? entryFilter.value.trim() : '';
 
-function generateMockArtifacts() {
-    const environments = ['dev', 'test', 'prod'];
-    const types = ['json', 'text', 'log', 'metadata'];
-    const sources = ['Player\'s Handbook', 'Dungeon Master\'s Guide', 'Monster Manual', 'Xanathar\'s Guide', 'Tasha\'s Cauldron'];
-    const artifacts = [];
+          allArtifacts = [];
+          for (const env of environments) {
+              const params = new URLSearchParams({ limit: '250' });
+              if (typeValue) params.set('artifact_type', typeValue);
+              if (sourceValue) params.set('source', sourceValue);
+              const response = await fetch(`/admin/api/dictionary/${env}/artifacts?${params.toString()}`);
+              if (!response.ok) {
+                  throw new Error(`Failed to fetch artifacts for ${env}`);
+              }
+              const payload = await response.json();
+              const records = (payload.artifacts || []).map(item => ({ ...item, environment: item.environment || env }));
+              allArtifacts.push(...records);
+          }
 
-    for (let i = 0; i < 50; i++) {
-        const env = environments[i % environments.length];
-        const type = types[i % types.length];
-        const source = sources[i % sources.length];
+          filteredArtifacts = allArtifacts.filter(artifact => {
+              if (selectedEnv !== 'all' && artifact.environment !== selectedEnv) {
+                  return false;
+              }
+              if (entryValue) {
+                  const entry = artifact.source_id || '';
+                  if (!entry.toLowerCase().includes(entryValue.toLowerCase())) {
+                      return false;
+                  }
+              }
+              return true;
+          });
 
-        artifacts.push({
-            id: i + 1,
-            name: `artifact_${env}_${i.toString().padStart(3, '0')}.${type}`,
-            source: source,
-            dictionary_entry: `Entry ${i + 1}`,
-            chunk_page: `chunk_${i % 10}`,
-            type: type,
-            size_bytes: Math.floor(Math.random() * 1024 * 1024), // Random size up to 1MB
-            environment: env,
-            modified_at: Date.now() - (i * 3600000), // Hours ago
-            linked: Math.random() > 0.2 // 80% linked
-        });
-    }
+          updateArtifactsDisplay();
 
-    return artifacts;
-}
+      } catch (error) {
+          console.error('Failed to load artifacts:', error);
+          AdminUtils.showToast('Failed to load artifacts', 'danger');
+      }
+  }
+
+
+
+
 
 function updateArtifactsDisplay() {
     const tbody = document.getElementById('artifacts-table-body');
