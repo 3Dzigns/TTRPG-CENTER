@@ -27,6 +27,7 @@ from .admin import (
     AdminCacheService,
     AdminLogService
 )
+from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
 
 # Initialize logging and services
 logger = get_logger(__name__)
@@ -840,20 +841,67 @@ class BugCreateRequest(BaseModel):
     title: str
     description: str
     severity: str
+    priority: Optional[str] = "medium"
     status: Optional[str] = "open"
+    component: Optional[str] = "other"
     environment: str
+    assigned_to: Optional[str] = None
     expected_behavior: Optional[str] = None
     actual_behavior: Optional[str] = None
     steps_to_reproduce: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    labels: Optional[List[str]] = None
+    related_bugs: Optional[List[str]] = None
+    test_failure_id: Optional[str] = None
+    estimation_hours: Optional[float] = None
+    milestone: Optional[str] = None
+    version_found: Optional[str] = None
     created_by: Optional[str] = "admin"
 
 class BugUpdateRequest(BaseModel):
     status: Optional[str] = None
+    priority: Optional[str] = None
     assigned_to: Optional[str] = None
+    title: Optional[str] = None
     description: Optional[str] = None
     severity: Optional[str] = None
+    component: Optional[str] = None
     resolution: Optional[str] = None
+    expected_behavior: Optional[str] = None
+    actual_behavior: Optional[str] = None
+    steps_to_reproduce: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    labels: Optional[List[str]] = None
+    related_bugs: Optional[List[str]] = None
+    estimation_hours: Optional[float] = None
+    actual_hours: Optional[float] = None
+    milestone: Optional[str] = None
+    version_found: Optional[str] = None
+    version_fixed: Optional[str] = None
+
+class BugBulkUpdateRequest(BaseModel):
+    bug_ids: List[str]
+    updates: Dict[str, Any]
+    updated_by: Optional[str] = "admin"
+
+class BugSearchRequest(BaseModel):
+    query: str
+    environment: str
+    filters: Optional[Dict[str, Any]] = None
+    limit: Optional[int] = 50
+
+class BugFilterRequest(BaseModel):
+    environment: Optional[str] = None
+    status: Optional[str] = None
+    severity: Optional[str] = None
+    priority: Optional[str] = None
+    component: Optional[str] = None
+    assigned_to: Optional[str] = None
+    created_by: Optional[str] = None
+    tags: Optional[List[str]] = None
+    search: Optional[str] = None
+    limit: Optional[int] = 100
+    offset: Optional[int] = 0
 
 @admin_router.get("/api/admin/testing/overview")
 async def get_testing_overview():
@@ -974,20 +1022,59 @@ async def stop_all_tests(environment: str = "dev"):
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.get("/api/admin/testing/bugs")
-async def list_bugs(environment: Optional[str] = None, status: Optional[str] = None, severity: Optional[str] = None):
-    """List bugs, optionally filtered by environment, status, and severity"""
+async def list_bugs(
+    environment: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    component: Optional[str] = Query(None),
+    assigned_to: Optional[str] = Query(None),
+    created_by: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: Optional[int] = Query(100),
+    offset: Optional[int] = Query(0)
+):
+    """List bugs with comprehensive filtering support"""
     try:
         if environment and environment != 'all':
-            bugs = await testing_service.list_bugs(environment, status, severity)
+            bugs = await testing_service.list_bugs(
+                environment=environment,
+                status=status,
+                severity=severity,
+                priority=priority,
+                component=component,
+                assigned_to=assigned_to,
+                created_by=created_by,
+                search=search,
+                limit=limit,
+                offset=offset
+            )
         else:
             # Aggregate bugs from all environments
             all_bugs = []
+            env_limit = limit // 3 if limit else None  # Distribute limit across environments
             for env in ['dev', 'test', 'prod']:
-                env_bugs = await testing_service.list_bugs(env, status, severity)
+                env_bugs = await testing_service.list_bugs(
+                    environment=env,
+                    status=status,
+                    severity=severity,
+                    priority=priority,
+                    component=component,
+                    assigned_to=assigned_to,
+                    created_by=created_by,
+                    search=search,
+                    limit=env_limit,
+                    offset=offset
+                )
                 all_bugs.extend(env_bugs)
-            bugs = all_bugs
+            bugs = all_bugs[:limit] if limit else all_bugs
 
-        return JSONResponse(content=bugs)
+        return JSONResponse(content={
+            "bugs": bugs,
+            "total": len(bugs),
+            "offset": offset,
+            "limit": limit
+        })
     except Exception as e:
         logger.error(f"Error listing bugs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1025,19 +1112,15 @@ async def create_bug(request: BugCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.put("/api/admin/testing/bug/{bug_id}")
-async def update_bug(bug_id: str, request: BugUpdateRequest, environment: str):
-    """Update an existing bug report"""
+async def update_bug(bug_id: str, request: BugUpdateRequest, environment: str = Query(...), updated_by: str = Query("admin")):
+    """Update an existing bug report with activity tracking"""
     try:
         updates = request.dict(exclude_unset=True)
-        bug = await testing_service.update_bug(environment, bug_id, updates)
+        bug = await testing_service.update_bug(environment, bug_id, updates, updated_by)
         if not bug:
             raise HTTPException(status_code=404, detail="Bug not found")
 
-        # Convert BugSeverity enum to string for JSON serialization
-        bug_dict = asdict(bug)
-        bug_dict['severity'] = bug.severity.value
-
-        return JSONResponse(content=bug_dict)
+        return JSONResponse(content=testing_service._serialize_bug(bug))
     except HTTPException:
         raise
     except Exception as e:
@@ -1086,6 +1169,262 @@ async def export_test_results(environment: Optional[str] = None):
         )
     except Exception as e:
         logger.error(f"Error exporting test results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# Enhanced Bug Management API - FR-017
+# -------------------------
+
+@admin_router.post("/api/admin/testing/bugs/search")
+async def search_bugs(request: BugSearchRequest):
+    """Advanced search across bug data with relevance scoring"""
+    try:
+        results = await testing_service.search_bugs(
+            environment=request.environment,
+            query=request.query,
+            filters=request.filters
+        )
+
+        # Apply limit
+        if request.limit:
+            results = results[:request.limit]
+
+        return JSONResponse(content={
+            "query": request.query,
+            "environment": request.environment,
+            "results": results,
+            "total_matches": len(results)
+        })
+    except Exception as e:
+        logger.error(f"Error searching bugs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/bugs/bulk-update")
+async def bulk_update_bugs(request: BugBulkUpdateRequest):
+    """Perform bulk updates on multiple bugs"""
+    try:
+        if not request.bug_ids:
+            raise HTTPException(status_code=400, detail="No bug IDs provided")
+
+        if not request.updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        # Extract environment from the first bug (assuming all bugs are in same environment)
+        # In a real implementation, you might want to validate this
+        environment = request.updates.get('environment', 'dev')
+
+        results = await testing_service.bulk_update_bugs(
+            environment=environment,
+            bug_ids=request.bug_ids,
+            updates=request.updates,
+            updated_by=request.updated_by
+        )
+
+        return JSONResponse(content=results)
+    except Exception as e:
+        logger.error(f"Error in bulk update: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/bugs/bulk-assign")
+async def bulk_assign_bugs(
+    bug_ids: List[str],
+    assignee: str,
+    environment: str = Query(...),
+    assigned_by: str = Query("admin")
+):
+    """Bulk assign multiple bugs to a user"""
+    try:
+        if not bug_ids:
+            raise HTTPException(status_code=400, detail="No bug IDs provided")
+
+        results = await testing_service.bulk_assign_bugs(
+            environment=environment,
+            bug_ids=bug_ids,
+            assignee=assignee,
+            assigned_by=assigned_by
+        )
+
+        return JSONResponse(content=results)
+    except Exception as e:
+        logger.error(f"Error in bulk assignment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/create-bug-from-test-failure")
+async def create_bug_from_test_failure(
+    test_id: str,
+    execution_id: str,
+    environment: str,
+    created_by: str = Query("admin")
+):
+    """Automatically create a bug from a test failure"""
+    try:
+        # Get test execution details
+        executions = await testing_service.get_recent_executions(environment, limit=1000)
+        test_execution = None
+        for exec in executions:
+            if exec.execution_id == execution_id:
+                test_execution = exec
+                break
+
+        if not test_execution:
+            raise HTTPException(status_code=404, detail="Test execution not found")
+
+        # Get test definition
+        test_def = await testing_service.get_test(environment, test_id)
+        if not test_def:
+            raise HTTPException(status_code=404, detail="Test definition not found")
+
+        # Create bug from failure
+        bug = await testing_service.create_bug_from_test_failure(
+            environment=environment,
+            test_execution=test_execution,
+            test_definition=test_def,
+            created_by=created_by
+        )
+
+        return JSONResponse(content=testing_service._serialize_bug(bug))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating bug from test failure: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/bugs/analytics/{environment}")
+async def get_bug_analytics(
+    environment: str,
+    date_from: Optional[float] = Query(None),
+    date_to: Optional[float] = Query(None)
+):
+    """Get comprehensive analytics for bug data"""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        analytics = await testing_service.get_bug_analytics(
+            environment=environment,
+            date_from=date_from,
+            date_to=date_to
+        )
+
+        return JSONResponse(content=analytics)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating bug analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/bugs/filters/options")
+async def get_bug_filter_options(environment: Optional[str] = Query(None)):
+    """Get available filter options for bug management UI"""
+    try:
+
+        # Get all bugs to extract dynamic options
+        all_assignees = set()
+        all_creators = set()
+        all_tags = set()
+        all_labels = set()
+        all_milestones = set()
+
+        environments = [environment] if environment and environment != 'all' else ['dev', 'test', 'prod']
+
+        for env in environments:
+            bugs = await testing_service.list_bugs(env)
+            for bug in bugs:
+                if bug.get('assigned_to'):
+                    all_assignees.add(bug['assigned_to'])
+                if bug.get('created_by'):
+                    all_creators.add(bug['created_by'])
+                if bug.get('tags'):
+                    all_tags.update(bug['tags'])
+                if bug.get('labels'):
+                    all_labels.update(bug['labels'])
+                if bug.get('milestone'):
+                    all_milestones.add(bug['milestone'])
+
+        return JSONResponse(content={
+            "static_options": {
+                "severities": [s.value for s in BugSeverity],
+                "priorities": [p.value for p in BugPriority],
+                "statuses": [s.value for s in BugStatus],
+                "components": [c.value for c in BugComponent],
+                "environments": ['dev', 'test', 'prod']
+            },
+            "dynamic_options": {
+                "assignees": sorted(list(all_assignees)),
+                "creators": sorted(list(all_creators)),
+                "tags": sorted(list(all_tags)),
+                "labels": sorted(list(all_labels)),
+                "milestones": sorted(list(all_milestones))
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting filter options: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/testing/bugs/{bug_id}/activity")
+async def get_bug_activity(bug_id: str, environment: str = Query(...)):
+    """Get activity log for a specific bug"""
+    try:
+        bug = await testing_service.get_bug(environment, bug_id)
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug not found")
+
+        activity_log = bug.get('activity_log', [])
+        return JSONResponse(content={
+            "bug_id": bug_id,
+            "activity_log": activity_log,
+            "total_activities": len(activity_log)
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting bug activity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/testing/bugs/{bug_id}/comment")
+async def add_bug_comment(
+    bug_id: str,
+    comment: str,
+    environment: str = Query(...),
+    user: str = Query("admin")
+):
+    """Add a comment to a bug's activity log"""
+    try:
+        # This would require extending the update_bug method to handle comments
+        # For now, we'll add it as a custom activity
+        bugs = await testing_service._load_environment_bugs(environment)
+
+        for bug in bugs:
+            if bug.bug_id == bug_id:
+                from ..admin.testing import BugActivity
+
+                activity = BugActivity(
+                    activity_id=str(uuid.uuid4()),
+                    bug_id=bug_id,
+                    activity_type='commented',
+                    user=user,
+                    timestamp=time.time(),
+                    description=f"Added comment: {comment[:50]}{'...' if len(comment) > 50 else ''}",
+                    details={'comment': comment}
+                )
+
+                bug.activity_log.append(activity)
+                bug.last_updated = time.time()
+                bug.last_updated_by = user
+
+                await testing_service._save_bug(bug)
+
+                return JSONResponse(content={
+                    "status": "success",
+                    "activity_id": activity.activity_id,
+                    "message": "Comment added successfully"
+                })
+
+        raise HTTPException(status_code=404, detail="Bug not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding bug comment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.get("/admin/cache", response_class=HTMLResponse)
