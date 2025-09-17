@@ -165,6 +165,8 @@ graphs/
 indexes/
 knowledge_base/
 vector_store/
+!src_common/vector_store/
+!src_common/vector_store/**
 database/
 collections/
 

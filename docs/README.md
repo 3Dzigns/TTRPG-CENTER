@@ -98,7 +98,7 @@ TTRPG Center is built on a **7-phase development methodology** with strict **env
 - **Framework**: FastAPI with async support
 - **AI Models**: OpenAI GPT-4o/4o-mini, Claude 3 Sonnet/Haiku
 - **Document Processing**: unstructured.io, Haystack, LlamaIndex
-- **Database**: AstraDB with vector search, Neo4j for knowledge graphs
+- **Database**: Apache Cassandra (DEV/CI) via Docker, AstraDB optional fallback, Neo4j for knowledge graphs
 - **Testing**: pytest with comprehensive coverage
 
 ### Environment Structure
@@ -123,7 +123,8 @@ TTRPG_Center/
 - Python 3.12+
 - Git
 - OpenAI API key (optional for full functionality)
-- AstraDB instance (optional for full functionality)
+- Cassandra Docker service (required for DEV/CI vector store)
+- AstraDB credentials (optional fallback/production parity)
 
 ### 🪟 Windows Setup (Required Dependencies)
 
@@ -311,7 +312,7 @@ Dynamic model selection based on query characteristics:
 - **API Endpoints**: 15+ REST endpoints with WebSocket support
 - **Supported Formats**: PDF documents with multi-pass processing
 - **AI Model Integrations**: OpenAI, Claude, local model support
-- **Database Support**: AstraDB, Neo4j, local storage options
+- **Database Support**: Cassandra (DEV/CI), AstraDB (feature-flagged), Neo4j, local storage options
 
 ---
 

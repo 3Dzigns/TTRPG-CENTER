@@ -661,47 +661,28 @@ class PassEGraphBuilder:
         return edges_path
     
     def _batch_update_chunks(self, chunks: List[Dict[str, Any]]) -> int:
-        """Batch update chunks with graph metadata in AstraDB"""
-        
+        """Batch update chunks with graph metadata in the vector store."""
+
         if not chunks:
             return 0
-        
+
+        documents: List[Dict[str, Any]] = []
+        for chunk in chunks:
+            doc = dict(chunk)
+            doc['environment'] = self.env
+            doc.setdefault('updated_at', time.time())
+            doc.setdefault('loaded_at', time.time())
+            documents.append(doc)
+
         try:
-            if self.astra_loader.client:
-                collection = self.astra_loader.client.get_collection(self.astra_loader.collection_name)
-                
-                # Batch update with retry logic
-                batch_size = 30
-                updated_count = 0
-                
-                for i in range(0, len(chunks), batch_size):
-                    batch = chunks[i:i + batch_size]
-                    try:
-                        for chunk in batch:
-                            collection.find_one_and_replace(
-                                {"chunk_id": chunk["chunk_id"]}, 
-                                chunk, 
-                                upsert=True
-                            )
-                        updated_count += len(batch)
-                        
-                        # Rate limiting
-                        if i + batch_size < len(chunks):
-                            time.sleep(0.1)
-                            
-                    except Exception as e:
-                        logger.warning(f"Batch update failed for batch {i//batch_size + 1}: {e}")
-                
-                logger.info(f"Batch updated {updated_count} chunks with graph metadata in AstraDB")
-                return updated_count
-            else:
-                logger.info(f"SIMULATION: Would update {len(chunks)} chunks with graph metadata in AstraDB")
-                return len(chunks)
-                
-        except Exception as e:
-            logger.error(f"Failed to batch update chunks in AstraDB: {e}")
+            updated_count = self.astra_loader.store.upsert_documents(documents)
+            logger.info("Upserted %s graph-enriched chunks via backend=%s", updated_count, self.astra_loader.backend)
+            return updated_count
+        except Exception as exc:
+            if self.astra_loader.backend == 'astra' and ASTRA_REQUIRE_CREDS:
+                raise RuntimeError("Vector store credentials missing; cannot update graph metadata") from exc
+            logger.error("Failed to batch update chunks in vector store: %s", exc)
             return 0
-    
     def _update_manifest(
         self,
         output_dir: Path,

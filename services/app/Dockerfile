@@ -7,6 +7,8 @@ FROM python:3.12-slim AS builder
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    libev-dev \
+    pkg-config \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -36,6 +38,8 @@ RUN apt-get update && apt-get install -y \
     # OCR (Tesseract)
     tesseract-ocr \
     tesseract-ocr-eng \
+    # Cassandra runtime
+    libev4 \
     # Image processing
     libmagic1 \
     # Cleanup

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FR-031 Cassandra Vector Store (DEV/CI)** - Local vector storage now runs on Apache Cassandra via Docker (replaces Astra dependency)
+  - Added pluggable vector store abstraction with Cassandra and Astra implementations
+  - Updated ingestion passes, admin/dashboard endpoints, and retriever to use the new backend
+  - Docker Compose now provisions a cassandra:5 service with health checks and env wiring
+  - Added cassandra-driver dependency and configuration/env templates for dev/test pipelines
+  - Authored Cassandra setup runbook and docs updates covering feature flag, schema, and troubleshooting
+
 - **FR-023 Persona Testing Framework** - Complete implementation of persona-aware testing and validation system
   - Comprehensive persona management system with 7+ predefined user types and experience levels
   - Query-time persona context extraction and response appropriateness validation
