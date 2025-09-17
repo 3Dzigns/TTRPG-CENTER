@@ -43,9 +43,11 @@ def load_dotenv_into_env(dotenv_path: Path) -> None:
 
 
 def openai_chat(model: str, system_prompt: str, user_prompt: str, api_key: str) -> str:
-    # Map router model names to deployed models
+    # Map router model names to deployed models with GPT-5 support
+    gpt5_enabled = os.getenv("OPENAI_GPT5_ENABLED", "false").lower() == "true"
+
     model_map = {
-        "gpt-5-large": "gpt-4o",  # fallback
+        "gpt-5-large": "gpt-5" if gpt5_enabled else "gpt-4o",  # Use GPT-5 when enabled, fallback to gpt-4o
         "gpt-4o-mini": "gpt-4o-mini",
         "gpt-4o": "gpt-4o",
     }
@@ -64,10 +66,33 @@ def openai_chat(model: str, system_prompt: str, user_prompt: str, api_key: str) 
         "temperature": 0.2,
     }
     with httpx.Client(timeout=60) as client:
-        resp = client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+        try:
+            resp = client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Log model usage telemetry
+            usage = data.get("usage", {})
+            print(f"Model usage: {model_name}, prompt_tokens: {usage.get('prompt_tokens', 0)}, completion_tokens: {usage.get('completion_tokens', 0)}, total_tokens: {usage.get('total_tokens', 0)}", file=sys.stderr)
+
+            return data["choices"][0]["message"]["content"].strip()
+        except httpx.HTTPStatusError as e:
+            # If GPT-5 is unavailable (404, 400) and we were trying GPT-5, fallback to GPT-4o
+            if model_name == "gpt-5" and e.response.status_code in (400, 404):
+                print(f"GPT-5 unavailable (status {e.response.status_code}), falling back to GPT-4o", file=sys.stderr)
+                fallback_payload = payload.copy()
+                fallback_payload["model"] = "gpt-4o"
+                resp = client.post(url, headers=headers, json=fallback_payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+                # Log fallback model usage telemetry
+                usage = data.get("usage", {})
+                print(f"Fallback model usage: gpt-4o, prompt_tokens: {usage.get('prompt_tokens', 0)}, completion_tokens: {usage.get('completion_tokens', 0)}, total_tokens: {usage.get('total_tokens', 0)}", file=sys.stderr)
+
+                return data["choices"][0]["message"]["content"].strip()
+            else:
+                raise
 
 
 def run_query(env: str, query: str) -> Dict[str, Any]:
