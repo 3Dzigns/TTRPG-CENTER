@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEHRL Management - TTRPG Center Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .correction-card {
+            border-left: 4px solid;
+            margin-bottom: 1rem;
+        }
+        .correction-card.confidence-high {
+            border-left-color: #28a745;
+        }
+        .correction-card.confidence-medium {
+            border-left-color: #ffc107;
+        }
+        .correction-card.confidence-low {
+            border-left-color: #dc3545;
+        }
+        .confidence-badge {
+            font-weight: bold;
+        }
+        .correction-diff {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+        .diff-old {
+            background-color: #f8d7da;
+            text-decoration: line-through;
+        }
+        .diff-new {
+            background-color: #d4edda;
+            font-weight: bold;
+        }
+        .correction-actions {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #dee2e6;
+        }
+        .correction-metadata {
+            font-size: 0.875rem;
+            color: #6c757d;
+        }
+        .loading-spinner {
+            display: none;
+        }
+        .filter-bar {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1.5rem;
+        }
+        .metrics-card {
+            margin-bottom: 1rem;
+        }
+        .alert-item {
+            border-left: 4px solid;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0.25rem;
+        }
+        .alert-high {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .alert-medium {
+            border-left-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        .alert-low {
+            border-left-color: #17a2b8;
+            background-color: #d1ecf1;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/admin">
+                <i class="bi bi-shield-check"></i> TTRPG Center Admin
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/ingestion">Ingestion</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/hgrn">HGRN Recommendations</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/admin/aehrl">AEHRL Management</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/logs">Logs</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1><i class="bi bi-robot"></i> AEHRL Management</h1>
+                    <div>
+                        <button class="btn btn-outline-primary" onclick="refreshData()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                        <div class="loading-spinner d-inline-block ms-2">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics Dashboard -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card bg-info text-white metrics-card">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-bar-chart-fill fs-1 me-3"></i>
+                                    <div>
+                                        <h5 class="card-title mb-0">Avg Support Rate</h5>
+                                        <h3 class="mb-0" id="avgSupportRate">--%</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-warning text-dark metrics-card">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-exclamation-triangle-fill fs-1 me-3"></i>
+                                    <div>
+                                        <h5 class="card-title mb-0">Hallucination Rate</h5>
+                                        <h3 class="mb-0" id="hallucinationRate">--%</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-primary text-white metrics-card">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-tools fs-1 me-3"></i>
+                                    <div>
+                                        <h5 class="card-title mb-0">Pending Corrections</h5>
+                                        <h3 class="mb-0" id="pendingCorrections">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-danger text-white metrics-card">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-bell-fill fs-1 me-3"></i>
+                                    <div>
+                                        <h5 class="card-title mb-0">Recent Alerts</h5>
+                                        <h3 class="mb-0" id="recentAlerts">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for different views -->
+                <ul class="nav nav-tabs" id="aehrlTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="corrections-tab" data-bs-toggle="tab" data-bs-target="#corrections" type="button" role="tab">
+                            <i class="bi bi-tools"></i> Correction Recommendations
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics" type="button" role="tab">
+                            <i class="bi bi-graph-up"></i> Metrics & Trends
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="alerts-tab" data-bs-toggle="tab" data-bs-target="#alerts" type="button" role="tab">
+                            <i class="bi bi-bell"></i> Alerts & Notifications
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="aehrlTabContent">
+                    <!-- Corrections Tab -->
+                    <div class="tab-pane fade show active" id="corrections" role="tabpanel">
+                        <div class="mt-3">
+                            <!-- Filter Bar -->
+                            <div class="filter-bar">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <label for="typeFilter" class="form-label">Correction Type</label>
+                                        <select class="form-select" id="typeFilter" onchange="filterCorrections()">
+                                            <option value="">All Types</option>
+                                            <option value="dictionary_update">Dictionary Update</option>
+                                            <option value="graph_edge_fix">Graph Edge Fix</option>
+                                            <option value="graph_node_fix">Graph Node Fix</option>
+                                            <option value="metadata_correction">Metadata Correction</option>
+                                            <option value="chunk_revision">Chunk Revision</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="confidenceFilter" class="form-label">Confidence</label>
+                                        <select class="form-select" id="confidenceFilter" onchange="filterCorrections()">
+                                            <option value="">All Confidence Levels</option>
+                                            <option value="high">High (≥80%)</option>
+                                            <option value="medium">Medium (60-79%)</option>
+                                            <option value="low">Low (<60%)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="jobFilter" class="form-label">Job ID</label>
+                                        <input type="text" class="form-control" id="jobFilter" placeholder="Filter by job..." onchange="filterCorrections()">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="sortBy" class="form-label">Sort By</label>
+                                        <select class="form-select" id="sortBy" onchange="filterCorrections()">
+                                            <option value="confidence">Confidence</option>
+                                            <option value="created_at">Created Date</option>
+                                            <option value="type">Type</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Corrections List -->
+                            <div id="correctionsContainer">
+                                <!-- Corrections will be loaded here -->
+                            </div>
+
+                            <!-- Empty State -->
+                            <div id="correctionsEmptyState" class="text-center py-5" style="display: none;">
+                                <i class="bi bi-tools fs-1 text-muted"></i>
+                                <h3 class="text-muted mt-3">No Correction Recommendations</h3>
+                                <p class="text-muted">No pending corrections found for the current filters.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metrics Tab -->
+                    <div class="tab-pane fade" id="metrics" role="tabpanel">
+                        <div class="mt-3">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h5><i class="bi bi-graph-up"></i> Evaluation Metrics (Last 7 Days)</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div id="metricsContent">
+                                                <p class="text-muted">Loading metrics...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h5><i class="bi bi-tools"></i> Correction Statistics</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div id="correctionStatsContent">
+                                                <p class="text-muted">Loading statistics...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Alerts Tab -->
+                    <div class="tab-pane fade" id="alerts" role="tabpanel">
+                        <div class="mt-3">
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5><i class="bi bi-bell"></i> Recent Alerts (Last 24 Hours)</h5>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="loadAlerts()">
+                                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                                    </button>
+                                </div>
+                                <div class="card-body">
+                                    <div id="alertsContainer">
+                                        <p class="text-muted">Loading alerts...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Correction Action Modal -->
+    <div class="modal fade" id="actionModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="actionModalTitle">Confirm Action</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="actionModalBody">Are you sure you want to perform this action?</p>
+                    <div id="rejectionReasonGroup" style="display: none;">
+                        <label for="rejectionReason" class="form-label">Reason for rejection:</label>
+                        <textarea class="form-control" id="rejectionReason" rows="3" placeholder="Please provide a reason for rejecting this correction..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmActionBtn">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/aehrl_management.js"></script>
+</body>
+</html>
