@@ -58,7 +58,7 @@ SPLIT_BY = os.getenv("SPLIT_BY", "word")
 # We use dimensionality reduction to fit within AstraDB collection index requirements
 OPENAI_MODEL_DIM = 1536  # Native text-embedding-3-small dimensions
 MODEL_DIM = int(os.getenv("MODEL_DIM", "1024"))  # BUG-014: Standardized to 1024 dimensions
-VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "json")
+VECTOR_BACKEND = (os.getenv('VECTOR_BACKEND') or os.getenv('VECTOR_STORE_BACKEND', 'json')).strip().lower()
 EMBED_DIM_REDUCTION = os.getenv("EMBED_DIM_REDUCTION", "pca-1024")  # BUG-014: Default to 1024-d reduction
 ABORT_ON_INCOMPATIBLE_VECTOR = os.getenv("ABORT_ON_INCOMPATIBLE_VECTOR", "true").lower() == "true"
 ASTRA_REQUIRE_CREDS = os.getenv('ASTRA_REQUIRE_CREDS', 'true').strip().lower() in ('1','true','yes')
@@ -210,7 +210,7 @@ def preflight_embeddings(model_dim: int = MODEL_DIM, backend: str = VECTOR_BACKE
     
     Args:
         model_dim: Embedding model dimension
-        backend: Vector storage backend ('json' or 'astra_vector')
+        backend: Vector storage backend ('json', 'astra_vector', or 'cassandra')
         
     Raises:
         SystemExit: If configuration is incompatible
@@ -720,77 +720,53 @@ class PassDVectorEnricher:
         logger.info(f"Wrote enrichment report to {output_path}")
     
     def _batch_upsert_vectors(self, chunks: List[VectorizedChunk]) -> int:
-        """Batch upsert vectorized chunks to AstraDB"""
-        
+        """Batch upsert vectorized chunks to the configured vector store."""
+
         if not chunks:
             return 0
-        
-        # Convert to AstraDB format
-        documents = []
+
+        documents: List[Dict[str, Any]] = []
         for chunk in chunks:
-            doc = {
-                'chunk_id': chunk.chunk_id,
-                'content': chunk.content,
-                'stage': chunk.stage,
-                'source_id': chunk.source_id,
-                'section_id': chunk.section_id,
-                'page_span': chunk.page_span,
-                'toc_path': chunk.toc_path,
-                'element_type': chunk.element_type,
-                'page_number': chunk.page_number,
-                'embedding': chunk.embedding,
-                'embedding_model': chunk.embedding_model,
-                'entities': chunk.entities or [],
-                'keywords': chunk.keywords or [],
-                'chunk_hash': chunk.chunk_hash,
-                'vector_id': chunk.vector_id,
-                'confidence_score': chunk.confidence_score,
-                'coordinates': chunk.coordinates,
-                'metadata': chunk.metadata or {},
-                'environment': self.env,
-                'updated_at': time.time()
-            }
-            documents.append(doc)
-        
+            metadata = dict(chunk.metadata or {})
+            metadata.setdefault('job_id', chunk.source_id or self.job_id)
+            metadata.setdefault('environment', self.env)
+            documents.append(
+                {
+                    'chunk_id': chunk.chunk_id,
+                    'content': chunk.content,
+                    'stage': chunk.stage,
+                    'source_hash': metadata.get('source_hash'),
+                    'source_file': metadata.get('source_file'),
+                    'source_id': chunk.source_id,
+                    'section_id': chunk.section_id,
+                    'page_span': chunk.page_span,
+                    'toc_path': chunk.toc_path,
+                    'element_type': chunk.element_type,
+                    'page_number': chunk.page_number,
+                    'embedding': chunk.embedding,
+                    'embedding_model': chunk.embedding_model,
+                    'entities': chunk.entities or [],
+                    'keywords': chunk.keywords or [],
+                    'chunk_hash': chunk.chunk_hash,
+                    'vector_id': chunk.vector_id,
+                    'confidence_score': chunk.confidence_score,
+                    'coordinates': chunk.coordinates,
+                    'metadata': metadata,
+                    'environment': self.env,
+                    'updated_at': time.time(),
+                    'loaded_at': time.time(),
+                }
+            )
+
         try:
-            if self.astra_loader.client:
-                collection = self.astra_loader.client.get_collection(self.astra_loader.collection_name)
-                
-                # Batch upsert with retry logic
-                batch_size = 50
-                loaded_count = 0
-                
-                for i in range(0, len(documents), batch_size):
-                    batch = documents[i:i + batch_size]
-                    try:
-                        # Use upsert_many for batch operations
-                        for doc in batch:
-                            collection.find_one_and_replace(
-                                {"chunk_id": doc["chunk_id"]}, 
-                                doc, 
-                                upsert=True
-                            )
-                        loaded_count += len(batch)
-                        
-                        # Rate limiting
-                        if i + batch_size < len(documents):
-                            time.sleep(0.1)
-                            
-                    except Exception as e:
-                        logger.warning(f"Batch upsert failed for batch {i//batch_size + 1}: {e}")
-                
-                logger.info(f"Batch upserted {loaded_count} vectorized chunks to AstraDB")
-                return loaded_count
-            else:
-                if ASTRA_REQUIRE_CREDS:
-                    raise RuntimeError("AstraDB credentials missing; cannot upsert vectors in strict mode")
-                logger.info(f"SIMULATION: Would upsert {len(documents)} vectorized chunks to AstraDB (simulation allowed)")
-                return len(documents)
-                
-        except Exception as e:
-            logger.error(f"Failed to batch upsert chunks to AstraDB: {e}")
+            loaded_count = self.astra_loader.store.upsert_documents(documents)
+            logger.info("Upserted %s vectorized chunks via backend=%s", loaded_count, self.astra_loader.backend)
+            return loaded_count
+        except Exception as exc:
+            if ASTRA_REQUIRE_CREDS and self.astra_loader.backend == 'astra':
+                raise RuntimeError("Vector store credentials missing; cannot upsert vectors") from exc
+            logger.error("Failed to batch upsert chunks to vector store: %s", exc)
             return 0
-    
     def _update_manifest(
         self,
         output_dir: Path,

@@ -59,27 +59,28 @@ class PassCBypassValidator:
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         
         # Initialize AstraDB connection
-        self._astra_client = None
+        self._vector_store = None
         self._init_astra_client()
     
     def _init_astra_client(self):
-        """Initialize AstraDB client for chunk counting"""
+        """Initialize vector store client for chunk counting."""
         try:
-            # Import AstraLoader to reuse its connection logic
             from .astra_loader import AstraLoader
+
             loader = AstraLoader(env=self.env)
-            self._astra_client = loader.client
+            self._vector_store = loader.store
             self._collection_name = loader.collection_name
-            
-            if self._astra_client is None:
-                self.logger.warning("AstraDB client not available - bypass validation will use simulation mode")
+            if self._vector_store is None:
+                self.logger.warning("Vector store not available; bypass validation will use simulation mode")
             else:
-                self.logger.info(f"PassC bypass validator initialized with AstraDB collection: {self._collection_name}")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to initialize AstraDB client for bypass validation: {e}")
-            self._astra_client = None
-    
+                self.logger.info(
+                    "PassC bypass validator initialized with vector backend %s (collection=%s)",
+                    loader.backend,
+                    self._collection_name,
+                )
+        except Exception as e:  # pragma: no cover - initialization failure
+            self.logger.error(f"Failed to initialize vector store for bypass validation: {e}")
+            self._vector_store = None
     def check_source_processed(self, source_hash: str) -> Optional[ProcessingRecord]:
         """
         Check if a source with given hash has been processed before
@@ -114,35 +115,17 @@ class PassCBypassValidator:
             return None
     
     def get_astra_chunk_count_by_source(self, source_hash: str) -> int:
-        """
-        Get chunk count from AstraDB for a specific source hash
-        
-        Args:
-            source_hash: SHA-256 hash of the source file
-            
-        Returns:
-            Count of chunks in AstraDB for this source
-        """
-        if self._astra_client is None:
-            self.logger.warning("AstraDB client not available - returning 0 chunk count")
+        """Get chunk count from the vector store for a specific source hash."""
+        if self._vector_store is None:
+            self.logger.warning("Vector store not available - returning 0 chunk count")
             return 0
-        
         try:
-            collection = self._astra_client.get_collection(self._collection_name)
-            
-            # Query for chunks with matching source hash in metadata
-            count = collection.count_documents(
-                {"metadata.source_hash": source_hash},
-                upper_bound=10000
-            )
-            
-            self.logger.debug(f"Found {count} chunks in AstraDB for source hash {source_hash}")
+            count = self._vector_store.count_documents_for_source(source_hash)
+            self.logger.debug("Found %s chunks in vector store for source hash %s", count, source_hash)
             return count
-            
         except Exception as e:
-            self.logger.error(f"Error querying AstraDB chunk count for hash {source_hash}: {e}")
+            self.logger.error(f"Error querying vector store chunk count for hash {source_hash}: {e}")
             return 0
-    
     def validate_chunk_count_match(self, source_hash: str, expected_count: int) -> bool:
         """
         Validate that expected chunk count matches actual AstraDB chunk count
@@ -280,50 +263,16 @@ class PassCBypassValidator:
             return False
     
     def remove_chunks_for_source(self, source_hash: str) -> int:
-        """
-        Remove all chunks for a specific source hash from AstraDB
-        
-        Args:
-            source_hash: SHA-256 hash of the source file
-            
-        Returns:
-            Number of chunks removed, -1 if error
-        """
-        if self._astra_client is None:
-            self.logger.warning("AstraDB client not available - cannot remove chunks")
+        """Remove all chunks for a specific source hash from the vector store."""
+        if self._vector_store is None:
+            self.logger.warning("Vector store not available - cannot remove chunks")
             return -1
-        
         try:
-            collection = self._astra_client.get_collection(self._collection_name)
-            
-            # Delete all chunks with matching source hash
-            delete_result = collection.delete_many({"metadata.source_hash": source_hash})
-            
-            # Handle various possible return formats
-            deleted_count = 0
-            if hasattr(delete_result, 'deleted_count'):
-                deleted_count = delete_result.deleted_count
-            elif hasattr(delete_result, 'deletedCount'):
-                deleted_count = delete_result.deletedCount
-            elif isinstance(delete_result, dict):
-                deleted_count = delete_result.get('deletedCount', delete_result.get('deleted_count', 0))
-            
-            self.logger.info(f"Removed {deleted_count} chunks for source hash {source_hash[:12]}...")
-            return deleted_count
-            
+            removed = self._vector_store.delete_by_source_hash(source_hash)
+            self.logger.info(
+                "Removed %s chunks for source hash %s", removed, source_hash[:12]
+            )
+            return removed
         except Exception as e:
             self.logger.error(f"Error removing chunks for source hash {source_hash}: {e}")
             return -1
-
-
-def get_bypass_validator(environment: str) -> PassCBypassValidator:
-    """
-    Factory function to get a configured bypass validator
-    
-    Args:
-        environment: Environment (dev/test/prod)
-        
-    Returns:
-        Configured PassCBypassValidator instance
-    """
-    return PassCBypassValidator(environment)

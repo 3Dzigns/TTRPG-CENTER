@@ -550,49 +550,45 @@ class PassCExtractor:
         logger.info(f"Wrote {len(chunks)} chunks to {output_path}")
     
     def _load_chunks_to_astra(self, chunks: List[RawChunk]) -> int:
-        """Load raw chunks to AstraDB collection"""
-        
+        """Persist raw chunks to the configured vector store."""
+
         if not chunks:
             return 0
-        
-        # Convert to AstraDB format
-        documents = []
+
+        documents: List[Dict[str, Any]] = []
         for chunk in chunks:
-            doc = {
-                'chunk_id': chunk.chunk_id,
-                'content': chunk.content,
-                'stage': chunk.stage,
-                'source_id': chunk.source_id,
-                'section_id': chunk.section_id,
-                'page_span': chunk.page_span,
-                'toc_path': chunk.toc_path,
-                'element_type': chunk.element_type,
-                'page_number': chunk.page_number,
-                'coordinates': chunk.coordinates,
-                'metadata': chunk.metadata or {},
-                'environment': self.env,
-                'loaded_at': time.time()
-            }
-            documents.append(doc)
-        
+            metadata = dict(chunk.metadata or {})
+            metadata.setdefault('job_id', self.job_id)
+            metadata.setdefault('environment', self.env)
+            documents.append(
+                {
+                    'chunk_id': chunk.chunk_id,
+                    'content': chunk.content,
+                    'stage': chunk.stage,
+                    'source_id': chunk.source_id,
+                    'section_id': chunk.section_id,
+                    'page_span': chunk.page_span,
+                    'toc_path': chunk.toc_path,
+                    'element_type': chunk.element_type,
+                    'page_number': chunk.page_number,
+                    'coordinates': chunk.coordinates,
+                    'metadata': metadata,
+                    'environment': self.env,
+                    'source_hash': metadata.get('source_hash'),
+                    'source_file': metadata.get('source_file'),
+                    'loaded_at': time.time(),
+                }
+            )
+
         try:
-            # Use AstraLoader to insert chunks
-            if self.astra_loader.client:
-                collection = self.astra_loader.client.get_collection(self.astra_loader.collection_name)
-                insert_result = collection.insert_many(documents)
-                loaded_count = len(insert_result.inserted_ids) if insert_result.inserted_ids else len(documents)
-                logger.info(f"Loaded {loaded_count} raw chunks to AstraDB")
-                return loaded_count
-            else:
-                if ASTRA_REQUIRE_CREDS:
-                    raise RuntimeError("AstraDB credentials missing; set in env/<env>/config/.env or disable strict mode")
-                logger.info(f"SIMULATION: Would load {len(documents)} raw chunks to AstraDB (simulation allowed)")
-                return len(documents)
-                
-        except Exception as e:
-            logger.error(f"Failed to load chunks to AstraDB: {e}")
+            loaded_count = self.astra_loader.store.upsert_documents(documents)
+            logger.info("Stored %s raw chunks via backend=%s", loaded_count, self.astra_loader.backend)
+            return loaded_count
+        except Exception as exc:
+            if ASTRA_REQUIRE_CREDS and self.astra_loader.backend == 'astra':
+                raise RuntimeError("Vector store credentials missing or invalid") from exc
+            logger.error("Failed to load chunks to vector store: %s", exc)
             return 0
-    
     def _get_page_count(self, pdf_path: Path) -> int:
         """Get total page count of PDF"""
         try:

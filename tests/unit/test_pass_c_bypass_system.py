@@ -383,105 +383,96 @@ class TestArtifactPreservationManager:
         assert marker_data["environment"] == "dev"
 
 
+
 class TestAstraLoaderEnhancements:
-    """Test enhanced AstraLoader functionality for bypass system"""
-    
+    """Test vector-store-backed AstraLoader functionality."""
+
     @pytest.fixture
-    def mock_astra_collection(self):
-        """Mock AstraDB collection"""
-        mock_collection = Mock()
-        mock_delete_result = Mock()
-        mock_delete_result.deleted_count = 100
-        mock_collection.delete_many.return_value = mock_delete_result
-        
-        mock_insert_result = Mock()
-        mock_insert_result.inserted_ids = ["id1", "id2", "id3"]
-        mock_collection.insert_many.return_value = mock_insert_result
-        
-        mock_collection.count_documents.return_value = 150
-        
-        return mock_collection
-    
+    def mock_store(self):
+        store = Mock()
+        store.backend_name = "astra"
+        store.collection_name = "ttrpg_chunks_dev"
+        store.upsert_documents.return_value = 2
+        store.delete_by_source_hash.return_value = 1
+        store.count_documents_for_source.return_value = 150
+        store.count_documents.return_value = 200
+        store.get_sources_with_chunk_counts.return_value = {
+            "status": "ready",
+            "environment": "dev",
+            "sources": [
+                {
+                    "source_hash": "job123",
+                    "source_file": "Unknown Source",
+                    "chunk_count": 7,
+                    "last_updated": 123.0,
+                }
+            ],
+            "total_sources": 1,
+            "total_chunks": 7,
+            "collection_name": "ttrpg_chunks_dev",
+        }
+        return store
+
     @pytest.fixture
-    def loader_with_mock_client(self, mock_astra_collection):
-        """AstraLoader with mocked client"""
+    def loader_with_mock_store(self, monkeypatch, mock_store):
+        monkeypatch.setattr("src_common.astra_loader.make_vector_store", lambda env: mock_store)
         loader = AstraLoader("dev")
-        loader.client = Mock()
-        loader.client.get_collection.return_value = mock_astra_collection
-        return loader, mock_astra_collection
-    
-    def test_safe_upsert_chunks_success(self, loader_with_mock_client):
-        """Test safe chunk upsert - success"""
-        loader, mock_collection = loader_with_mock_client
-        
+        return loader, mock_store
+
+    def test_safe_upsert_chunks_success(self, loader_with_mock_store):
+        loader, store = loader_with_mock_store
         test_chunks = [
-            {
-                "id": "chunk1",
-                "content": "Test content 1",
-                "metadata": {"page": 1}
-            },
-            {
-                "id": "chunk2", 
-                "content": "Test content 2",
-                "metadata": {"page": 2}
-            }
+            {"id": "chunk1", "content": "Test content 1", "metadata": {"page": 1}},
+            {"id": "chunk2", "content": "Test content 2", "metadata": {"page": 2}},
         ]
-        
+
         result = loader.safe_upsert_chunks_for_source(test_chunks, "abcd1234")
-        
+
+        store.delete_by_source_hash.assert_called_once_with("abcd1234")
+        store.upsert_documents.assert_called_once()
+        docs = store.upsert_documents.call_args[0][0]
+        assert all(doc["metadata"].get("source_hash") == "abcd1234" for doc in docs)
         assert result.success is True
-        assert result.chunks_loaded == 3  # Based on mock inserted_ids
-        
-        # Verify delete was called first
-        mock_collection.delete_many.assert_called_once_with({"metadata.source_hash": "abcd1234"})
-        
-        # Verify insert was called with proper metadata
-        mock_collection.insert_many.assert_called_once()
-        call_args = mock_collection.insert_many.call_args[0][0]
-        
-        # Check that source_hash was added to metadata
-        for doc in call_args:
-            assert doc["metadata"]["source_hash"] == "abcd1234"
-    
-    def test_validate_chunk_integrity_success(self, loader_with_mock_client):
-        """Test chunk integrity validation - success"""
-        loader, mock_collection = loader_with_mock_client
-        
+        assert result.chunks_loaded == store.upsert_documents.return_value
+    def test_validate_chunk_integrity_success(self, loader_with_mock_store):
+        loader, store = loader_with_mock_store
+        store.count_documents_for_source.return_value = 150
+
         result = loader.validate_chunk_integrity("abcd1234", 150)
-        
+
+        store.count_documents_for_source.assert_called_once_with("abcd1234")
         assert result["integrity_valid"] is True
         assert result["expected_count"] == 150
         assert result["actual_count"] == 150
         assert result["status"] == "validated"
-    
-    def test_validate_chunk_integrity_mismatch(self, loader_with_mock_client):
-        """Test chunk integrity validation - count mismatch"""
-        loader, mock_collection = loader_with_mock_client
-        mock_collection.count_documents.return_value = 120  # Different count
-        
+
+    def test_validate_chunk_integrity_mismatch(self, loader_with_mock_store):
+        loader, store = loader_with_mock_store
+        store.count_documents_for_source.return_value = 120
+
         result = loader.validate_chunk_integrity("abcd1234", 150)
-        
+
         assert result["integrity_valid"] is False
-        assert result["expected_count"] == 150
         assert result["actual_count"] == 120
-        assert result["status"] == "validated"
-    
-    def test_safe_upsert_simulation_mode(self):
-        """Test safe upsert in simulation mode"""
-        loader = AstraLoader("dev")
-        loader.client = None  # Simulation mode
-        
-        test_chunks = [{"id": "chunk1", "content": "test", "metadata": {}}]
-        
-        result = loader.safe_upsert_chunks_for_source(test_chunks, "abcd1234")
-        
-        assert result.success is True
-        assert result.chunks_loaded == 1
+        assert result["status"] == "mismatch"
 
+    def test_get_sources_with_chunk_counts(self, loader_with_mock_store):
+        loader, store = loader_with_mock_store
+        payload = loader.get_sources_with_chunk_counts()
 
-class TestFactoryFunctions:
-    """Test factory functions"""
-    
+        store.get_sources_with_chunk_counts.assert_called_once()
+        assert payload["status"] == "ready"
+        assert payload["total_chunks"] == 7
+
+    def test_safe_upsert_handles_backend_error(self, loader_with_mock_store):
+        loader, store = loader_with_mock_store
+        store.backend_name = 'cassandra'
+        store.upsert_documents.side_effect = RuntimeError("boom")
+
+        result = loader.safe_upsert_chunks_for_source([], "abcd1234")
+
+        assert result.success is False
+        assert result.error_message == "boom"
     def test_get_bypass_validator(self):
         """Test bypass validator factory"""
         validator = get_bypass_validator("dev")

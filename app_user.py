@@ -712,24 +712,15 @@ async def get_available_sources():
         }
         
         # Get chunk sources and counts
-        if astra_loader.client:
-            try:
-                collection = astra_loader.client.get_collection(astra_loader.collection_name)
-                
-                # Get distinct sources from chunks
-                distinct_sources = collection.distinct("source")
-                for source in distinct_sources:
-                    # Count chunks per source
-                    count = collection.count_documents({"source": source})
-                    sources_info["chunks"][source] = count
-                    sources_info["total_chunks"] += count
-                    
-            except Exception as e:
-                logger.warning(f"Could not retrieve chunk sources: {e}")
-                sources_info["chunks"] = {"error": "Could not retrieve chunk sources"}
+        chunk_meta = astra_loader.get_sources_with_chunk_counts()
+        if chunk_meta.get("status") == "ready":
+            for source in chunk_meta.get("sources", []):
+                name = source.get("source_file") or source.get("source_hash")
+                count = source.get("chunk_count", 0)
+                sources_info["chunks"][name] = count
+                sources_info["total_chunks"] += count
         else:
-            sources_info["chunks"] = {"simulation": "AstraDB not configured"}
-        
+            sources_info["chunks"] = {"status": chunk_meta.get("status", "unavailable"), "error": chunk_meta.get("error")}
         # Get dictionary term count
         if dict_loader.client:
             try:
