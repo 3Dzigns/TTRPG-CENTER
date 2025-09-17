@@ -1,0 +1,658 @@
+{% extends "base.html" %}
+
+{% block title %}Wireframe Dashboard - TTRPG Center Admin{% endblock %}
+
+{% block head %}
+<style>
+        .wireframe-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .wireframe-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .project-thumbnail {
+            height: 120px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 0.375rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            border: 2px dashed #dee2e6;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border-radius: 1rem;
+        }
+        .recent-activity {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .activity-item {
+            border-left: 3px solid #007bff;
+            padding-left: 1rem;
+            margin-bottom: 1rem;
+        }
+        .activity-item.created {
+            border-color: #28a745;
+        }
+        .activity-item.updated {
+            border-color: #ffc107;
+        }
+        .activity-item.exported {
+            border-color: #17a2b8;
+        }
+        .activity-item.deleted {
+            border-color: #dc3545;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1 class="h3 mb-1">Wireframe Dashboard</h1>
+                        <p class="text-muted mb-0">Design and manage UI wireframes with drag-drop components</p>
+                    </div>
+                    <div>
+                        <a href="/admin/wireframe/editor" class="btn btn-primary">
+                            <i class="fas fa-plus me-2"></i>New Wireframe
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stats-card text-center p-3">
+                    <div class="card-body">
+                        <i class="fas fa-project-diagram fa-2x mb-2"></i>
+                        <h4 class="mb-1" id="totalProjects">-</h4>
+                        <p class="mb-0 small">Total Projects</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center p-3" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);">
+                    <div class="card-body">
+                        <i class="fas fa-clock fa-2x mb-2"></i>
+                        <h4 class="mb-1" id="recentProjects">-</h4>
+                        <p class="mb-0 small">Recent (7 days)</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center p-3" style="background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);">
+                    <div class="card-body">
+                        <i class="fas fa-puzzle-piece fa-2x mb-2"></i>
+                        <h4 class="mb-1" id="totalComponents">-</h4>
+                        <p class="mb-0 small">Total Components</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center p-3" style="background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%);">
+                    <div class="card-body">
+                        <i class="fas fa-download fa-2x mb-2"></i>
+                        <h4 class="mb-1" id="totalExports">-</h4>
+                        <p class="mb-0 small">Exports Generated</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Projects List -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Your Wireframe Projects</h5>
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="text" class="form-control form-control-sm" id="searchProjects" placeholder="Search projects..." style="width: 200px;">
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                    <i class="fas fa-sort me-1"></i>Sort
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="#" data-sort="updated_at">Recent Updates</a></li>
+                                    <li><a class="dropdown-item" href="#" data-sort="created_at">Date Created</a></li>
+                                    <li><a class="dropdown-item" href="#" data-sort="name">Name (A-Z)</a></li>
+                                    <li><a class="dropdown-item" href="#" data-sort="components_count">Component Count</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="projectsLoading" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Loading your wireframe projects...</p>
+                        </div>
+
+                        <div id="projectsContainer" class="d-none">
+                            <div class="row" id="projectsList">
+                                <!-- Projects will be loaded here -->
+                            </div>
+
+                            <!-- Pagination -->
+                            <nav class="mt-4" id="paginationContainer" style="display: none;">
+                                <ul class="pagination justify-content-center" id="pagination">
+                                    <!-- Pagination will be generated here -->
+                                </ul>
+                            </nav>
+                        </div>
+
+                        <div id="noProjects" class="text-center py-5 d-none">
+                            <i class="fas fa-project-diagram fa-4x text-muted mb-3"></i>
+                            <h5 class="text-muted">No Wireframe Projects Yet</h5>
+                            <p class="text-muted mb-3">Create your first wireframe to get started with UI design</p>
+                            <a href="/admin/wireframe/editor" class="btn btn-primary">
+                                <i class="fas fa-plus me-2"></i>Create First Wireframe
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-4">
+                <!-- Quick Actions -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h6 class="mb-0">Quick Actions</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <a href="/admin/wireframe/editor" class="btn btn-primary">
+                                <i class="fas fa-plus me-2"></i>New Wireframe
+                            </a>
+                            <button type="button" class="btn btn-outline-secondary" id="importBtn">
+                                <i class="fas fa-upload me-2"></i>Import Project
+                            </button>
+                            <button type="button" class="btn btn-outline-info" id="templatesBtn">
+                                <i class="fas fa-copy me-2"></i>Browse Templates
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Recent Activity</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="activityLoading" class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+
+                        <div id="activityContainer" class="recent-activity d-none">
+                            <!-- Activity items will be loaded here -->
+                        </div>
+
+                        <div id="noActivity" class="text-center py-3 text-muted d-none">
+                            <i class="fas fa-history fa-2x mb-2"></i>
+                            <p class="mb-0">No recent activity</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Project Details Modal -->
+    <div class="modal fade" id="projectModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="projectModalTitle">Project Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="projectModalBody">
+                    <!-- Project details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="editProjectBtn">
+                        <i class="fas fa-edit me-1"></i>Edit Project
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal fade" id="deleteModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Project</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete this wireframe project?</p>
+                    <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+                    <p>Project: <strong id="deleteProjectName"></strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                        <i class="fas fa-trash me-1"></i>Delete Project
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        class WireframeDashboard {
+            constructor() {
+                this.projects = [];
+                this.currentPage = 1;
+                this.itemsPerPage = 12;
+                this.sortBy = 'updated_at';
+                this.searchTerm = '';
+                this.selectedProject = null;
+            }
+
+            async initialize() {
+                await this.loadDashboardData();
+                this.setupEventListeners();
+                this.startPeriodicRefresh();
+            }
+
+            async loadDashboardData() {
+                try {
+                    // Load projects and stats in parallel
+                    const [projectsResponse, statsResponse] = await Promise.all([
+                        fetch('/admin/api/wireframe/projects'),
+                        fetch('/admin/api/wireframe/stats')
+                    ]);
+
+                    if (projectsResponse.ok) {
+                        const projectsData = await projectsResponse.json();
+                        this.projects = projectsData.projects || [];
+                        this.renderProjects();
+                    }
+
+                    if (statsResponse.ok) {
+                        const statsData = await statsResponse.json();
+                        this.updateStats(statsData);
+                    }
+
+                    await this.loadRecentActivity();
+
+                } catch (error) {
+                    console.error('Failed to load dashboard data:', error);
+                    this.showError('Failed to load dashboard data');
+                }
+            }
+
+            updateStats(stats) {
+                document.getElementById('totalProjects').textContent = stats.total_projects || 0;
+                document.getElementById('recentProjects').textContent = stats.recent_projects || 0;
+                document.getElementById('totalComponents').textContent = stats.total_components || 0;
+                document.getElementById('totalExports').textContent = stats.total_exports || 0;
+            }
+
+            renderProjects() {
+                const container = document.getElementById('projectsList');
+                const loadingElement = document.getElementById('projectsLoading');
+                const projectsContainer = document.getElementById('projectsContainer');
+                const noProjectsElement = document.getElementById('noProjects');
+
+                loadingElement.classList.add('d-none');
+
+                if (this.projects.length === 0) {
+                    projectsContainer.classList.add('d-none');
+                    noProjectsElement.classList.remove('d-none');
+                    return;
+                }
+
+                projectsContainer.classList.remove('d-none');
+                noProjectsElement.classList.add('d-none');
+
+                // Filter and sort projects
+                let filteredProjects = this.projects;
+                if (this.searchTerm) {
+                    filteredProjects = this.projects.filter(project =>
+                        project.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
+                        project.description.toLowerCase().includes(this.searchTerm.toLowerCase())
+                    );
+                }
+
+                // Sort projects
+                filteredProjects.sort((a, b) => {
+                    if (this.sortBy === 'name') {
+                        return a.name.localeCompare(b.name);
+                    } else if (this.sortBy === 'components_count') {
+                        return (b.components?.length || 0) - (a.components?.length || 0);
+                    } else {
+                        return new Date(b[this.sortBy] || 0) - new Date(a[this.sortBy] || 0);
+                    }
+                });
+
+                // Paginate
+                const totalPages = Math.ceil(filteredProjects.length / this.itemsPerPage);
+                const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+                const endIndex = startIndex + this.itemsPerPage;
+                const paginatedProjects = filteredProjects.slice(startIndex, endIndex);
+
+                // Render project cards
+                container.innerHTML = paginatedProjects.map(project => this.createProjectCard(project)).join('');
+
+                // Update pagination
+                this.renderPagination(totalPages);
+            }
+
+            createProjectCard(project) {
+                const componentsCount = project.components?.length || 0;
+                const lastUpdated = new Date(project.updated_at).toLocaleDateString();
+                const theme = project.canvas_settings?.theme || 'admin';
+
+                return `
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card wireframe-card h-100" data-project-id="${project.id}">
+                            <div class="card-body">
+                                <div class="project-thumbnail">
+                                    <div class="text-center">
+                                        <i class="fas fa-${theme === 'lcars' ? 'rocket' : 'desktop'} fa-2x text-muted"></i>
+                                        <div class="small text-muted mt-1">${componentsCount} components</div>
+                                    </div>
+                                </div>
+
+                                <h6 class="card-title mb-2">${this.escapeHtml(project.name)}</h6>
+                                <p class="card-text text-muted small mb-3" style="height: 40px; overflow: hidden;">
+                                    ${this.escapeHtml(project.description || 'No description')}
+                                </p>
+
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-calendar me-1"></i>${lastUpdated}
+                                    </small>
+                                    <span class="badge bg-${theme === 'lcars' ? 'warning' : 'primary'}">${theme.toUpperCase()}</span>
+                                </div>
+
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary flex-grow-1 edit-project">
+                                        <i class="fas fa-edit me-1"></i>Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-info view-project">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger delete-project">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderPagination(totalPages) {
+                const paginationContainer = document.getElementById('paginationContainer');
+                const pagination = document.getElementById('pagination');
+
+                if (totalPages <= 1) {
+                    paginationContainer.style.display = 'none';
+                    return;
+                }
+
+                paginationContainer.style.display = 'block';
+
+                let paginationHTML = '';
+
+                // Previous button
+                if (this.currentPage > 1) {
+                    paginationHTML += `<li class="page-item"><a class="page-link" href="#" data-page="${this.currentPage - 1}">Previous</a></li>`;
+                }
+
+                // Page numbers
+                for (let i = 1; i <= totalPages; i++) {
+                    if (i === this.currentPage) {
+                        paginationHTML += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
+                    } else {
+                        paginationHTML += `<li class="page-item"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+                    }
+                }
+
+                // Next button
+                if (this.currentPage < totalPages) {
+                    paginationHTML += `<li class="page-item"><a class="page-link" href="#" data-page="${this.currentPage + 1}">Next</a></li>`;
+                }
+
+                pagination.innerHTML = paginationHTML;
+            }
+
+            async loadRecentActivity() {
+                try {
+                    const response = await fetch('/admin/api/wireframe/activity');
+                    const activityLoading = document.getElementById('activityLoading');
+                    const activityContainer = document.getElementById('activityContainer');
+                    const noActivity = document.getElementById('noActivity');
+
+                    activityLoading.classList.add('d-none');
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const activities = data.activities || [];
+
+                        if (activities.length === 0) {
+                            noActivity.classList.remove('d-none');
+                        } else {
+                            activityContainer.innerHTML = activities.map(activity => this.createActivityItem(activity)).join('');
+                            activityContainer.classList.remove('d-none');
+                        }
+                    } else {
+                        noActivity.classList.remove('d-none');
+                    }
+                } catch (error) {
+                    console.error('Failed to load activity:', error);
+                    document.getElementById('noActivity').classList.remove('d-none');
+                }
+            }
+
+            createActivityItem(activity) {
+                const timestamp = new Date(activity.timestamp).toLocaleDateString();
+                const actionIcon = {
+                    'created': 'fa-plus',
+                    'updated': 'fa-edit',
+                    'exported': 'fa-download',
+                    'deleted': 'fa-trash'
+                }[activity.action] || 'fa-info';
+
+                const actionText = {
+                    'created': 'created',
+                    'updated': 'updated',
+                    'exported': 'exported',
+                    'deleted': 'deleted'
+                }[activity.action] || activity.action;
+
+                return `
+                    <div class="activity-item ${activity.action}">
+                        <div class="d-flex align-items-start">
+                            <i class="fas ${actionIcon} me-2 mt-1"></i>
+                            <div class="flex-grow-1">
+                                <div class="small">
+                                    <strong>${this.escapeHtml(activity.user)}</strong> ${actionText}
+                                    <strong>${this.escapeHtml(activity.details?.project_name || 'a project')}</strong>
+                                </div>
+                                <div class="text-muted small">${timestamp}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            setupEventListeners() {
+                // Search
+                document.getElementById('searchProjects').addEventListener('input', (e) => {
+                    this.searchTerm = e.target.value;
+                    this.currentPage = 1;
+                    this.renderProjects();
+                });
+
+                // Sort
+                document.querySelectorAll('[data-sort]').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.sortBy = e.target.dataset.sort;
+                        this.currentPage = 1;
+                        this.renderProjects();
+                    });
+                });
+
+                // Pagination
+                document.getElementById('pagination').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (e.target.classList.contains('page-link') && e.target.dataset.page) {
+                        this.currentPage = parseInt(e.target.dataset.page);
+                        this.renderProjects();
+                    }
+                });
+
+                // Project actions
+                document.getElementById('projectsList').addEventListener('click', (e) => {
+                    const projectCard = e.target.closest('.wireframe-card');
+                    if (!projectCard) return;
+
+                    const projectId = projectCard.dataset.projectId;
+                    const project = this.projects.find(p => p.id === projectId);
+
+                    if (e.target.closest('.edit-project')) {
+                        window.location.href = `/admin/wireframe/editor?project=${projectId}`;
+                    } else if (e.target.closest('.view-project')) {
+                        this.showProjectDetails(project);
+                    } else if (e.target.closest('.delete-project')) {
+                        this.showDeleteConfirmation(project);
+                    }
+                });
+
+                // Delete confirmation
+                document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
+                    this.deleteProject();
+                });
+            }
+
+            showProjectDetails(project) {
+                this.selectedProject = project;
+                document.getElementById('projectModalTitle').textContent = project.name;
+
+                const modalBody = document.getElementById('projectModalBody');
+                modalBody.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Project Information</h6>
+                            <table class="table table-sm">
+                                <tr><td><strong>Name:</strong></td><td>${this.escapeHtml(project.name)}</td></tr>
+                                <tr><td><strong>Description:</strong></td><td>${this.escapeHtml(project.description || 'None')}</td></tr>
+                                <tr><td><strong>Components:</strong></td><td>${project.components?.length || 0}</td></tr>
+                                <tr><td><strong>Theme:</strong></td><td>${project.canvas_settings?.theme || 'admin'}</td></tr>
+                                <tr><td><strong>Created:</strong></td><td>${new Date(project.created_at).toLocaleString()}</td></tr>
+                                <tr><td><strong>Updated:</strong></td><td>${new Date(project.updated_at).toLocaleString()}</td></tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Canvas Settings</h6>
+                            <table class="table table-sm">
+                                <tr><td><strong>Size:</strong></td><td>${project.canvas_settings?.width || 1200}x${project.canvas_settings?.height || 800}px</td></tr>
+                                <tr><td><strong>Grid:</strong></td><td>${project.canvas_settings?.grid_enabled ? 'Enabled' : 'Disabled'}</td></tr>
+                                <tr><td><strong>Snap to Grid:</strong></td><td>${project.canvas_settings?.snap_to_grid ? 'Yes' : 'No'}</td></tr>
+                            </table>
+
+                            ${project.tags?.length ? `
+                                <h6>Tags</h6>
+                                <div>
+                                    ${project.tags.map(tag => `<span class="badge bg-secondary me-1">${this.escapeHtml(tag)}</span>`).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+
+                const modal = new bootstrap.Modal(document.getElementById('projectModal'));
+                modal.show();
+            }
+
+            showDeleteConfirmation(project) {
+                this.selectedProject = project;
+                document.getElementById('deleteProjectName').textContent = project.name;
+                const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+                modal.show();
+            }
+
+            async deleteProject() {
+                if (!this.selectedProject) return;
+
+                try {
+                    const response = await fetch(`/admin/api/wireframe/projects/${this.selectedProject.id}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        // Remove from local array
+                        this.projects = this.projects.filter(p => p.id !== this.selectedProject.id);
+                        this.renderProjects();
+
+                        // Close modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('deleteModal'));
+                        modal.hide();
+
+                        this.showSuccess('Project deleted successfully');
+                    } else {
+                        throw new Error('Failed to delete project');
+                    }
+                } catch (error) {
+                    console.error('Delete failed:', error);
+                    this.showError('Failed to delete project');
+                }
+            }
+
+            startPeriodicRefresh() {
+                // Refresh dashboard data every 5 minutes
+                setInterval(() => {
+                    this.loadDashboardData();
+                }, 5 * 60 * 1000);
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            showSuccess(message) {
+                // You can implement a toast notification here
+                console.log('Success:', message);
+            }
+
+            showError(message) {
+                // You can implement a toast notification here
+                console.error('Error:', message);
+            }
+        }
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            window.wireframeDashboard = new WireframeDashboard();
+            window.wireframeDashboard.initialize();
+        });
+    </script>
+</div>
+{% endblock %}

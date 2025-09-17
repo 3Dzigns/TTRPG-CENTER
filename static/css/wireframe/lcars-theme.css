@@ -1,0 +1,491 @@
+/**
+ * LCARS Theme Implementation
+ *
+ * Provides complete LCARS (Library Computer Access/Retrieval System) styling
+ * for the wireframe editor, including color schemes, typography, and component styles.
+ */
+
+/* ===== LCARS COLOR PALETTE ===== */
+:root {
+    /* Primary LCARS Colors */
+    --lcars-orange: #ff9900;
+    --lcars-orange-light: #ffcc00;
+    --lcars-orange-dark: #cc7700;
+
+    /* LCARS Blues */
+    --lcars-blue: #0099ff;
+    --lcars-blue-light: #00ccff;
+    --lcars-blue-dark: #0066cc;
+
+    /* LCARS Status Colors */
+    --lcars-red: #ff0000;
+    --lcars-red-light: #ff6666;
+    --lcars-green: #00ff00;
+    --lcars-green-light: #66ff66;
+    --lcars-yellow: #ffff00;
+    --lcars-yellow-light: #ffff99;
+
+    /* LCARS Backgrounds */
+    --lcars-bg-primary: #001122;
+    --lcars-bg-secondary: #002244;
+    --lcars-bg-tertiary: #003366;
+    --lcars-bg-dark: #000011;
+
+    /* LCARS Text */
+    --lcars-text-primary: #ff9900;
+    --lcars-text-secondary: #00ccff;
+    --lcars-text-light: #ffffff;
+    --lcars-text-dark: #000000;
+
+    /* LCARS Accents */
+    --lcars-border: #ff9900;
+    --lcars-shadow: rgba(255, 153, 0, 0.3);
+    --lcars-glow: rgba(255, 153, 0, 0.6);
+}
+
+/* ===== LCARS THEME APPLICATION ===== */
+.lcars-theme {
+    background: linear-gradient(135deg, var(--lcars-bg-dark) 0%, var(--lcars-bg-primary) 100%);
+    color: var(--lcars-text-primary);
+    font-family: 'Courier New', 'Consolas', 'Monaco', monospace;
+}
+
+.lcars-theme .wireframe-toolbar {
+    background: linear-gradient(135deg, var(--lcars-bg-secondary) 0%, var(--lcars-bg-tertiary) 100%);
+    border-bottom: 2px solid var(--lcars-border);
+    box-shadow: 0 2px 10px var(--lcars-shadow);
+}
+
+.lcars-theme .component-palette {
+    background: linear-gradient(180deg, var(--lcars-bg-primary) 0%, var(--lcars-bg-secondary) 100%);
+    border-right: 2px solid var(--lcars-border);
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .properties-panel {
+    background: linear-gradient(180deg, var(--lcars-bg-primary) 0%, var(--lcars-bg-secondary) 100%);
+    border-left: 2px solid var(--lcars-border);
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .canvas-container {
+    background: var(--lcars-bg-primary);
+    border: 1px solid var(--lcars-border);
+}
+
+/* ===== LCARS TYPOGRAPHY ===== */
+.lcars-theme h1, .lcars-theme h2, .lcars-theme h3,
+.lcars-theme h4, .lcars-theme h5, .lcars-theme h6 {
+    color: var(--lcars-text-primary);
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.lcars-theme .component-name {
+    color: var(--lcars-text-primary);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.lcars-theme .property-group-title {
+    color: var(--lcars-text-primary);
+    font-weight: bold;
+    text-transform: uppercase;
+    border-bottom-color: var(--lcars-border);
+}
+
+/* ===== LCARS BUTTONS ===== */
+.lcars-theme .btn {
+    background: linear-gradient(45deg, var(--lcars-orange), var(--lcars-orange-light));
+    border: none;
+    border-radius: 20px;
+    color: var(--lcars-text-dark);
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px var(--lcars-shadow);
+}
+
+.lcars-theme .btn:hover {
+    background: linear-gradient(45deg, var(--lcars-orange-light), var(--lcars-yellow));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px var(--lcars-glow);
+}
+
+.lcars-theme .btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px var(--lcars-shadow);
+}
+
+.lcars-theme .btn-outline-primary {
+    background: transparent;
+    border: 2px solid var(--lcars-orange);
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .btn-outline-primary:hover {
+    background: var(--lcars-orange);
+    color: var(--lcars-text-dark);
+}
+
+.lcars-theme .btn-secondary {
+    background: linear-gradient(45deg, var(--lcars-blue), var(--lcars-blue-light));
+    color: var(--lcars-text-dark);
+}
+
+.lcars-theme .btn-danger {
+    background: linear-gradient(45deg, var(--lcars-red), var(--lcars-red-light));
+    color: var(--lcars-text-light);
+}
+
+/* ===== LCARS FORMS ===== */
+.lcars-theme .form-control {
+    background: var(--lcars-bg-secondary);
+    border: 2px solid var(--lcars-border);
+    border-radius: 10px;
+    color: var(--lcars-text-primary);
+    font-family: 'Courier New', monospace;
+}
+
+.lcars-theme .form-control:focus {
+    background: var(--lcars-bg-tertiary);
+    border-color: var(--lcars-orange-light);
+    box-shadow: 0 0 10px var(--lcars-glow);
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .form-control::placeholder {
+    color: rgba(255, 153, 0, 0.7);
+}
+
+.lcars-theme .form-select {
+    background: var(--lcars-bg-secondary);
+    border: 2px solid var(--lcars-border);
+    border-radius: 10px;
+    color: var(--lcars-text-primary);
+    font-family: 'Courier New', monospace;
+}
+
+.lcars-theme .form-label {
+    color: var(--lcars-text-primary);
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+}
+
+/* ===== LCARS COMPONENT ITEMS ===== */
+.lcars-theme .component-item {
+    background: linear-gradient(135deg, var(--lcars-bg-secondary) 0%, var(--lcars-bg-tertiary) 100%);
+    border: 2px solid var(--lcars-border);
+    border-radius: 15px;
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .component-item:hover {
+    border-color: var(--lcars-orange-light);
+    background: linear-gradient(135deg, var(--lcars-bg-tertiary) 0%, var(--lcars-bg-secondary) 100%);
+    box-shadow: 0 4px 15px var(--lcars-glow);
+}
+
+.lcars-theme .component-preview {
+    background: var(--lcars-bg-primary);
+    border-color: var(--lcars-border);
+}
+
+/* ===== LCARS WIREFRAME COMPONENTS ===== */
+.lcars-theme .wireframe-component {
+    border-color: transparent;
+}
+
+.lcars-theme .wireframe-component:hover {
+    border-color: var(--lcars-orange);
+    box-shadow: 0 0 0 1px var(--lcars-glow);
+}
+
+.lcars-theme .wireframe-component.selected {
+    border-color: var(--lcars-orange-light);
+    box-shadow: 0 0 0 2px var(--lcars-glow);
+}
+
+/* ===== LCARS RESIZE HANDLES ===== */
+.lcars-theme .resize-handle {
+    background: var(--lcars-orange);
+    border: 1px solid var(--lcars-orange-dark);
+    border-radius: 50%;
+}
+
+.lcars-theme .resize-handle:hover {
+    background: var(--lcars-orange-light);
+    box-shadow: 0 0 8px var(--lcars-glow);
+}
+
+/* ===== LCARS GRID ===== */
+.lcars-theme .canvas-container.grid-enabled {
+    background-image:
+        linear-gradient(to right, rgba(255, 153, 0, 0.3) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 153, 0, 0.3) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+/* ===== LCARS DROP ZONES ===== */
+.lcars-theme .drop-zone-active {
+    background-color: rgba(255, 153, 0, 0.1);
+    border: 2px dashed var(--lcars-orange);
+}
+
+.lcars-theme .drop-zone-hover {
+    background-color: rgba(255, 153, 0, 0.2);
+    border-color: var(--lcars-orange-light);
+}
+
+.lcars-theme .drop-preview-box {
+    background: rgba(255, 153, 0, 0.9);
+    color: var(--lcars-text-dark);
+    border: 1px solid var(--lcars-orange-dark);
+    box-shadow: 0 4px 12px var(--lcars-glow);
+}
+
+/* ===== LCARS CARDS AND PANELS ===== */
+.lcars-theme .card {
+    background: linear-gradient(135deg, var(--lcars-bg-secondary) 0%, var(--lcars-bg-tertiary) 100%);
+    border: 2px solid var(--lcars-border);
+    border-radius: 15px;
+    color: var(--lcars-text-primary);
+    box-shadow: 0 4px 15px var(--lcars-shadow);
+}
+
+.lcars-theme .card-header {
+    background: linear-gradient(90deg, var(--lcars-orange), var(--lcars-orange-light));
+    color: var(--lcars-text-dark);
+    border-bottom: 2px solid var(--lcars-orange-dark);
+    border-radius: 12px 12px 0 0;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.lcars-theme .card-body {
+    background: transparent;
+}
+
+/* ===== LCARS MODALS ===== */
+.lcars-theme .modal-content {
+    background: linear-gradient(135deg, var(--lcars-bg-primary) 0%, var(--lcars-bg-secondary) 100%);
+    border: 2px solid var(--lcars-border);
+    border-radius: 15px;
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .modal-header {
+    background: linear-gradient(90deg, var(--lcars-orange), var(--lcars-orange-light));
+    color: var(--lcars-text-dark);
+    border-bottom: 2px solid var(--lcars-orange-dark);
+    border-radius: 12px 12px 0 0;
+}
+
+.lcars-theme .modal-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.lcars-theme .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* ===== LCARS DROPDOWNS ===== */
+.lcars-theme .dropdown-menu {
+    background: var(--lcars-bg-secondary);
+    border: 2px solid var(--lcars-border);
+    border-radius: 10px;
+    color: var(--lcars-text-primary);
+    box-shadow: 0 4px 15px var(--lcars-shadow);
+}
+
+.lcars-theme .dropdown-item {
+    color: var(--lcars-text-primary);
+    font-family: 'Courier New', monospace;
+}
+
+.lcars-theme .dropdown-item:hover {
+    background: var(--lcars-orange);
+    color: var(--lcars-text-dark);
+}
+
+.lcars-theme .dropdown-divider {
+    border-color: var(--lcars-border);
+}
+
+/* ===== LCARS BADGES AND INDICATORS ===== */
+.lcars-theme .badge {
+    background: var(--lcars-orange);
+    color: var(--lcars-text-dark);
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.lcars-theme .badge.bg-primary {
+    background: var(--lcars-blue) !important;
+}
+
+.lcars-theme .badge.bg-success {
+    background: var(--lcars-green) !important;
+}
+
+.lcars-theme .badge.bg-danger {
+    background: var(--lcars-red) !important;
+}
+
+.lcars-theme .badge.bg-warning {
+    background: var(--lcars-yellow) !important;
+    color: var(--lcars-text-dark) !important;
+}
+
+/* ===== LCARS SCROLLBARS ===== */
+.lcars-theme ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.lcars-theme ::-webkit-scrollbar-track {
+    background: var(--lcars-bg-primary);
+    border-radius: 6px;
+}
+
+.lcars-theme ::-webkit-scrollbar-thumb {
+    background: linear-gradient(45deg, var(--lcars-orange), var(--lcars-orange-light));
+    border-radius: 6px;
+    border: 1px solid var(--lcars-orange-dark);
+}
+
+.lcars-theme ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(45deg, var(--lcars-orange-light), var(--lcars-yellow));
+}
+
+/* ===== LCARS ANIMATIONS ===== */
+@keyframes lcars-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes lcars-glow {
+    0%, 100% {
+        box-shadow: 0 0 5px var(--lcars-shadow);
+    }
+    50% {
+        box-shadow: 0 0 20px var(--lcars-glow), 0 0 30px var(--lcars-glow);
+    }
+}
+
+.lcars-theme .pulse {
+    animation: lcars-pulse 2s infinite;
+}
+
+.lcars-theme .glow {
+    animation: lcars-glow 3s infinite;
+}
+
+/* ===== LCARS COMPONENT SPECIFIC STYLES ===== */
+.lcars-theme .lcars-status-light .status-indicator {
+    border-color: var(--lcars-border);
+    box-shadow: 0 0 10px currentColor;
+}
+
+.lcars-theme .lcars-status-light .status-label {
+    color: var(--lcars-text-primary);
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.lcars-theme .lcars-button {
+    background: linear-gradient(45deg, var(--lcars-orange), var(--lcars-orange-light));
+    border: none;
+    color: var(--lcars-text-dark);
+    text-transform: uppercase;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+.lcars-theme .lcars-panel {
+    background: linear-gradient(135deg, var(--lcars-bg-secondary), var(--lcars-bg-tertiary));
+    border: 2px solid var(--lcars-border);
+    border-radius: 15px;
+    color: var(--lcars-text-primary);
+}
+
+.lcars-theme .lcars-progress-bar .progress-track {
+    background: var(--lcars-bg-primary);
+    border-color: var(--lcars-border);
+}
+
+.lcars-theme .lcars-progress-bar .progress-fill {
+    background: linear-gradient(90deg, var(--lcars-orange), var(--lcars-orange-light));
+}
+
+/* ===== LCARS ACCESSIBILITY ===== */
+.lcars-theme .wireframe-component:focus {
+    outline: 2px solid var(--lcars-orange-light);
+    outline-offset: 2px;
+}
+
+.lcars-theme .component-item:focus {
+    outline: 2px solid var(--lcars-orange-light);
+    outline-offset: 2px;
+}
+
+/* ===== LCARS HIGH CONTRAST MODE ===== */
+@media (prefers-contrast: high) {
+    .lcars-theme {
+        --lcars-orange: #ffaa00;
+        --lcars-orange-light: #ffdd00;
+        --lcars-bg-primary: #000000;
+        --lcars-bg-secondary: #111111;
+        --lcars-text-primary: #ffffff;
+    }
+
+    .lcars-theme .wireframe-component {
+        border-width: 3px;
+    }
+
+    .lcars-theme .wireframe-component.selected {
+        border-width: 4px;
+    }
+}
+
+/* ===== LCARS REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+    .lcars-theme .pulse,
+    .lcars-theme .glow {
+        animation: none;
+    }
+
+    .lcars-theme .btn,
+    .lcars-theme .component-item,
+    .lcars-theme .wireframe-component {
+        transition: none;
+    }
+}
+
+/* ===== LCARS PRINT STYLES ===== */
+@media print {
+    .lcars-theme {
+        background: white !important;
+        color: black !important;
+    }
+
+    .lcars-theme .wireframe-component {
+        border: 2px solid black !important;
+    }
+
+    .lcars-theme .resize-handles {
+        display: none !important;
+    }
+}
