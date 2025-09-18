@@ -8,10 +8,19 @@ from array import array
 from datetime import datetime
 from typing import Any, Dict, Mapping, Optional, Sequence, List
 
-from cassandra.auth import PlainTextAuthProvider  # type: ignore
-from cassandra.cluster import Cluster  # type: ignore
-from cassandra.io.asyncioreactor import AsyncioConnection  # type: ignore
-from cassandra.query import SimpleStatement  # type: ignore
+try:
+    from cassandra.auth import PlainTextAuthProvider  # type: ignore
+    from cassandra.cluster import Cluster  # type: ignore
+    from cassandra.io.asyncioreactor import AsyncioConnection  # type: ignore
+    from cassandra.query import SimpleStatement  # type: ignore
+except Exception as cassandra_import_error:  # pragma: no cover - environment specific
+    PlainTextAuthProvider = None  # type: ignore[assignment]
+    Cluster = None  # type: ignore[assignment]
+    AsyncioConnection = None  # type: ignore[assignment]
+    SimpleStatement = None  # type: ignore[assignment]
+    _CASSANDRA_IMPORT_ERROR = cassandra_import_error
+else:
+    _CASSANDRA_IMPORT_ERROR = None
 
 from ..ttrpg_logging import get_logger
 from .base import VectorStore
@@ -20,11 +29,20 @@ logger = get_logger(__name__)
 
 
 os.environ.setdefault('CASS_DRIVER_NO_EXTENSIONS', '1')
+
+
+def _ensure_dependencies() -> None:
+    if Cluster is None or AsyncioConnection is None or SimpleStatement is None or PlainTextAuthProvider is None:
+        if '_CASSANDRA_IMPORT_ERROR' in globals() and _CASSANDRA_IMPORT_ERROR is not None:
+            raise RuntimeError("Cassandra backend unavailable: cassandra-driver failed to import.") from _CASSANDRA_IMPORT_ERROR
+        raise RuntimeError("Cassandra backend unavailable: cassandra-driver is not installed.")
+
 class CassandraVectorStore(VectorStore):
     """Vector store backed by Apache Cassandra."""
 
     def __init__(self, env: str) -> None:
         super().__init__(env)
+        _ensure_dependencies()
         self.contact_points = [cp.strip() for cp in os.getenv("CASSANDRA_CONTACT_POINTS", "127.0.0.1").split(",") if cp.strip()]
         self.port = int(os.getenv("CASSANDRA_PORT", "9042"))
         self.keyspace = os.getenv("CASSANDRA_KEYSPACE", "ttrpg")

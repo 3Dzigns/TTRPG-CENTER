@@ -14,6 +14,7 @@ from .classifier import classify_query
 from .policies import load_policies, choose_plan
 from .router import pick_model
 from .query_planner import get_planner
+from .llm_runtime import generate_rag_answers
 from .prompts import load_prompt, render_prompt, PromptError
 from .retriever import retrieve
 from ..aehrl.evaluator import AEHRLEvaluator
@@ -39,6 +40,8 @@ async def rag_ask(payload: Dict[str, Any]):
     q = (payload or {}).get("query", "").strip()
     if not q:
         return JSONResponse(status_code=400, content={"error": "query is required"})
+
+    trace_id = str(uuid.uuid4())
 
     # 0) Persona context extraction (if enabled)
     persona_enabled = os.getenv("PERSONA_TESTING_ENABLED", "true").lower() == "true"
@@ -89,7 +92,7 @@ async def rag_ask(payload: Dict[str, Any]):
     # 5) Retrieve top chunks
     top_chunks = retrieve(plan, q, env, limit=payload.get("top_k", 3))
 
-    # 6) Synthesize stub answers (no external network)
+    # 6) Compose stub answers and attempt live generation when permitted
     def _synth(prefix: str) -> str:
         parts = []
         if top_chunks:
@@ -101,16 +104,36 @@ async def rag_ask(payload: Dict[str, Any]):
         for ch in top_chunks[:3]:
             meta_page = safe_metadata_get(ch.metadata, "page") or safe_metadata_get(ch.metadata, "page_number")
             sec = safe_metadata_get(ch.metadata, "section") or safe_metadata_get(ch.metadata, "section_title")
-            cite = f"[{PathSafe(ch.source).name}{' p.'+str(meta_page) if meta_page else ''}{' · '+sec if sec else ''}]"
+            cite = f"[{PathSafe(ch.source).name}{' p.' + str(meta_page) if meta_page else ''}{' :: ' + sec if sec else ''}]"
             parts.append(f"- {cite}")
         return f"{prefix}: " + "\n".join(parts)
 
-    openai_answer = _synth("OpenAI_stub")
-    claude_answer = _synth("Claude_stub")
+    def _build_provider_prompt(base_prompt: str) -> str:
+        if not top_chunks:
+            return base_prompt
+        segments = [base_prompt, "", "Retrieved context:"]
+        for idx, chunk in enumerate(top_chunks[:5], start=1):
+            snippet = chunk.text.strip().replace("\n", " ")[:500]
+            segments.append(f"{idx}. {PathSafe(chunk.source).name}: {snippet}")
+        segments.append("")
+        segments.append("Use the retrieved context when forming answers and cite sources succinctly.")
+        return "\n".join(segments)
 
-    # 7) Heuristic selector (prefer longer context)
-    heuristic = "openai" if len(openai_answer) >= len(claude_answer) else "claude"
-    selected_answer = openai_answer if heuristic == "openai" else claude_answer
+    stub_answers = {"openai": _synth("OpenAI_stub"), "claude": _synth("Claude_stub")}
+    provider_prompt = _build_provider_prompt(rendered_prompt)
+    llm_result = generate_rag_answers(
+        prompt=provider_prompt,
+        model_cfg=model_cfg if isinstance(model_cfg, dict) else model_cfg,
+        stub_answers=stub_answers,
+    )
+    selected_answer = llm_result.answers.get(llm_result.selected, next(iter(stub_answers.values()), ""))
+
+    answers_payload = dict(llm_result.answers)
+    answers_payload["selected"] = llm_result.selected
+    used_stub_llm = llm_result.used_stub_llm
+    degraded = llm_result.degraded
+    degraded_reason = llm_result.degraded_reason
+    provider_metadata = llm_result.provider_metadata
 
     # 8) AEHRL Evaluation (if enabled)
     aehrl_enabled = os.getenv("AEHRL_ENABLED", "true").lower() == "true"
@@ -190,12 +213,25 @@ async def rag_ask(payload: Dict[str, Any]):
     elapsed_ms = int((time.time() - t0) * 1000)
     approx_tokens = max(1, len(q.split()) + sum(len(c.text.split()) for c in top_chunks))
 
+    model_meta: Dict[str, Any] = {}
+    if isinstance(model_cfg, dict):
+        model_meta.update(model_cfg)
+    elif hasattr(model_cfg, 'items'):
+        try:
+            model_meta.update(dict(model_cfg))
+        except Exception:
+            pass
+    if provider_metadata:
+        for key, value in provider_metadata.items():
+            if value is not None:
+                model_meta[key] = value
+
     response = {
         "query": q,
         "environment": env,
         "classification": cls,
         "plan": plan,
-        "model": model_cfg,
+        "model": model_meta,
         "query_planning": {
             "enabled": True,
             "plan_cached": query_plan.hit_count > 0 if 'query_plan' in locals() else False,
@@ -206,7 +242,8 @@ async def rag_ask(payload: Dict[str, Any]):
         "metrics": {
             "timer_ms": elapsed_ms,
             "token_count": approx_tokens,
-            "model_badge": model_cfg.get("model"),
+            "model_badge": model_meta.get("model"),
+            "mode": "live" if not used_stub_llm else "stub",
         },
         "retrieved": [
             {
@@ -218,11 +255,7 @@ async def rag_ask(payload: Dict[str, Any]):
             }
             for c in top_chunks
         ],
-        "answers": {
-            "openai": openai_answer,
-            "claude": claude_answer,
-            "selected": heuristic,
-        },
+        "answers": answers_payload,
         "aehrl": {
             "enabled": aehrl_enabled,
             "warnings": hallucination_warnings,
@@ -250,8 +283,15 @@ async def rag_ask(payload: Dict[str, Any]):
                 "response_appropriate": persona_metrics.appropriateness_score >= 0.7 if persona_metrics else None
             } if persona_metrics else None
         },
-        "used_stub_llm": True,
+        "used_stub_llm": used_stub_llm,
+        "degraded": degraded,
+        "trace_id": trace_id,
+        "answer": selected_answer,
+        "sources": [c.source for c in top_chunks],
     }
+    if degraded and degraded_reason:
+        response["degraded_reason"] = degraded_reason
+
 
     logger.info(
         "RAG ask handled",
@@ -261,6 +301,9 @@ async def rag_ask(payload: Dict[str, Any]):
             "env": env,
             "top_chunks": len(top_chunks),
             "intent": cls.get("intent"),
+            "used_stub_llm": used_stub_llm,
+            "degraded": degraded,
+            "llm_provider": llm_result.provider,
         },
     )
     return JSONResponse(content=response)
