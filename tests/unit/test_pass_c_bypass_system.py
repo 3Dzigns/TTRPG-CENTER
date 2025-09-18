@@ -385,7 +385,7 @@ class TestArtifactPreservationManager:
 
 
 class TestAstraLoaderEnhancements:
-    """Test vector-store-backed AstraLoader functionality."""
+    """Test vector-store-backed AstraLoader functionality for bypass system."""
 
     @pytest.fixture
     def mock_store(self):
@@ -434,6 +434,7 @@ class TestAstraLoaderEnhancements:
         assert all(doc["metadata"].get("source_hash") == "abcd1234" for doc in docs)
         assert result.success is True
         assert result.chunks_loaded == store.upsert_documents.return_value
+
     def test_validate_chunk_integrity_success(self, loader_with_mock_store):
         loader, store = loader_with_mock_store
         store.count_documents_for_source.return_value = 150
@@ -473,6 +474,7 @@ class TestAstraLoaderEnhancements:
 
         assert result.success is False
         assert result.error_message == "boom"
+
     def test_get_bypass_validator(self):
         """Test bypass validator factory"""
         validator = get_bypass_validator("dev")

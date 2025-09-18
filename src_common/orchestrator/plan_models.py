@@ -37,6 +37,9 @@ class QueryPlan:
     # Performance optimization hints
     performance_hints: Dict[str, Any]
 
+    # Graph expansion metadata
+    graph_expansion: Optional[Dict[str, Any]] = None
+
     # Cache metadata
     cache_ttl: int  # Time-to-live in seconds
     created_at: float  # Unix timestamp
@@ -50,6 +53,7 @@ class QueryPlan:
         retrieval_strategy: Dict[str, Any],
         model_config: Dict[str, Any],
         performance_hints: Optional[Dict[str, Any]] = None,
+        graph_expansion: Optional[Dict[str, Any]] = None,
         cache_ttl: int = 3600
     ) -> QueryPlan:
         """Create a new QueryPlan from query components."""
@@ -62,6 +66,7 @@ class QueryPlan:
             retrieval_strategy=retrieval_strategy,
             model_config=model_config,
             performance_hints=performance_hints or {},
+            graph_expansion=graph_expansion,
             cache_ttl=cache_ttl,
             created_at=time.time(),
             hit_count=0
@@ -131,6 +136,12 @@ class PlanGenerationContext:
     max_graph_depth: int = 3
     enable_reranking: bool = True
     enable_graph_retrieval: bool = True
+
+    # Graph expansion settings
+    enable_graph_expansion: bool = True
+    graph_expansion_strategy: str = "hybrid"  # alias, graph, cross_ref, hybrid
+    max_graph_expansions: int = 10
+    min_expansion_confidence: float = 0.3
 
     # Static heuristic weights
     complexity_multiplier: Dict[str, float] = None

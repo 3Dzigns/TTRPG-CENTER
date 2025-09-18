@@ -14,6 +14,7 @@ from .plan_models import QueryPlan, PlanGenerationContext
 from .plan_cache import get_cache
 from .policies import load_policies, choose_plan
 from .router import pick_model
+from .graph_expander import GraphQueryExpander
 
 logger = get_logger(__name__)
 
@@ -30,6 +31,7 @@ class QueryPlanner:
         self.environment = environment or os.getenv("APP_ENV", "dev")
         self.cache = get_cache(self.environment)
         self.context = PlanGenerationContext(environment=self.environment)
+        self.graph_expander = GraphQueryExpander(environment=self.environment)
 
         logger.info(f"QueryPlanner initialized for environment: {self.environment}")
 
@@ -82,16 +84,20 @@ class QueryPlanner:
         # 3. Generate model configuration
         model_config = self._generate_model_config(classification, retrieval_strategy)
 
-        # 4. Generate performance hints
+        # 4. Generate graph expansion (if enabled)
+        graph_expansion = self._generate_graph_expansion(classification, query)
+
+        # 5. Generate performance hints
         performance_hints = self._generate_performance_hints(classification, query)
 
-        # 5. Create the plan
+        # 6. Create the plan
         plan = QueryPlan.create_from_query(
             query=query,
             classification=classification,
             retrieval_strategy=retrieval_strategy,
             model_config=model_config,
             performance_hints=performance_hints,
+            graph_expansion=graph_expansion,
             cache_ttl=self._calculate_cache_ttl(classification)
         )
 
@@ -297,6 +303,98 @@ class QueryPlanner:
         graph_tokens = graph_depth * 200  # Graph traversal adds more content
 
         return vector_tokens + graph_tokens
+
+    def _generate_graph_expansion(self, classification: Classification, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate graph expansion metadata for the query plan.
+
+        Args:
+            classification: Query classification
+            query: Original user query
+
+        Returns:
+            Graph expansion metadata or None if disabled/unavailable
+        """
+        if not self.context.enable_graph_expansion:
+            return None
+
+        # Determine expansion strategy based on query characteristics
+        strategy = self._select_expansion_strategy(classification, query)
+        if not strategy:
+            return None
+
+        try:
+            # Perform graph expansion
+            expanded_query = self.graph_expander.expand_query(
+                query=query,
+                strategy=strategy,
+                max_expansions=self.context.max_graph_expansions,
+                min_confidence=self.context.min_expansion_confidence
+            )
+
+            if not expanded_query.expansion_terms:
+                return None
+
+            return {
+                "enabled": True,
+                "strategy": strategy,
+                "original_query": query,
+                "expanded_query": expanded_query.expanded_query,
+                "expansion_terms": [
+                    {
+                        "term": term.term,
+                        "source": term.source,
+                        "confidence": term.confidence,
+                        "original_term": term.original_term
+                    }
+                    for term in expanded_query.expansion_terms
+                ],
+                "entity_mentions": expanded_query.entity_mentions,
+                "processing_time_ms": expanded_query.processing_time_ms
+            }
+
+        except Exception as e:
+            logger.warning(f"Graph expansion failed for query '{query}': {e}")
+            return {
+                "enabled": True,
+                "strategy": strategy,
+                "error": str(e),
+                "fallback": True
+            }
+
+    def _select_expansion_strategy(self, classification: Classification, query: str) -> Optional[str]:
+        """
+        Select the appropriate graph expansion strategy based on query characteristics.
+
+        Args:
+            classification: Query classification
+            query: Original user query
+
+        Returns:
+            Expansion strategy name or None if no expansion recommended
+        """
+        intent = classification.get("intent", "")
+        domain = classification.get("domain", "")
+        complexity = classification.get("complexity", "low")
+
+        # Skip expansion for simple admin queries
+        if domain == "admin" or intent == "code_help":
+            return None
+
+        # Alias expansion for entity-focused queries
+        if intent == "fact_lookup" and complexity == "low":
+            return "alias"
+
+        # Cross-reference expansion for relationship queries
+        if intent == "multi_hop_reasoning" or "compare" in query.lower() or "relationship" in query.lower():
+            return "cross_ref"
+
+        # Graph traversal for complex domain queries
+        if domain in ["ttrpg_rules", "ttrpg_lore"] and complexity in ["medium", "high"]:
+            return "graph"
+
+        # Hybrid for everything else
+        return "hybrid"
 
     def get_cache_metrics(self):
         """Get current cache performance metrics."""
