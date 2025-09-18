@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FR-029 Delta Refresh System** - Intelligent incremental document processing with SHA-based change detection
+  - Complete delta refresh orchestration system with granular page and section-level change detection
+  - SHA-256 content fingerprinting for reliable change detection and selective pipeline updates
+  - IncrementalIngestionManager with background job management and concurrent processing prevention
+  - DeltaTracker for audit trail, session management, and rollback capabilities
+  - Comprehensive test suite with 44 passing tests covering all delta refresh components
+  - Performance optimization targeting 80%+ reduction in processing time for incremental updates
+  - Integration with existing 3-pass ingestion pipeline (unstructured.io → Haystack → LlamaIndex)
+  - Configurable similarity thresholds and intelligent fallback to full processing
+
 - **FR-031 Cassandra Vector Store (DEV/CI)** - Local vector storage now runs on Apache Cassandra via Docker (replaces Astra dependency)
   - Added pluggable vector store abstraction with Cassandra and Astra implementations
   - Updated ingestion passes, admin/dashboard endpoints, and retriever to use the new backend
