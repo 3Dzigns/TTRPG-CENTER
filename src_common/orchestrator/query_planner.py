@@ -98,10 +98,13 @@ class QueryPlanner:
         # 6. Generate provenance configuration
         provenance_config = self._generate_provenance_config(classification, query)
 
-        # 7. Generate performance hints
+        # 7. Generate evaluation configuration
+        eval_config = self._generate_evaluation_config(classification, query)
+
+        # 8. Generate performance hints
         performance_hints = self._generate_performance_hints(classification, query)
 
-        # 8. Create the plan
+        # 9. Create the plan
         plan = QueryPlan.create_from_query(
             query=query,
             classification=classification,
@@ -111,6 +114,7 @@ class QueryPlanner:
             graph_expansion=graph_expansion,
             reranking_config=reranking_config,
             provenance_config=provenance_config,
+            eval_config=eval_config,
             cache_ttl=self._calculate_cache_ttl(classification)
         )
 
@@ -600,6 +604,97 @@ class QueryPlanner:
             config["include_source_excerpts"] = True
 
         logger.debug(f"Generated provenance config: {config}")
+
+        return config
+
+    def _generate_evaluation_config(self, classification: Classification, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate evaluation gate configuration based on query characteristics.
+
+        Args:
+            classification: Query classification result
+            query: Original user query
+
+        Returns:
+            Evaluation configuration dictionary or None if disabled
+        """
+        if not self.context.enable_evaluation_gate:
+            return None
+
+        intent = getattr(classification, 'intent', 'unknown')
+        domain = getattr(classification, 'domain', 'general')
+        complexity = getattr(classification, 'complexity', 'medium')
+
+        config = {
+            "enabled": True,
+            "strategy": self.context.evaluation_strategy,
+            "minimum_overall_score": self.context.minimum_overall_quality,
+            "minimum_accuracy_score": self.context.minimum_accuracy_score,
+            "max_evaluation_time_ms": self.context.max_evaluation_time_ms,
+            "enable_caching": self.context.enable_evaluation_caching,
+            "enable_source_validation": True,
+            "enable_citation_checking": True,
+            "enable_domain_validation": True
+        }
+
+        # Intent-based evaluation strategy adaptation
+        if intent == "fact_lookup":
+            config["strategy"] = "accuracy_first"
+            config["minimum_accuracy_score"] = max(0.8, config["minimum_accuracy_score"])
+            config["enable_source_validation"] = True
+
+        elif intent == "creative_write":
+            config["strategy"] = "fast"
+            config["minimum_accuracy_score"] = 0.6
+            config["enable_citation_checking"] = False
+
+        elif intent == "multi_hop_reasoning":
+            config["strategy"] = "comprehensive"
+            config["minimum_overall_score"] = max(0.7, config["minimum_overall_score"])
+            config["enable_domain_validation"] = True
+
+        # Domain-specific adjustments
+        if domain == "ttrpg_rules":
+            config["enable_domain_validation"] = True
+            config["minimum_rules_accuracy"] = 0.8
+            config["minimum_citation_quality"] = 0.7
+
+        # Complexity-based adjustments
+        if complexity == "high":
+            config["strategy"] = "comprehensive"
+            config["max_evaluation_time_ms"] = min(100, config["max_evaluation_time_ms"] * 2)
+
+        elif complexity == "low":
+            config["strategy"] = "fast"
+            config["max_evaluation_time_ms"] = max(25, config["max_evaluation_time_ms"] // 2)
+
+        # Environment-specific adjustments
+        if self.environment == "prod":
+            config["max_evaluation_time_ms"] = min(30, config["max_evaluation_time_ms"])
+            config["fallback_on_timeout"] = True
+
+        elif self.environment == "dev":
+            config["max_evaluation_time_ms"] = max(100, config["max_evaluation_time_ms"])
+            config["enable_detailed_feedback"] = True
+
+        # Query-specific adjustments
+        query_lower = query.lower()
+
+        # Critical accuracy requirements for specific query types
+        if any(term in query_lower for term in ["damage", "spell", "rules", "official"]):
+            config["minimum_accuracy_score"] = max(0.85, config["minimum_accuracy_score"])
+            config["critical_accuracy_domains"] = ["ttrpg_rules"]
+
+        # Fast evaluation for simple queries
+        if len(query.split()) <= 5 and not any(term in query_lower for term in ["how", "why", "explain"]):
+            config["strategy"] = "fast"
+
+        # Comprehensive evaluation for explanation queries
+        if any(term in query_lower for term in ["explain", "why", "how does", "what happens"]):
+            config["strategy"] = "comprehensive"
+            config["enable_detailed_feedback"] = True
+
+        logger.debug(f"Generated evaluation config: {config}")
 
         return config
 
