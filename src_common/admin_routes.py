@@ -1919,6 +1919,141 @@ async def run_ingestion_job(request: IngestionRunRequest):
 
 
 # -------------------------
+# Selective Ingestion - FR-033
+# -------------------------
+
+class SelectiveIngestionRequest(BaseModel):
+    env: str
+    selected_sources: List[str]
+    options: Optional[Dict[str, Any]] = None
+
+@admin_router.get("/api/admin/ingestion/{environment}/sources")
+async def get_available_sources(environment: str):
+    """Get list of sources available for selective ingestion"""
+    try:
+        if environment not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        sources = await ingestion_service.get_available_sources(environment)
+
+        return {
+            "environment": environment,
+            "sources": sources,
+            "total_count": len(sources),
+            "available_for_reingestion": len([s for s in sources if s.get("available_for_reingestion", False)]),
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get available sources for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.post("/api/admin/ingestion/selective")
+async def run_selective_ingestion_job(request: SelectiveIngestionRequest):
+    """Start a selective ingestion job for specific sources"""
+    try:
+        if not request.selected_sources:
+            raise HTTPException(status_code=400, detail="At least one source must be selected")
+
+        if request.env not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        # Validate sources are available for reingestion
+        available_sources = await ingestion_service.get_available_sources(request.env)
+        available_source_files = {
+            s.get('source_file', s.get('id', ''))
+            for s in available_sources
+            if s.get('available_for_reingestion', False)
+        }
+
+        invalid_sources = [src for src in request.selected_sources if src not in available_source_files]
+        if invalid_sources:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Sources not available for reingestion: {invalid_sources}"
+            )
+
+        # Start the selective ingestion job
+        job_id = await ingestion_service.start_selective_ingestion_job(
+            environment=request.env,
+            selected_sources=request.selected_sources,
+            options=request.options or {}
+        )
+
+        # Broadcast job start via WebSocket
+        await manager.broadcast({
+            "type": "selective_ingestion_job_started",
+            "job_id": job_id,
+            "environment": request.env,
+            "selected_sources": request.selected_sources,
+            "source_count": len(request.selected_sources),
+            "timestamp": time.time()
+        })
+
+        # Simulate process ID for compatibility with frontend expectations
+        import os
+        pid = os.getpid()
+
+        return {
+            "job_id": job_id,
+            "env": request.env,
+            "job_type": "selective",
+            "selected_sources": request.selected_sources,
+            "source_count": len(request.selected_sources),
+            "pid": pid,
+            "status": "started",
+            "timestamp": time.time()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start selective ingestion job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/ingestion/{environment}/sources/health")
+async def get_sources_health_summary(environment: str):
+    """Get health summary of sources for selective ingestion planning"""
+    try:
+        if environment not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        sources = await ingestion_service.get_available_sources(environment)
+
+        # Calculate health statistics
+        health_stats = {"green": 0, "yellow": 0, "red": 0}
+        total_chunks = 0
+        reingestion_candidates = []
+
+        for source in sources:
+            health = source.get("health", "red")
+            health_stats[health] = health_stats.get(health, 0) + 1
+            total_chunks += source.get("chunk_count", 0)
+
+            if source.get("available_for_reingestion", False):
+                reingestion_candidates.append({
+                    "source_file": source.get("source_file", source.get("id", "unknown")),
+                    "health": health,
+                    "chunk_count": source.get("chunk_count", 0),
+                    "last_ingestion": source.get("last_local_ingestion")
+                })
+
+        return {
+            "environment": environment,
+            "health_summary": health_stats,
+            "total_sources": len(sources),
+            "total_chunks": total_chunks,
+            "reingestion_candidates": len(reingestion_candidates),
+            "candidates": reingestion_candidates[:10],  # Top 10 candidates
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get sources health summary for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
 # Log Management - FR-008
 # -------------------------
 
