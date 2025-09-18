@@ -154,6 +154,10 @@ embeddings/
 vectors/
 processed/
 ingestion/
+!src_common/ingestion/
+!src_common/ingestion/**
+!tests/unit/ingestion/
+!tests/unit/ingestion/**
 raw_documents/
 parsed_documents/
 chunked_documents/

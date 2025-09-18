@@ -47,7 +47,9 @@
       "Bash(tasklist)",
       "Bash(find:*)",
       "Bash(git fetch:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(git reset:*)",
+      "Bash(git check-ignore:*)"
     ],
     "deny": [],
     "ask": []
