@@ -25,6 +25,7 @@ class LogEntry:
     """Individual log entry information"""
     job_id: str
     job_type: str  # 'ad-hoc' or 'nightly'
+    lane: str
     status: str  # 'running', 'completed', 'failed', 'pending'
     pid: Optional[int]
     start_time: Optional[float]
@@ -128,6 +129,7 @@ class AdminLogService:
             filename = log_file.name
             job_id = self._extract_job_id(filename)
             job_type = self._extract_job_type(filename)
+            lane = self._extract_lane(log_file)
 
             # Try to determine status by checking if file is still being written
             status = await self._determine_log_status(log_file)
@@ -147,6 +149,7 @@ class AdminLogService:
             return LogEntry(
                 job_id=job_id,
                 job_type=job_type,
+                lane=lane,
                 status=status,
                 pid=pid,
                 start_time=start_time,
@@ -162,6 +165,21 @@ class AdminLogService:
             logger.error(f"Error parsing log file {log_file}: {e}")
             return None
 
+    def _extract_lane(self, log_file: Path) -> str:
+        """Derive the content lane from the log header if present."""
+        try:
+            with open(log_file, 'r', encoding='utf-8', errors='ignore') as handle:
+                head = handle.read(512)
+            cleaned = head.replace('\r', ' ').replace('\n', ' ')
+            for token in cleaned.split():
+                if token.lower().startswith('lane='):
+                    value = token.split('=', 1)[1].strip().upper()
+                    if value in {'A', 'B', 'C'}:
+                        return value
+        except Exception:
+            logger.debug("Unable to extract lane from %s", log_file)
+        return 'A'
+
     def _extract_job_id(self, filename: str) -> str:
         """Extract job ID from log filename"""
         # Try to extract timestamp-based ID or use filename
@@ -173,6 +191,8 @@ class AdminLogService:
             # adhoc_ingestion_2025-01-15_14-30-25.log -> adhoc_2025-01-15_14-30-25
             parts = filename.replace('adhoc_ingestion_', '').replace('.log', '')
             return f"adhoc_{parts}"
+        elif filename.startswith('job_'):
+            return filename.replace('.log', '')
         else:
             # Use filename without extension
             return filename.replace('.log', '')
@@ -182,6 +202,8 @@ class AdminLogService:
         if 'nightly' in filename.lower():
             return 'nightly'
         elif 'adhoc' in filename.lower():
+            return 'ad-hoc'
+        elif filename.lower().startswith('job_'):
             return 'ad-hoc'
         else:
             return 'ad-hoc'  # Default

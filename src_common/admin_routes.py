@@ -1864,6 +1864,7 @@ class IngestionRunRequest(BaseModel):
     source_files: Optional[List[str]] = None
     options: Optional[Dict[str, Any]] = None
     job_type: Optional[str] = "ad_hoc"  # "ad_hoc" or "nightly"
+    lane: Optional[str] = "A"
 
 @admin_router.post("/api/admin/ingestion/run")
 async def run_ingestion_job(request: IngestionRunRequest):
@@ -1877,12 +1878,17 @@ async def run_ingestion_job(request: IngestionRunRequest):
             source_file = (request.source_files[0] if request.source_files
                           else "ad_hoc_run")
 
+        lane = (request.lane or "A").strip().upper()
+        if lane not in {"A", "B", "C"}:
+            lane = "A"
+
         # Start the ingestion job
         job_id = await ingestion_service.start_ingestion_job(
             environment=request.env,
             source_file=source_file,
             options=request.options or {},
-            job_type=request.job_type or "ad_hoc"
+            job_type=request.job_type or "ad_hoc",
+            lane=lane,
         )
 
         # Broadcast job start via WebSocket
@@ -1890,6 +1896,7 @@ async def run_ingestion_job(request: IngestionRunRequest):
             "type": "ingestion_job_started",
             "job_id": job_id,
             "environment": request.env,
+            "lane": lane,
             "timestamp": time.time()
         })
 
@@ -1900,6 +1907,7 @@ async def run_ingestion_job(request: IngestionRunRequest):
         return {
             "job_id": job_id,
             "env": request.env,
+            "lane": lane,
             "pid": pid,
             "status": "started",
             "timestamp": time.time()

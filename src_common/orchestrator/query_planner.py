@@ -22,6 +22,12 @@ from .provenance_models import ProvenanceConfig
 logger = get_logger(__name__)
 
 
+def _classification_value(classification, key: str, default=None):
+    if isinstance(classification, dict):
+        return classification.get(key, default)
+    return getattr(classification, key, default)
+
+
 class QueryPlanner:
     """
     Intelligent query planner that generates optimized execution plans.
@@ -436,9 +442,9 @@ class QueryPlanner:
         }
 
         # Adapt configuration based on query characteristics
-        intent = classification.intent
-        domain = classification.domain
-        complexity = classification.complexity
+        intent = _classification_value(classification, "intent", "")
+        domain = _classification_value(classification, "domain", "")
+        complexity = _classification_value(classification, "complexity", "medium")
 
         # Strategy selection based on query type
         if intent == "fact_lookup":
@@ -553,9 +559,9 @@ class QueryPlanner:
         }
 
         # Adapt configuration based on query characteristics
-        intent = classification.intent
-        domain = classification.domain
-        complexity = classification.complexity
+        intent = _classification_value(classification, "intent", "")
+        domain = _classification_value(classification, "domain", "")
+        complexity = _classification_value(classification, "complexity", "medium")
 
         # Adjust detail level based on query complexity and type
         if complexity == "high" or intent == "multi_hop_reasoning":
@@ -621,9 +627,9 @@ class QueryPlanner:
         if not self.context.enable_evaluation_gate:
             return None
 
-        intent = getattr(classification, 'intent', 'unknown')
-        domain = getattr(classification, 'domain', 'general')
-        complexity = getattr(classification, 'complexity', 'medium')
+        intent = _classification_value(classification, 'intent', 'unknown')
+        domain = _classification_value(classification, 'domain', 'general')
+        complexity = _classification_value(classification, 'complexity', 'medium')
 
         config = {
             "enabled": True,

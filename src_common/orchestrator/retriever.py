@@ -34,7 +34,22 @@ def _simple_score(query: str, text: str) -> float:
     return len(q & t) / max(1, len(q))
 
 
+def _apply_lane_filter(chunks: List[DocChunk], lane: Optional[str]) -> List[DocChunk]:
+    """Filter retrieval results by content lane identifier."""
+    if not lane or lane.upper() == "ALL":
+        return chunks
+    lane_upper = lane.upper()
+    filtered: List[DocChunk] = []
+    for chunk in chunks:
+        metadata = chunk.metadata or {}
+        chunk_lane = str(metadata.get("lane", "A")).upper()
+        if chunk_lane == lane_upper:
+            filtered.append(chunk)
+    return filtered
+
+
 def _keyword_boost_score(query: str, text: str, metadata: Dict[str, Any]) -> float:
+
     base = _simple_score(query, text)
     ql = (query or "").lower()
     tx = (text or "").lower()
@@ -122,7 +137,13 @@ def _retrieve_from_store(query: str, env: str, top_k: int = 5) -> List[DocChunk]
     return chunks[: max(1, top_k)]
 
 
-def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, limit: int = 3) -> List[DocChunk]:
+def retrieve(
+    plan: Union[Dict[str, Any], 'QueryPlan'],
+    query: str,
+    env: str,
+    limit: int = 3,
+    lane: Optional[str] = None,
+) -> List[DocChunk]:
     """
     Graph-augmented hybrid retriever. Supports both legacy plan dictionaries and new QueryPlan objects
     with graph expansion capabilities. Performs lightweight lexical scoring over local artifacts
@@ -140,6 +161,12 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
         plan_dict = plan
         graph_expansion = None
         expanded_query = query
+
+    lane_filter = None
+    if lane:
+        lane_value = lane.strip().upper()
+        if lane_value and lane_value != "ALL":
+            lane_filter = lane_value
 
     top_k = int(plan_dict.get("vector_top_k", 5))
 
@@ -162,7 +189,12 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
             results = _apply_reranking(results, plan, query, env)
             # Apply provenance tracking if enabled
             results = _apply_provenance_tracking(results, plan, query, env)
-            return results
+            filtered = _apply_lane_filter(results, lane_filter)
+            if lane_filter:
+                if filtered:
+                    return filtered
+            else:
+                return filtered
 
     candidates = list(_iter_candidate_chunks(env))
     for i, ch in enumerate(candidates):
@@ -199,7 +231,8 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
     # Apply provenance tracking if enabled
     results = _apply_provenance_tracking(results, plan, query, env)
 
-    return results
+    filtered = _apply_lane_filter(results, lane_filter)
+    return filtered
 
 
 def _get_expanded_query(original_query: str, graph_expansion: Optional[Dict[str, Any]]) -> str:

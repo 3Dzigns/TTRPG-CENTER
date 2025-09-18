@@ -1,5 +1,16 @@
 # Cassandra Setup for TTRPG Center (DEV/CI)
 
+## Python Driver Installation
+
+The local development and CI environments rely on the native `cassandra-driver` package. Install the wheel after creating your virtual environment:
+
+```bash
+pip install "cassandra-driver>=3.29.0,<3.30.0"
+```
+
+On Python 3.12 the pre-built wheels are available for Windows, macOS, and Linux. If compilation fails, ensure you are using the latest pip (`python -m pip install --upgrade pip`).
+
+
 This guide explains how to run the local Apache Cassandra instance that backs the vector store in development and CI environments (FR-031).
 
 ## 1. Overview
