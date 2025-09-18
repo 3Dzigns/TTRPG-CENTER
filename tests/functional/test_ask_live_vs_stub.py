@@ -38,6 +38,7 @@ def test_stub_mode_returns_stub_answer(monkeypatch, rag_client):
     assert data["answers"]["selected"] in {"openai", "claude"}
     assert data["answer"]
     assert isinstance(data["sources"], list)
+    assert data["lane"] == "A"
 
 
 def test_live_mode_returns_live_answer(monkeypatch, rag_client):
@@ -58,6 +59,7 @@ def test_live_mode_returns_live_answer(monkeypatch, rag_client):
     assert data["answers"]["selected"] == "openai"
     assert data["answer"] == "real answer"
     assert data["model"].get("provider") == "openai"
+    assert data["lane"] == "A"
 
 
 def test_live_mode_fallback_sets_degraded(monkeypatch, rag_client):
@@ -77,3 +79,11 @@ def test_live_mode_fallback_sets_degraded(monkeypatch, rag_client):
     assert data["degraded"] is True
     assert "RateLimitError" in data["degraded_reason"]
     assert "sk-test" not in data["degraded_reason"]
+
+
+def test_lane_override_in_response(rag_client):
+    response = rag_client.post("/rag/ask", json={"query": "Describe a paladin", "lane": "B"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["lane"] == "B"

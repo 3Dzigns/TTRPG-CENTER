@@ -18,6 +18,8 @@ volumes:
     name: ttrpg_logs_dev
   uploads_dev:
     name: ttrpg_uploads_dev
+  cassandra_data_dev:
+    name: ttrpg_cassandra_data_dev
 
 services:
   app-dev:

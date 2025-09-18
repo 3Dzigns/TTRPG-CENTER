@@ -114,8 +114,10 @@ class TestAdminIngestionService:
         
         assert job_id.startswith("job_")
         assert "_dev" in job_id
-        mock_mkdir.assert_called_once()
+        assert mock_mkdir.call_count >= 2
         mock_json_dump.assert_called_once()
+        dumped_manifest = mock_json_dump.call_args[0][0]
+        assert dumped_manifest["lane"] == "A"
 
 
 class TestAdminDictionaryService:

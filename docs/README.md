@@ -4,7 +4,7 @@
 
 Welcome to the TTRPG Center documentation hub. This system provides intelligent document processing, query handling, and workflow orchestration for tabletop RPG content through a sophisticated multi-phase architecture.
 
-## 🚀 Quick Navigation
+##  Quick Navigation
 
 ### For New Developers
 - **[Project Architecture](./PROJECT_ARCHITECTURE.md)** - Complete system overview and technical deep-dive
@@ -23,58 +23,58 @@ Welcome to the TTRPG Center documentation hub. This system provides intelligent 
 
 ---
 
-## 📁 Documentation Structure
+##  Documentation Structure
 
 ### Core Documentation
 ```
 docs/
-├── README.md                          # This index file
-├── PROJECT_ARCHITECTURE.md            # Master architecture document
-├── comprehensive_code_analysis_2025.md # Detailed code analysis
-└── code_analysis_report.md            # Implementation status report
+ README.md                          # This index file
+ PROJECT_ARCHITECTURE.md            # Master architecture document
+ comprehensive_code_analysis_2025.md # Detailed code analysis
+ code_analysis_report.md            # Implementation status report
 ```
 
 ### Phase Documentation
 ```
 docs/phases/
-├── Phase0.md    # Foundation & Environment Isolation
-├── Phase1.md    # Three-Pass Ingestion Pipeline  
-├── Phase2.md    # Intelligent Retrieval & Model Routing
-├── phase3.md    # Graph-Centered Workflows
-├── phase4.md    # Admin UI Implementation
-├── Phase5.md    # User Interface & Experience
-├── Phase6.md    # Testing & Feedback Systems
-└── Phase7.md    # Requirements & Feature Management
+ Phase0.md    # Foundation & Environment Isolation
+ Phase1.md    # Three-Pass Ingestion Pipeline  
+ Phase2.md    # Intelligent Retrieval & Model Routing
+ phase3.md    # Graph-Centered Workflows
+ phase4.md    # Admin UI Implementation
+ Phase5.md    # User Interface & Experience
+ Phase6.md    # Testing & Feedback Systems
+ Phase7.md    # Requirements & Feature Management
 ```
 
 ### Specialized Documentation  
 ```
 docs/
-├── requirements/           # Feature requirements and specifications
-│   ├── Requirement.md     # Master requirements document
-│   ├── FR001.md          # Functional requirement examples
-│   └── FR-*.md           # Individual requirement documents
-├── setup/                 # Setup and configuration guides
-│   └── ASTRA_SETUP.md    # AstraDB configuration guide
-├── testing/              # Testing documentation and guides
-│   ├── phase4-test-guide.md
-│   └── phase4-test-summary.md
-├── bugs/                 # Bug reports and tracking
-│   ├── BP001.md          # Individual bug reports
-│   └── BP*.md            # Bug tracking documents
-└── reports/              # Analysis and status reports
-    └── code_analysis_report.md
+ requirements/           # Feature requirements and specifications
+    Requirement.md     # Master requirements document
+    FR001.md          # Functional requirement examples
+    FR-*.md           # Individual requirement documents
+ setup/                 # Setup and configuration guides
+    ASTRA_SETUP.md    # AstraDB configuration guide
+ testing/              # Testing documentation and guides
+    phase4-test-guide.md
+    phase4-test-summary.md
+ bugs/                 # Bug reports and tracking
+    BP001.md          # Individual bug reports
+    BP*.md            # Bug tracking documents
+ reports/              # Analysis and status reports
+     code_analysis_report.md
 ```
 
 ---
 
-## 🏗️ System Overview
+##  System Overview
 
 ### Architecture at a Glance
 TTRPG Center is built on a **7-phase development methodology** with strict **environment isolation** and **graph-centric reasoning**:
 
 1. **Foundation** (Phase 0): Environment isolation, CI/CD, logging infrastructure
-2. **Ingestion** (Phase 1): Multi-pass PDF processing (unstructured.io → Haystack → LlamaIndex)
+2. **Ingestion** (Phase 1): Multi-pass PDF processing (unstructured.io  Haystack  LlamaIndex)
 3. **Intelligence** (Phase 2): Query classification, policy-driven retrieval, model routing
 4. **Workflows** (Phase 3): Graph-aware planning, multi-step reasoning, HITL approvals
 5. **Admin Tools** (Phase 4): System management, monitoring, operational interfaces
@@ -83,16 +83,16 @@ TTRPG Center is built on a **7-phase development methodology** with strict **env
 8. **Requirements** (Phase 7): Structured feature management, documentation generation
 
 ### Key Capabilities
-- ✅ **Multi-Pass Document Processing**: PDF → Chunks → Enrichment → Knowledge Graph
-- ✅ **Intelligent Query Handling**: Intent classification with model routing 
-- ✅ **Graph-Powered Reasoning**: Multi-hop reasoning via knowledge graphs
-- ✅ **Workflow Orchestration**: Complex task planning with human-in-the-loop
-- ✅ **Real-Time Interfaces**: WebSocket support, live status updates
-- ✅ **Comprehensive Testing**: Unit, functional, regression, security test suites
+-  **Multi-Pass Document Processing**: PDF  Chunks  Enrichment  Knowledge Graph
+-  **Intelligent Query Handling**: Intent classification with model routing 
+-  **Graph-Powered Reasoning**: Multi-hop reasoning via knowledge graphs
+-  **Workflow Orchestration**: Complex task planning with human-in-the-loop
+-  **Real-Time Interfaces**: WebSocket support, live status updates
+-  **Comprehensive Testing**: Unit, functional, regression, security test suites
 
 ---
 
-## 🛠️ Technology Stack
+##  Technology Stack
 
 ### Core Technologies
 - **Framework**: FastAPI with async support
@@ -104,20 +104,20 @@ TTRPG Center is built on a **7-phase development methodology** with strict **env
 ### Environment Structure
 ```
 TTRPG_Center/
-├── env/{dev|test|prod}/        # Environment isolation
-│   ├── config/                 # Environment-specific configurations
-│   ├── data/                   # Environment data directories  
-│   └── logs/                   # Environment-specific logging
-├── src_common/                 # Shared application code
-├── tests/                      # Comprehensive test suites
-├── docs/                       # Documentation (you are here)
-├── artifacts/                  # Processing artifacts and outputs
-└── scripts/                    # Automation and deployment scripts
+ env/{dev|test|prod}/        # Environment isolation
+    config/                 # Environment-specific configurations
+    data/                   # Environment data directories  
+    logs/                   # Environment-specific logging
+ src_common/                 # Shared application code
+ tests/                      # Comprehensive test suites
+ docs/                       # Documentation (you are here)
+ artifacts/                  # Processing artifacts and outputs
+ scripts/                    # Automation and deployment scripts
 ```
 
 ---
 
-## 🔧 Development Quick Start
+##  Development Quick Start
 
 ### Prerequisites
 - Python 3.12+
@@ -126,7 +126,7 @@ TTRPG_Center/
 - Cassandra Docker service (required for DEV/CI vector store)
 - AstraDB credentials (optional fallback/production parity)
 
-### 🪟 Windows Setup (Required Dependencies)
+###  Windows Setup (Required Dependencies)
 
 **For Windows users** - TTRPG Center requires Poppler and Tesseract for PDF processing:
 
@@ -178,9 +178,9 @@ open http://localhost:8000/admin
 
 ---
 
-## 📊 Implementation Status
+##  Implementation Status
 
-### ✅ Completed Phases
+###  Completed Phases
 - **Phase 0**: Environment isolation, CI/CD foundation *(Complete)*
 - **Phase 1**: Three-pass ingestion pipeline *(Complete)*  
 - **Phase 2**: Intelligent retrieval and model routing *(Complete)*
@@ -190,7 +190,7 @@ open http://localhost:8000/admin
 - **Phase 6**: Testing and feedback systems *(Complete)*
 - **Phase 7**: Requirements and feature management *(Complete)*
 
-### 🔍 Key Metrics
+###  Key Metrics
 - **Test Coverage**: >90% unit test coverage across all modules
 - **Performance**: <150ms p95 query classification, <400ms retrieval
 - **Quality Gates**: All phases pass unit/functional/regression/security tests
@@ -198,9 +198,9 @@ open http://localhost:8000/admin
 
 ---
 
-## 🧭 Navigation by Role
+##  Navigation by Role
 
-### 👩‍💻 **Software Developers**
+###  **Software Developers**
 Start here for implementation details:
 1. [Project Architecture Overview](./PROJECT_ARCHITECTURE.md#system-architecture)
 2. [Core Components Deep Dive](./PROJECT_ARCHITECTURE.md#core-components)
@@ -213,7 +213,7 @@ Start here for implementation details:
 - `src_common/planner/` - Workflow planning and task decomposition
 - `tests/` - Comprehensive test suites with examples
 
-### 🏗️ **System Architects**  
+###  **System Architects**  
 Focus on system design and integration:
 1. [Multi-Phase Architecture](./PROJECT_ARCHITECTURE.md#multi-phase-development-structure)
 2. [Data Flow Architecture](./PROJECT_ARCHITECTURE.md#data-flow-architecture)
@@ -225,7 +225,7 @@ Focus on system design and integration:
 - [Requirements](./requirements/) - Functional requirements and specifications
 - [Setup Guides](./setup/) - Configuration and deployment procedures
 
-### 🚀 **DevOps Engineers**
+###  **DevOps Engineers**
 Infrastructure and operations focus:
 1. [Deployment & Operations](./PROJECT_ARCHITECTURE.md#deployment--operations)
 2. [Environment Management](./PROJECT_ARCHITECTURE.md#environment-isolation-system)
@@ -237,7 +237,7 @@ Infrastructure and operations focus:
 - `env/` - Environment-specific configurations
 - `artifacts/` - Processing outputs and job artifacts
 
-### 🧪 **QA Engineers**
+###  **QA Engineers**
 Testing and quality assurance:
 1. [Testing Strategy](./PROJECT_ARCHITECTURE.md#security--testing-standards)
 2. [Quality Gates](./PROJECT_ARCHITECTURE.md#security--testing-standards)
@@ -250,7 +250,7 @@ Testing and quality assurance:
 - `tests/regression/` - Golden file baseline comparisons
 - `tests/security/` - Security and injection testing
 
-### 📝 **Product Managers**
+###  **Product Managers**
 Feature planning and requirements:
 1. [Phase Objectives](./phases/) - Development roadmap and features
 2. [Requirements Documentation](./requirements/) - Feature specifications
@@ -259,7 +259,7 @@ Feature planning and requirements:
 
 ---
 
-## 🔍 Key Concepts
+##  Key Concepts
 
 ### Environment Isolation
 Each environment (dev/test/prod) maintains complete separation:
@@ -284,7 +284,7 @@ Dynamic model selection based on query characteristics:
 
 ---
 
-## 📞 Getting Help
+##  Getting Help
 
 ### Documentation Issues
 - **Missing Information**: Check phase-specific documentation in `docs/phases/`
@@ -297,6 +297,13 @@ Dynamic model selection based on query characteristics:
 - **Performance Problems**: Check resource limits and caching configuration
 
 ### Contributing
+
+1. Read: [Development Workflows](./PROJECT_ARCHITECTURE.md#development-workflows)
+2. Follow: Testing standards and quality gates
+3. Document: Update phase documentation for feature changes
+4. Test: Comprehensive test coverage required for all changes
+5. Install: `pip install "cassandra-driver>=3.29.0,<3.30.0"` before running `pytest`
+
 1. **Read**: [Development Workflows](./PROJECT_ARCHITECTURE.md#development-workflows)
 2. **Follow**: Testing standards and quality gates
 3. **Document**: Update phase documentation for feature changes
@@ -304,7 +311,7 @@ Dynamic model selection based on query characteristics:
 
 ---
 
-## 📈 Project Stats
+##  Project Stats
 
 - **Total Lines of Code**: ~15,000+ (Python/JavaScript/Configuration)
 - **Test Coverage**: >90% across all core modules

@@ -34,6 +34,7 @@ class IngestionJob:
     error_message: Optional[str] = None
     artifacts_path: Optional[str] = None
     process_id: Optional[int] = None
+    lane: str = "A"
     hgrn_enabled: bool = False
     hgrn_report_path: Optional[str] = None
     
@@ -226,7 +227,14 @@ class AdminIngestionService:
             logger.error(f"Error getting job logs for {environment}/{job_id}: {e}")
             return []
     
-    async def start_ingestion_job(self, environment: str, source_file: str, options: Dict[str, Any] = None, job_type: str = "ad_hoc") -> str:
+    async def start_ingestion_job(
+        self,
+        environment: str,
+        source_file: str,
+        options: Optional[Dict[str, Any]] = None,
+        job_type: str = "ad_hoc",
+        lane: str = "A",
+    ) -> str:
         """
         Start a new ingestion job (stub implementation)
 
@@ -253,6 +261,11 @@ class AdminIngestionService:
                 job_id = f"job_{int(timestamp.timestamp())}_{environment}"
                 log_filename = f"{job_id}.log"
 
+            lane_value = (lane or "A").strip().upper()
+            if lane_value not in {"A", "B", "C"}:
+                lane_value = "A"
+            options_dict = options or {}
+
             # Create job directory
             job_path = Path(f"artifacts/{environment}/{job_id}")
             job_path.mkdir(parents=True, exist_ok=True)
@@ -268,11 +281,12 @@ class AdminIngestionService:
                 "source_file": source_file,
                 "status": "pending",
                 "created_at": timestamp.timestamp(),
-                "options": options or {},
+                "options": options_dict,
                 "job_type": job_type,
+                "lane": lane_value,
                 "log_file": log_filename,
                 "phases": ["parse", "enrich", "compile", "hgrn_validate"],
-                "hgrn_enabled": options.get("hgrn_enabled", True) if options else True
+                "hgrn_enabled": options_dict.get("hgrn_enabled", True)
             }
 
             manifest_file = job_path / "manifest.json"
@@ -281,6 +295,18 @@ class AdminIngestionService:
 
             # Create log file path for the job
             log_file_path = logs_dir / log_filename
+            log_lines = [
+                f"[{timestamp.isoformat()}] Ingestion job created",
+                f"job_id={job_id} environment={environment} type={job_type}",
+                f"lane={lane_value}",
+            ]
+            if source_file:
+                log_lines.append(f"source={source_file}")
+            if options_dict:
+                log_lines.append(f"options={json.dumps(options_dict, sort_keys=True)}")
+            with open(log_file_path, 'w', encoding='utf-8') as log_file:
+                log_file.write("\n".join(log_lines) + "\n")
+
 
             logger.info(f"Created {job_type} ingestion job {job_id} for {environment} with log file {log_filename}")
 
@@ -497,6 +523,7 @@ class AdminIngestionService:
                 started_at=manifest.get("started_at"),
                 completed_at=manifest.get("completed_at"),
                 source_file=manifest.get("source_file", "unknown"),
+                lane=manifest.get("lane", "A"),
                 total_phases=len(manifest.get("phases", [])),
                 completed_phases=manifest.get("completed_phases", 0),
                 current_phase=manifest.get("current_phase"),

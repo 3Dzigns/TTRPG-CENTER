@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from typing import Any, Dict
+from types import SimpleNamespace
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -27,10 +28,120 @@ logger = get_logger(__name__)
 
 rag_router = APIRouter()
 
+LANE_CHOICES = {"A", "B", "C", "ALL"}
+
+
+def _normalize_lane(value: Optional[str]) -> str:
+    lane = (value or "A").strip().upper()
+    if lane not in LANE_CHOICES:
+        return "A"
+    return lane
+
+
+def _resolve_query_plan(env: str, query: str, classification: Optional[Dict[str, Any]] = None):
+    """Return classification, query plan, retrieval plan, and model config."""
+    classification = classification or classify_query(query)
+    planner = get_planner(env)
+    try:
+        query_plan = planner.get_plan(query)
+    except Exception:
+        query_plan = None
+
+    plan = getattr(query_plan, "retrieval_strategy", None) if query_plan else None
+    model_cfg = getattr(query_plan, "model_config", None) if query_plan else None
+
+    if not plan or not model_cfg:
+        policies = load_policies()
+        plan = choose_plan(policies, classification)
+        model_cfg = pick_model(classification, plan)
+        query_plan = SimpleNamespace(
+            retrieval_strategy=plan,
+            model_config=model_cfg,
+            graph_expansion=None,
+            performance_hints={},
+            query_hash=None,
+            hit_count=0,
+        )
+
+    return classification, query_plan, plan, model_cfg
+
 
 @rag_router.get("/ping")
 async def rag_ping():
     return {"status": "ok", "component": "rag", "environment": os.getenv("APP_ENV", "dev")}
+
+@rag_router.post("/classify")
+async def rag_classify(payload: Dict[str, Any]):
+    env = os.getenv("APP_ENV", "dev")
+    q = (payload or {}).get("query", "").strip()
+    if not q:
+        return JSONResponse(status_code=400, content={"error": "query is required"})
+
+    classification = classify_query(q)
+
+    return {
+        "query": q,
+        "environment": env,
+        "classification": classification,
+    }
+
+
+@rag_router.post("/retrieve")
+async def rag_retrieve(payload: Dict[str, Any]):
+    env = os.getenv("APP_ENV", "dev")
+    q = (payload or {}).get("query", "").strip()
+    if not q:
+        return JSONResponse(status_code=400, content={"error": "query is required"})
+
+    lane = _normalize_lane((payload or {}).get("lane"))
+    lane_filter = None if lane == "ALL" else lane
+    top_k = int(payload.get("top_k", 3) or 3)
+
+    classification, query_plan, plan, model_cfg = _resolve_query_plan(env, q)
+
+    chunks = retrieve(plan, q, env, limit=top_k, lane=lane_filter)
+    chunk_payload = [
+        {
+            "id": c.id,
+            "text": c.text,
+            "source": c.source,
+            "score": c.score,
+            "metadata": c.metadata,
+        }
+        for c in chunks
+    ]
+
+    model_meta: Dict[str, Any] = {}
+    if isinstance(model_cfg, dict):
+        model_meta.update(model_cfg)
+    elif hasattr(model_cfg, "items"):
+        try:
+            model_meta.update(dict(model_cfg))
+        except Exception:
+            pass
+
+    if isinstance(plan, dict):
+        retrieval_plan = plan
+    elif hasattr(plan, "items"):
+        try:
+            retrieval_plan = dict(plan)
+        except Exception:
+            retrieval_plan = {"value": str(plan)}
+    else:
+        retrieval_plan = {"value": str(plan)}
+
+    return {
+        "query": q,
+        "environment": env,
+        "lane": lane,
+        "top_k": top_k,
+        "classification": classification,
+        "retrieval_plan": retrieval_plan,
+        "model": model_meta,
+        "chunks": chunk_payload,
+        "trace_id": str(uuid.uuid4()),
+    }
+
 
 
 @rag_router.post("/ask")
@@ -58,25 +169,13 @@ async def rag_ask(payload: Dict[str, Any]):
             logger.warning(f"Failed to extract persona context: {e}")
             persona_context = None
 
-    # 1) Classify
-    cls = classify_query(q)
+    lane = _normalize_lane((payload or {}).get("lane"))
+    lane_filter = None if lane == "ALL" else lane
 
-    # 2) Query Planning (enhanced plan generation with caching)
-    planner = get_planner(env)
-    query_plan = planner.get_plan(q)
-
-    # Extract components from optimized plan
-    plan = query_plan.retrieval_strategy
-    model_cfg = query_plan.model_config
-
-    # Legacy fallback for compatibility (if planning fails)
-    if not plan or not model_cfg:
-        policies = load_policies()
-        plan = choose_plan(policies, cls)
-        model_cfg = pick_model(cls, plan)
+    classification, query_plan, plan, model_cfg = _resolve_query_plan(env, q)
 
     # 4) Prompt template
-    tmpl = load_prompt(cls["intent"], cls["domain"])  # best-effort
+    tmpl = load_prompt(classification["intent"], classification["domain"])  # best-effort
     try:
         rendered_prompt = render_prompt(
             tmpl,
@@ -90,7 +189,8 @@ async def rag_ask(payload: Dict[str, Any]):
         rendered_prompt = f"You are the TTRPG Center Assistant. TASK: {q}"
 
     # 5) Retrieve top chunks
-    top_chunks = retrieve(plan, q, env, limit=payload.get("top_k", 3))
+    top_chunks = retrieve(plan, q, env, limit=payload.get("top_k", 3), lane=lane_filter)
+
 
     # 6) Compose stub answers and attempt live generation when permitted
     def _synth(prefix: str) -> str:
@@ -100,7 +200,8 @@ async def rag_ask(payload: Dict[str, Any]):
             parts.append(top_chunks[0].text[:300])
         else:
             parts.append("No relevant chunks found in the current environment artifacts.")
-        parts.append("\nCitations:")
+        parts.append("")
+        parts.append("Citations:")
         for ch in top_chunks[:3]:
             meta_page = safe_metadata_get(ch.metadata, "page") or safe_metadata_get(ch.metadata, "page_number")
             sec = safe_metadata_get(ch.metadata, "section") or safe_metadata_get(ch.metadata, "section_title")
@@ -169,7 +270,7 @@ async def rag_ask(payload: Dict[str, Any]):
             # Generate user warnings for high-priority flags
             for flag in aehrl_report.get_high_priority_flags():
                 hallucination_warnings.append({
-                    "message": f"⚠️ Unsupported statement — please verify: {flag.claim.text}",
+                    "message": f"[WARN] Unsupported statement - please verify: {flag.claim.text}",
                     "confidence": flag.claim.confidence,
                     "severity": flag.severity.value,
                     "recommendation": flag.recommended_action
@@ -229,7 +330,8 @@ async def rag_ask(payload: Dict[str, Any]):
     response = {
         "query": q,
         "environment": env,
-        "classification": cls,
+        "lane": lane,
+        "classification": classification,
         "plan": plan,
         "model": model_meta,
         "query_planning": {
@@ -300,10 +402,11 @@ async def rag_ask(payload: Dict[str, Any]):
             "duration_ms": elapsed_ms,
             "env": env,
             "top_chunks": len(top_chunks),
-            "intent": cls.get("intent"),
+            "intent": classification.get("intent"),
             "used_stub_llm": used_stub_llm,
             "degraded": degraded,
             "llm_provider": llm_result.provider,
+            "lane": lane,
         },
     )
     return JSONResponse(content=response)
@@ -318,3 +421,5 @@ class PathSafe(str):
             return _P(self).name
         except Exception:
             return str(self)
+
+
