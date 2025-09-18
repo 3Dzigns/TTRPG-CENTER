@@ -172,3 +172,25 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+  cassandra-dev:
+    image: cassandra:5
+    container_name: ttrpg-cassandra-dev
+    environment:
+      - CASSANDRA_CLUSTER_NAME=ttrpg-dev
+      - MAX_HEAP_SIZE=1024M
+      - HEAP_NEWSIZE=256M
+      - CASSANDRA_DC=dc1
+    networks:
+      - ttrpg-dev-net
+    volumes:
+      - cassandra_data_dev:/var/lib/cassandra
+    ports:
+      - "9042:9042"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped

@@ -273,6 +273,7 @@ scripts/
 | `env/{ENV}/config/ports.json` | Port assignments | Environment isolation |
 | `config/retrieval_policies.yaml` | RAG policies | Query processing behavior |
 | `config/prompts/*.txt` | AI prompt templates | Model interactions |
+| `docs/setup/CASSANDRA_SETUP.md` | Local Cassandra setup runbook | DEV/CI |
 
 ### 🔧 **Development Tools**
 | File | Purpose | Usage |

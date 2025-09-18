@@ -383,11 +383,12 @@ class TestArtifactPreservationManager:
         assert marker_data["environment"] == "dev"
 
 
+
 class TestAstraLoaderEnhancements:
     """Test vector-store-backed AstraLoader functionality for bypass system."""
 
     @pytest.fixture
-    def loader_with_mock_store(self, monkeypatch):
+    def mock_store(self):
         store = Mock()
         store.backend_name = "astra"
         store.collection_name = "ttrpg_chunks_dev"
@@ -410,9 +411,13 @@ class TestAstraLoaderEnhancements:
             "total_chunks": 7,
             "collection_name": "ttrpg_chunks_dev",
         }
-        monkeypatch.setattr("src_common.astra_loader.make_vector_store", lambda env: store)
+        return store
+
+    @pytest.fixture
+    def loader_with_mock_store(self, monkeypatch, mock_store):
+        monkeypatch.setattr("src_common.astra_loader.make_vector_store", lambda env: mock_store)
         loader = AstraLoader("dev")
-        return loader, store
+        return loader, mock_store
 
     def test_safe_upsert_chunks_success(self, loader_with_mock_store):
         loader, store = loader_with_mock_store
@@ -470,10 +475,6 @@ class TestAstraLoaderEnhancements:
         assert result.success is False
         assert result.error_message == "boom"
 
-
-class TestFactoryFunctions:
-    """Test factory functions"""
-    
     def test_get_bypass_validator(self):
         """Test bypass validator factory"""
         validator = get_bypass_validator("dev")

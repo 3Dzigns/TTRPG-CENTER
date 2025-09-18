@@ -5,9 +5,10 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from ..ttrpg_logging import get_logger
+from ..vector_store.factory import make_vector_store
 
 logger = get_logger(__name__)
 
@@ -87,76 +88,63 @@ def _iter_candidate_chunks(env: str) -> List[DocChunk]:
                     yield DocChunk(id=cid, text=text, source=str(path), score=0.0, metadata=meta)
 
 
-def _astra_config() -> Dict[str, str]:
-    return {
-        "endpoint": os.getenv("ASTRA_DB_API_ENDPOINT", ""),
-        "token": os.getenv("ASTRA_DB_APPLICATION_TOKEN", ""),
-        "db_id": os.getenv("ASTRA_DB_ID", ""),
-        "keyspace": os.getenv("ASTRA_DB_KEYSPACE", ""),
-    }
 
-
-def _retrieve_from_astra(query: str, env: str, top_k: int = 5) -> List[DocChunk]:
-    cfg = _astra_config()
-    if not (cfg["endpoint"] and cfg["token"]):
-        return []
+def _retrieve_from_store(query: str, env: str, top_k: int = 5) -> List[DocChunk]:
     try:
-        from astrapy import DataAPIClient  # type: ignore
-
-        client = DataAPIClient(cfg["token"])  # nosec
-        db = client.get_database_by_api_endpoint(cfg["endpoint"])  # endpoint includes DB
-        collection_name = f"ttrpg_chunks_{env}"
-        col = db.get_collection(collection_name)
-
-        # Page through a reasonable subset and score client-side (regex unsupported in JSON API)
-        projection = {"content": 1, "metadata": 1, "chunk_id": 1}
-        cursor = col.find({}, projection=projection, limit=2000)
-
-        candidates: List[DocChunk] = []
-        scanned = 0
-        max_docs = 2000  # safety cap
-        for d in cursor:
-            text = (d.get("content") or "")
-            cid = d.get("chunk_id") or str(d.get("_id"))
-            meta = d.get("metadata") or {}
-            score = _keyword_boost_score(query, text, meta)
-            if score > 0:
-                src = f"astra:{collection_name}:{cid}"
-                candidates.append(DocChunk(id=str(cid), text=text, source=src, score=score, metadata=meta))
-            scanned += 1
-            if scanned >= max_docs:
-                break
-
-        if not candidates:
-            return []
-        candidates.sort(key=lambda c: c.score, reverse=True)
-        # Deduplicate by signature
-        seen = set()
-        results: List[DocChunk] = []
-        for c in candidates:
-            sig = " ".join(_tokenize(c.text))[:200]
-            if sig in seen:
-                continue
-            seen.add(sig)
-            results.append(c)
-            if len(results) >= max(1, top_k):
-                break
-        return results
-    except Exception as e:
-        logger.warning(f"Astra retrieval unavailable, falling back: {e}")
+        store = make_vector_store(env)
+    except Exception as exc:
+        logger.warning("Vector store unavailable; falling back to local artifacts: %s", exc)
         return []
 
+    filters: Dict[str, Any] = {
+        "query_text": query,
+        "scan_limit": 2000,
+    }
+    raw_results = store.query(vector=None, top_k=max(top_k * 2, 10), filters=filters)
+    if not raw_results:
+        return []
 
-def retrieve(plan: Dict[str, Any], query: str, env: str, limit: int = 3) -> List[DocChunk]:
+    chunks: List[DocChunk] = []
+    for doc in raw_results:
+        text = doc.get("content") or ""
+        metadata = doc.get("metadata") or {}
+        score = doc.get("score", 0.0)
+        chunks.append(
+            DocChunk(
+                id=str(doc.get("chunk_id")),
+                text=text,
+                source=f"vector:{store.backend_name}:{metadata.get('source_file', 'unknown')}",
+                score=score,
+                metadata=metadata,
+            )
+        )
+    chunks.sort(key=lambda c: c.score, reverse=True)
+    return chunks[: max(1, top_k)]
+
+
+def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, limit: int = 3) -> List[DocChunk]:
     """
-    Hybrid retriever facade. For now, performs lightweight lexical scoring over local artifacts
+    Graph-augmented hybrid retriever. Supports both legacy plan dictionaries and new QueryPlan objects
+    with graph expansion capabilities. Performs lightweight lexical scoring over local artifacts
     to satisfy Phase 2 contract without external services. If AstraDB is configured and reachable,
     prefers AstraDB as the source of truth.
     """
-    top_k = int(plan.get("vector_top_k", 5))
+    # Handle both legacy dict plans and new QueryPlan objects
+    if hasattr(plan, 'retrieval_strategy'):
+        # QueryPlan object
+        plan_dict = plan.retrieval_strategy
+        graph_expansion = getattr(plan, 'graph_expansion', None)
+        expanded_query = _get_expanded_query(query, graph_expansion)
+    else:
+        # Legacy dict plan
+        plan_dict = plan
+        graph_expansion = None
+        expanded_query = query
 
-    # Prefer AstraDB when available
-    astra_results = _retrieve_from_astra(query, env, top_k)
+    top_k = int(plan_dict.get("vector_top_k", 5))
+
+    # Prefer AstraDB when available (use expanded query for better results)
+    astra_results = _retrieve_from_store(expanded_query, env, top_k)
     if astra_results:
         # Deduplicate similar content
         seen = set()
@@ -174,11 +162,18 @@ def retrieve(plan: Dict[str, Any], query: str, env: str, limit: int = 3) -> List
 
     candidates = list(_iter_candidate_chunks(env))
     for i, ch in enumerate(candidates):
+        # Use expanded query for better scoring when available
+        base_score = _simple_score(expanded_query, ch.text)
+
+        # Apply graph-aware boosting if we have expansion metadata
+        if graph_expansion and graph_expansion.get("enabled"):
+            base_score = _apply_graph_boost(base_score, ch, graph_expansion)
+
         candidates[i] = DocChunk(
             id=ch.id,
             text=ch.text,
             source=ch.source,
-            score=_simple_score(query, ch.text),
+            score=base_score,
             metadata=ch.metadata,
         )
     # sort and dedup by content similarity (very naive)
@@ -194,3 +189,71 @@ def retrieve(plan: Dict[str, Any], query: str, env: str, limit: int = 3) -> List
         seen.append(sig)
         results.append(ch)
     return results
+
+
+def _get_expanded_query(original_query: str, graph_expansion: Optional[Dict[str, Any]]) -> str:
+    """
+    Extract the expanded query from graph expansion metadata.
+
+    Args:
+        original_query: Original user query
+        graph_expansion: Graph expansion metadata from QueryPlan
+
+    Returns:
+        Expanded query string or original if no expansion available
+    """
+    if not graph_expansion or not graph_expansion.get("enabled"):
+        return original_query
+
+    # Return expanded query if available, otherwise fall back to original
+    expanded = graph_expansion.get("expanded_query")
+    if expanded and expanded != original_query:
+        logger.debug(f"Using expanded query: '{original_query}' -> '{expanded}'")
+        return expanded
+
+    return original_query
+
+
+def _apply_graph_boost(base_score: float, chunk: DocChunk, graph_expansion: Dict[str, Any]) -> float:
+    """
+    Apply graph-aware boosting to the base similarity score.
+
+    Args:
+        base_score: Base similarity score
+        chunk: Document chunk to score
+        graph_expansion: Graph expansion metadata
+
+    Returns:
+        Boosted score incorporating graph relationships
+    """
+    if not graph_expansion.get("enabled") or not graph_expansion.get("expansion_terms"):
+        return base_score
+
+    boost_factor = 1.0
+    text_lower = chunk.text.lower()
+
+    # Check for mentions of expanded terms in the chunk
+    for term_data in graph_expansion.get("expansion_terms", []):
+        term = term_data.get("term", "").lower()
+        confidence = term_data.get("confidence", 0.0)
+        source = term_data.get("source", "")
+
+        if term and term in text_lower:
+            # Apply boost based on expansion source and confidence
+            if source == "alias":
+                boost_factor += confidence * 0.3  # Moderate boost for aliases
+            elif source == "cross_ref":
+                boost_factor += confidence * 0.4  # Higher boost for cross-references
+            elif source == "graph_relation":
+                boost_factor += confidence * 0.2  # Lower boost for graph relations
+
+    # Cap the boost to prevent extreme scores
+    boost_factor = min(boost_factor, 2.0)
+
+    boosted_score = base_score * boost_factor
+
+    if boost_factor > 1.0:
+        logger.debug(f"Applied graph boost: {base_score:.3f} -> {boosted_score:.3f} "
+                    f"(factor: {boost_factor:.2f})")
+
+    return boosted_score

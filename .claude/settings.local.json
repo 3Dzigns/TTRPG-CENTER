@@ -45,7 +45,9 @@
       "Bash(gh pr create:*)",
       "Bash(ss:*)",
       "Bash(tasklist)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []
