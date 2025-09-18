@@ -10,7 +10,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, List
 
 from cassandra.auth import PlainTextAuthProvider  # type: ignore
 from cassandra.cluster import Cluster  # type: ignore
-from cassandra.io.asyncio import AsyncioConnection  # type: ignore
+from cassandra.io.asyncioreactor import AsyncioConnection  # type: ignore
 from cassandra.query import SimpleStatement  # type: ignore
 
 from ..ttrpg_logging import get_logger

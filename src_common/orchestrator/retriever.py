@@ -160,6 +160,8 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
         if results:
             # Apply reranking if enabled
             results = _apply_reranking(results, plan, query, env)
+            # Apply provenance tracking if enabled
+            results = _apply_provenance_tracking(results, plan, query, env)
             return results
 
     candidates = list(_iter_candidate_chunks(env))
@@ -193,6 +195,9 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
 
     # Apply reranking if enabled
     results = _apply_reranking(results, plan, query, env)
+
+    # Apply provenance tracking if enabled
+    results = _apply_provenance_tracking(results, plan, query, env)
 
     return results
 
@@ -376,4 +381,99 @@ def _apply_reranking(
 
     except Exception as e:
         logger.warning(f"Error during reranking: {e}, returning original results")
+        return results
+
+
+def _apply_provenance_tracking(
+    results: List[DocChunk],
+    plan: Union[Dict[str, Any], 'QueryPlan'],
+    query: str,
+    env: str
+) -> List[DocChunk]:
+    """
+    Apply provenance tracking to results if enabled in the plan.
+
+    Args:
+        results: Retrieval results
+        plan: Query plan (dict or QueryPlan object)
+        query: Original user query
+        env: Environment
+
+    Returns:
+        Results with provenance metadata attached
+    """
+    if not results:
+        return results
+
+    # Check if provenance tracking is enabled
+    provenance_config = None
+
+    if hasattr(plan, 'provenance_config'):
+        # QueryPlan object
+        provenance_config = getattr(plan, 'provenance_config', None)
+    else:
+        # Legacy dict plan - no provenance support
+        return results
+
+    if not provenance_config or not provenance_config.get('enabled', False):
+        return results
+
+    try:
+        # Import provenance components
+        from .provenance_tracker import ProvenanceTracker
+        from .provenance_models import ProvenanceConfig
+
+        # Create provenance tracker
+        tracker = ProvenanceTracker(environment=env)
+
+        # Start tracking for this retrieval session
+        bundle = tracker.start_tracking(query)
+
+        # Track retrieval stage
+        search_params = {
+            'top_k': len(results),
+            'graph_expansion': getattr(plan, 'graph_expansion', None) is not None,
+            'strategy': getattr(plan, 'retrieval_strategy', {}).get('strategy', 'default'),
+            'total_candidates': len(results)
+        }
+
+        # Convert DocChunk results to dict format for tracking
+        results_dicts = []
+        for chunk in results:
+            result_dict = {
+                'id': chunk.id,
+                'content': chunk.text,
+                'score': chunk.score,
+                'source': chunk.source,
+                'metadata': chunk.metadata.copy() if chunk.metadata else {}
+            }
+            results_dicts.append(result_dict)
+
+        # Track the retrieval
+        tracker.track_retrieval(
+            bundle=bundle,
+            strategy=search_params['strategy'],
+            search_params=search_params,
+            results=results_dicts,
+            graph_data=getattr(plan, 'graph_expansion', None),
+            retrieval_time_ms=0.0  # Would be measured in real implementation
+        )
+
+        # Attach provenance bundle to results metadata
+        for chunk in results:
+            if not chunk.metadata:
+                chunk.metadata = {}
+            chunk.metadata['provenance_bundle_id'] = bundle.correlation_id
+            chunk.metadata['provenance_session_id'] = bundle.session_id
+
+        logger.debug(f"Applied provenance tracking: {len(results)} results tracked")
+
+        return results
+
+    except ImportError:
+        logger.warning("Provenance components not available, skipping tracking")
+        return results
+
+    except Exception as e:
+        logger.warning(f"Error during provenance tracking: {e}, returning original results")
         return results
