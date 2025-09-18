@@ -1,4 +1,4 @@
-# tests/unit/test_admin_services.py
+﻿# tests/unit/test_admin_services.py
 """
 Unit tests for Phase 4 Admin Services
 Tests all five admin service modules (ADM-001 through ADM-005)
@@ -104,7 +104,7 @@ class TestAdminIngestionService:
     @patch('pathlib.Path.mkdir')
     @patch('builtins.open', new_callable=mock_open)
     @patch('json.dump')
-    async def test_start_ingestion_job(self, mock_json_dump, mock_file, mock_mkdir, ingestion_service):
+    async def test_start_ingestion_job(self, mock_json_dump, mock_file, mock_mkdir, ingestion_service, monkeypatch):
         """Test job creation"""
         job_id = await ingestion_service.start_ingestion_job(
             "dev", 

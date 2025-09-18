@@ -7,6 +7,7 @@ Environment-scoped ingestion job monitoring and management
 import json
 import time
 import asyncio
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from dataclasses import dataclass, asdict
@@ -75,6 +76,8 @@ class AdminIngestionService:
     
     def __init__(self):
         self.environments = ['dev', 'test', 'prod']
+        self._active_jobs = {}  # Track running async tasks
+        self._pass_sequence = ["parse", "enrich", "compile"]  # Lane A pipeline phases
         logger.info("Admin Ingestion Service initialized")
     
     async def get_ingestion_overview(self) -> Dict[str, Any]:
@@ -261,10 +264,12 @@ class AdminIngestionService:
                 job_id = f"job_{int(timestamp.timestamp())}_{environment}"
                 log_filename = f"{job_id}.log"
 
-            lane_value = (lane or "A").strip().upper()
-            if lane_value not in {"A", "B", "C"}:
-                lane_value = "A"
             options_dict = options or {}
+            lane_value = "A"
+            if job_type == "nightly" and options_dict.get("lane"):
+                candidate = str(options_dict.get("lane"))
+                if candidate.upper() in {"A", "B", "C"}:
+                    lane_value = candidate.upper()
 
             # Create job directory
             job_path = Path(f"artifacts/{environment}/{job_id}")
@@ -308,6 +313,18 @@ class AdminIngestionService:
                 log_file.write("\n".join(log_lines) + "\n")
 
 
+            self._start_ingestion_pipeline(
+                job_id=job_id,
+                environment=environment,
+                job_path=job_path,
+                manifest=job_manifest.copy(),
+                manifest_file=manifest_file,
+                log_file_path=log_file_path,
+                lane=lane_value,
+                job_type=job_type,
+                options=options_dict,
+            )
+
             logger.info(f"Created {job_type} ingestion job {job_id} for {environment} with log file {log_filename}")
 
             # In a real implementation, this would trigger the actual ingestion pipeline
@@ -318,6 +335,208 @@ class AdminIngestionService:
         except Exception as e:
             logger.error(f"Error starting ingestion job: {e}")
             raise
+
+    def _start_ingestion_pipeline(
+        self,
+        job_id: str,
+        environment: str,
+        job_path: Path,
+        manifest: Dict[str, Any],
+        manifest_file: Path,
+        log_file_path: Path,
+        lane: str,
+        job_type: str,
+        options: Dict[str, Any],
+    ) -> None:
+        if os.getenv("DISABLE_INGESTION_RUNNER", "").lower() in {"1", "true", "yes"}:
+            logger.info(f"Ingestion runner disabled for job {job_id}")
+            return
+
+        try:
+            # Get or create event loop
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # No event loop in current thread, create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            # Create the task
+            task = asyncio.create_task(
+                self._run_ingestion_pipeline(
+                    job_id=job_id,
+                    environment=environment,
+                    manifest=manifest,
+                    manifest_file=manifest_file,
+                    log_file_path=log_file_path,
+                    lane=lane,
+                    job_type=job_type,
+                    options=options,
+                )
+            )
+            self._active_jobs[job_id] = task
+
+            def _cleanup(_):
+                self._active_jobs.pop(job_id, None)
+                logger.info(f"Cleaned up task for job {job_id}")
+
+            task.add_done_callback(_cleanup)
+            logger.info(f"Started ingestion pipeline task for job {job_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to start ingestion pipeline for job {job_id}: {e}")
+            # Update manifest to show failure
+            try:
+                manifest["status"] = "failed"
+                manifest["error_message"] = f"Failed to start pipeline: {str(e)}"
+                with open(manifest_file, 'w', encoding='utf-8') as f:
+                    json.dump(manifest, f, indent=2)
+            except Exception as manifest_error:
+                logger.error(f"Failed to update manifest after pipeline start failure: {manifest_error}")
+
+    async def _run_ingestion_pipeline(
+        self,
+        job_id: str,
+        environment: str,
+        manifest: Dict[str, Any],
+        manifest_file: Path,
+        log_file_path: Path,
+        lane: str,
+        job_type: str,
+        options: Dict[str, Any],
+    ) -> None:
+        try:
+            start_ts = time.time()
+            manifest["status"] = "running"
+            manifest["started_at"] = start_ts
+            manifest["current_phase"] = None
+            manifest["completed_phases"] = 0
+            await self._write_manifest(manifest_file, manifest)
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} started lane={lane}")
+
+            job_path = manifest_file.parent
+
+            for idx, phase in enumerate(self._pass_sequence, start=1):
+                manifest["current_phase"] = phase
+                manifest["completed_phases"] = idx - 1
+                await self._write_manifest(manifest_file, manifest)
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] phase={phase} status=started")
+
+                # Simulate actual pipeline work and create artifacts
+                await self._execute_phase(phase, job_path, manifest, job_id)
+
+                # Small delay to simulate processing time
+                await asyncio.sleep(0.5)
+
+                manifest["completed_phases"] = idx
+                await self._write_manifest(manifest_file, manifest)
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] phase={phase} status=completed")
+
+            manifest["current_phase"] = None
+            manifest["status"] = "completed"
+            manifest["completed_at"] = time.time()
+            await self._write_manifest(manifest_file, manifest)
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} completed successfully")
+
+        except Exception as exc:
+            manifest["status"] = "failed"
+            manifest["current_phase"] = None
+            manifest["error_message"] = str(exc)
+            manifest["completed_at"] = time.time()
+            await self._write_manifest(manifest_file, manifest)
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} failed: {exc}")
+            logger.exception("Ingestion pipeline failed for %s", job_id)
+
+    async def _write_manifest(self, manifest_file: Path, manifest: Dict[str, Any]) -> None:
+        def _write() -> None:
+            manifest_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(manifest_file, 'w', encoding='utf-8') as handle:
+                json.dump(manifest, handle, indent=2)
+
+        await asyncio.to_thread(_write)
+
+    async def _append_log(self, log_file_path: Path, message: str) -> None:
+        def _write() -> None:
+            log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file_path, 'a', encoding='utf-8') as handle:
+                handle.write(message + "\n")
+
+        await asyncio.to_thread(_write)
+
+    async def _execute_phase(self, phase: str, job_path: Path, manifest: Dict[str, Any], job_id: str) -> None:
+        """Execute a specific phase of the ingestion pipeline and create artifacts"""
+        try:
+            if phase == "parse":
+                # Pass A: Create sample chunks from PDF parsing
+                chunks_data = {
+                    "source_file": manifest.get("source_file", "unknown.pdf"),
+                    "job_id": job_id,
+                    "processed_at": datetime.now().isoformat(),
+                    "chunks": [
+                        {
+                            "chunk_id": f"chunk_{i}",
+                            "content": f"Sample content from PDF chunk {i}",
+                            "page": i % 10 + 1,
+                            "metadata": {"source": "PDF", "type": "text"}
+                        }
+                        for i in range(15)  # Create 15 sample chunks
+                    ]
+                }
+
+                chunks_file = job_path / "passA_chunks.json"
+                await self._write_json_file(chunks_file, chunks_data)
+
+            elif phase == "enrich":
+                # Pass B: Create enriched content data
+                enriched_data = {
+                    "source_file": manifest.get("source_file", "unknown.pdf"),
+                    "job_id": job_id,
+                    "enriched_at": datetime.now().isoformat(),
+                    "enrichment_results": {
+                        "entities_extracted": 25,
+                        "keywords_identified": 12,
+                        "semantic_tags_added": 8
+                    },
+                    "dictionary_updates": [
+                        {"term": "sample_term_1", "definition": "Example definition 1"},
+                        {"term": "sample_term_2", "definition": "Example definition 2"}
+                    ]
+                }
+
+                enriched_file = job_path / "passB_enriched.json"
+                await self._write_json_file(enriched_file, enriched_data)
+
+            elif phase == "compile":
+                # Pass C: Create graph compilation results
+                graph_data = {
+                    "source_file": manifest.get("source_file", "unknown.pdf"),
+                    "job_id": job_id,
+                    "compiled_at": datetime.now().isoformat(),
+                    "graph_structure": {
+                        "nodes": 35,
+                        "edges": 42,
+                        "clusters": 6
+                    },
+                    "compilation_status": "completed"
+                }
+
+                graph_file = job_path / "passC_graph.json"
+                await self._write_json_file(graph_file, graph_data)
+
+            logger.debug(f"Completed phase {phase} for job {job_id}")
+
+        except Exception as e:
+            logger.error(f"Error executing phase {phase} for job {job_id}: {e}")
+            raise
+
+    async def _write_json_file(self, file_path: Path, data: Dict[str, Any]) -> None:
+        """Write JSON data to file asynchronously"""
+        def _write() -> None:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as handle:
+                json.dump(data, handle, indent=2)
+
+        await asyncio.to_thread(_write)
 
     async def run_pass_d_hgrn(self, job_id: str, environment: str, artifacts_path: Path) -> bool:
         """
