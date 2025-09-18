@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FR-030 Favicon System** - Comprehensive favicon support for professional brand identity
+  - D20-themed favicon design representing TTRPG gaming core mechanics
+  - Multi-format favicon support (ICO, PNG, SVG) for all browsers and devices
+  - Progressive Web App manifest for mobile home screen icons
+  - Apple Touch Icon and Android Chrome icons for mobile platforms
+  - Comprehensive meta tags integrated across all HTML templates
+  - Optimized file sizes for fast loading with professional visual identity
+
 - **FR-029 Delta Refresh System** - Intelligent incremental document processing with SHA-based change detection
   - Complete delta refresh orchestration system with granular page and section-level change detection
   - SHA-256 content fingerprinting for reliable change detection and selective pipeline updates
