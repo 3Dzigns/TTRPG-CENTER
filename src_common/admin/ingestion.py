@@ -10,7 +10,7 @@ import asyncio
 import os
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Dict, List, Any, Optional, AsyncGenerator, Callable
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -67,6 +67,49 @@ class JobLogEntry:
     metadata: Dict[str, Any]
 
 
+@dataclass
+class IngestionMetrics:
+    """Real-time metrics for ingestion observability"""
+    job_id: str
+    environment: str
+    timestamp: float
+    phase: str
+    status: str  # 'started', 'progress', 'completed', 'failed'
+    total_sources: int
+    processed_sources: int
+    current_source: Optional[str]
+    records_processed: int
+    records_failed: int
+    processing_rate: float  # records per second
+    estimated_completion: Optional[float]
+    error_details: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class PhaseProgress:
+    """Progress tracking for individual phases"""
+    phase: str
+    status: str
+    start_time: float
+    current_time: float
+    total_items: int
+    completed_items: int
+    failed_items: int
+    current_item: Optional[str]
+    processing_rate: float
+    estimated_completion: Optional[float]
+
+    @property
+    def progress_percent(self) -> float:
+        if self.total_items == 0:
+            return 0.0
+        return (self.completed_items / self.total_items) * 100.0
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.current_time - self.start_time
+
+
 class AdminIngestionService:
     """
     Ingestion Console Service
@@ -79,6 +122,8 @@ class AdminIngestionService:
         self.environments = ['dev', 'test', 'prod']
         self._active_jobs = {}  # Track running async tasks
         self._pass_sequence = ["parse", "enrich", "compile"]  # Lane A pipeline phases
+        self._metrics_callbacks: List[Callable[[IngestionMetrics], None]] = []  # FR-034: Metrics broadcasting
+        self._job_progress: Dict[str, Dict[str, PhaseProgress]] = {}  # Track phase progress per job
         logger.info("Admin Ingestion Service initialized")
     
     async def get_ingestion_overview(self) -> Dict[str, Any]:
@@ -506,8 +551,43 @@ class AdminIngestionService:
                 sources_to_process = [manifest.get("source_file", "unknown.pdf")]
                 await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Processing single source: {sources_to_process[0]}")
 
-            # Execute each phase with progress tracking
+            # Initialize job progress tracking
+            if job_id not in self._job_progress:
+                self._job_progress[job_id] = {}
+
+            # Execute each phase with enhanced progress tracking and metrics emission
             for idx, phase in enumerate(self._pass_sequence, start=1):
+                # Initialize phase progress
+                phase_start_time = time.time()
+                self._job_progress[job_id][phase] = PhaseProgress(
+                    phase=phase,
+                    status="started",
+                    start_time=phase_start_time,
+                    current_time=phase_start_time,
+                    total_items=len(sources_to_process),
+                    completed_items=0,
+                    failed_items=0,
+                    current_item=None,
+                    processing_rate=0.0,
+                    estimated_completion=None
+                )
+
+                # Emit job start metrics
+                await self._emit_metrics(IngestionMetrics(
+                    job_id=job_id,
+                    environment=environment,
+                    timestamp=phase_start_time,
+                    phase=phase,
+                    status="started",
+                    total_sources=len(sources_to_process),
+                    processed_sources=0,
+                    current_source=None,
+                    records_processed=0,
+                    records_failed=0,
+                    processing_rate=0.0,
+                    estimated_completion=None
+                ))
+
                 phase_result = await self._execute_phase_unified(
                     phase=phase,
                     job_path=job_path,
@@ -517,15 +597,43 @@ class AdminIngestionService:
                     log_file_path=log_file_path
                 )
 
+                # Update phase progress to completed
+                phase_end_time = time.time()
+                phase_progress = self._job_progress[job_id][phase]
+                phase_progress.status = "completed"
+                phase_progress.current_time = phase_end_time
+                phase_progress.completed_items = len(sources_to_process)
+                phase_progress.processing_rate = self._calculate_processing_rate(
+                    phase_progress.completed_items,
+                    phase_progress.duration_seconds
+                )
+
                 # Update manifest with phase results
                 manifest[f"{phase}_result"] = phase_result
                 manifest["completed_phases"] = idx
+
+                # Emit completion metrics
+                await self._emit_metrics(IngestionMetrics(
+                    job_id=job_id,
+                    environment=environment,
+                    timestamp=phase_end_time,
+                    phase=phase,
+                    status="completed",
+                    total_sources=len(sources_to_process),
+                    processed_sources=len(sources_to_process),
+                    current_source=None,
+                    records_processed=phase_result.get("processed_count", 0),
+                    records_failed=0,
+                    processing_rate=phase_progress.processing_rate,
+                    estimated_completion=None
+                ))
 
                 await self._append_log(log_file_path,
                     f"[{datetime.now().isoformat()}] Phase {phase} completed: "
                     f"processed={phase_result['processed_count']}, "
                     f"artifacts={phase_result['artifact_count']}, "
-                    f"checksum={phase_result['checksum'][:8]}")
+                    f"checksum={phase_result['checksum'][:8]}, "
+                    f"rate={phase_progress.processing_rate:.2f}/s")
 
             logger.info(f"Unified Lane A pipeline completed for job {job_id}")
             await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Unified Lane A pipeline completed successfully")
@@ -558,7 +666,38 @@ class AdminIngestionService:
                 "sources": []
             }
 
-            for source in sources_to_process:
+            for idx, source in enumerate(sources_to_process):
+                # Update progress tracking
+                if job_id in self._job_progress and phase in self._job_progress[job_id]:
+                    phase_progress = self._job_progress[job_id][phase]
+                    phase_progress.current_time = time.time()
+                    phase_progress.current_item = source
+                    phase_progress.completed_items = idx
+                    phase_progress.processing_rate = self._calculate_processing_rate(
+                        phase_progress.completed_items,
+                        phase_progress.duration_seconds
+                    )
+
+                    # Emit progress metrics
+                    await self._emit_metrics(IngestionMetrics(
+                        job_id=job_id,
+                        environment=manifest.get("environment", "unknown"),
+                        timestamp=time.time(),
+                        phase=phase,
+                        status="progress",
+                        total_sources=len(sources_to_process),
+                        processed_sources=idx,
+                        current_source=source,
+                        records_processed=idx,
+                        records_failed=0,
+                        processing_rate=phase_progress.processing_rate,
+                        estimated_completion=self._estimate_completion_time(
+                            len(sources_to_process),
+                            idx,
+                            phase_progress.processing_rate
+                        )
+                    ))
+
                 source_result = await self._execute_phase_for_source(phase, source, job_path, manifest, job_id)
                 phase_data["sources"].append(source_result)
                 processed_sources.append(source)
@@ -709,6 +848,168 @@ class AdminIngestionService:
                 json.dump(data, handle, indent=2)
 
         await asyncio.to_thread(_write)
+
+    # ===========================
+    # FR-034: Observability Methods
+    # ===========================
+
+    def register_metrics_callback(self, callback: Callable[[IngestionMetrics], None]) -> None:
+        """Register a callback for real-time metrics broadcasting"""
+        if callback not in self._metrics_callbacks:
+            self._metrics_callbacks.append(callback)
+            logger.debug(f"Registered metrics callback: {callback.__name__}")
+
+    def unregister_metrics_callback(self, callback: Callable[[IngestionMetrics], None]) -> None:
+        """Unregister a metrics callback"""
+        if callback in self._metrics_callbacks:
+            self._metrics_callbacks.remove(callback)
+            logger.debug(f"Unregistered metrics callback: {callback.__name__}")
+
+    async def _emit_metrics(self, metrics: IngestionMetrics) -> None:
+        """Emit metrics to all registered callbacks"""
+        try:
+            for callback in self._metrics_callbacks:
+                try:
+                    # Handle both sync and async callbacks
+                    if asyncio.iscoroutinefunction(callback):
+                        await callback(metrics)
+                    else:
+                        callback(metrics)
+                except Exception as e:
+                    logger.error(f"Error in metrics callback {callback.__name__}: {e}")
+        except Exception as e:
+            logger.error(f"Error emitting metrics: {e}")
+
+    def _calculate_processing_rate(self, completed_items: int, duration: float) -> float:
+        """Calculate processing rate in items per second"""
+        if duration <= 0:
+            return 0.0
+        return completed_items / duration
+
+    def _estimate_completion_time(self, total_items: int, completed_items: int, rate: float) -> Optional[float]:
+        """Estimate completion time based on current progress"""
+        if rate <= 0 or completed_items >= total_items:
+            return None
+        remaining_items = total_items - completed_items
+        estimated_seconds = remaining_items / rate
+        return time.time() + estimated_seconds
+
+    async def get_job_metrics(self, job_id: str) -> Dict[str, Any]:
+        """Get current metrics for a specific job"""
+        try:
+            job_progress = self._job_progress.get(job_id, {})
+
+            if not job_progress:
+                return {
+                    "job_id": job_id,
+                    "status": "not_found",
+                    "message": "Job not found or not started"
+                }
+
+            # Aggregate metrics across all phases
+            total_items = sum(phase.total_items for phase in job_progress.values())
+            completed_items = sum(phase.completed_items for phase in job_progress.values())
+            failed_items = sum(phase.failed_items for phase in job_progress.values())
+
+            current_phase = None
+            for phase_name, phase in job_progress.items():
+                if phase.status in ["started", "progress"]:
+                    current_phase = phase_name
+                    break
+
+            overall_rate = 0.0
+            if job_progress:
+                total_duration = max(phase.duration_seconds for phase in job_progress.values())
+                overall_rate = self._calculate_processing_rate(completed_items, total_duration)
+
+            return {
+                "job_id": job_id,
+                "status": "running" if current_phase else "completed",
+                "current_phase": current_phase,
+                "overall_progress": {
+                    "total_items": total_items,
+                    "completed_items": completed_items,
+                    "failed_items": failed_items,
+                    "success_rate": (completed_items / total_items * 100) if total_items > 0 else 0,
+                    "processing_rate": overall_rate
+                },
+                "phases": {
+                    name: {
+                        "status": phase.status,
+                        "progress_percent": phase.progress_percent,
+                        "duration_seconds": phase.duration_seconds,
+                        "processing_rate": phase.processing_rate,
+                        "current_item": phase.current_item
+                    }
+                    for name, phase in job_progress.items()
+                },
+                "timestamp": time.time()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting job metrics for {job_id}: {e}")
+            return {
+                "job_id": job_id,
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def get_historical_job_metrics(self, environment: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get historical job metrics from manifest files for trend analysis"""
+        try:
+            historical_jobs = []
+            artifacts_path = Path(f"artifacts/{environment}")
+
+            if not artifacts_path.exists():
+                return []
+
+            # Find all job directories with manifest files
+            job_dirs = [d for d in artifacts_path.iterdir() if d.is_dir() and (d / "manifest.json").exists()]
+
+            # Sort by modification time (most recent first)
+            job_dirs.sort(key=lambda x: (x / "manifest.json").stat().st_mtime, reverse=True)
+
+            for job_dir in job_dirs[:limit]:
+                manifest_file = job_dir / "manifest.json"
+                try:
+                    with open(manifest_file, 'r', encoding='utf-8') as f:
+                        manifest = json.load(f)
+
+                    # Extract metrics from manifest
+                    job_metrics = {
+                        "job_id": manifest.get("job_id"),
+                        "job_type": manifest.get("job_type"),
+                        "environment": manifest.get("environment"),
+                        "created_at": manifest.get("created_at"),
+                        "completed_at": manifest.get("completed_at"),
+                        "status": manifest.get("status"),
+                        "source_count": manifest.get("source_count", 1),
+                        "phases": {}
+                    }
+
+                    # Extract phase-specific metrics
+                    for phase in self._pass_sequence:
+                        phase_key = f"{phase}_result"
+                        if phase_key in manifest:
+                            phase_result = manifest[phase_key]
+                            job_metrics["phases"][phase] = {
+                                "processed_count": phase_result.get("processed_count", 0),
+                                "artifact_count": phase_result.get("artifact_count", 0),
+                                "duration_seconds": phase_result.get("duration_seconds", 0),
+                                "status": phase_result.get("status")
+                            }
+
+                    historical_jobs.append(job_metrics)
+
+                except Exception as e:
+                    logger.warning(f"Error reading manifest {manifest_file}: {e}")
+                    continue
+
+            return historical_jobs
+
+        except Exception as e:
+            logger.error(f"Error getting historical job metrics for {environment}: {e}")
+            return []
 
     async def get_available_sources(self, environment: str) -> List[Dict[str, Any]]:
         """

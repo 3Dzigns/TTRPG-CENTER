@@ -197,6 +197,164 @@
     </div>
 </div>
 
+<!-- FR-034: Real-time Observability Dashboard -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Real-time Observability Dashboard</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="startObservabilityMode()" id="start-observability-btn">
+                <i class="bi bi-play-circle me-1"></i>Start Live Monitoring
+            </button>
+            <button class="btn btn-outline-secondary" onclick="stopObservabilityMode()" id="stop-observability-btn" style="display: none;">
+                <i class="bi bi-stop-circle me-1"></i>Stop Monitoring
+            </button>
+            <button class="btn btn-outline-info" onclick="showHistoricalMetrics()">
+                <i class="bi bi-clock-history me-1"></i>Historical Analysis
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="observability-inactive" class="text-center text-muted py-4">
+            <i class="bi bi-speedometer display-4 mb-2"></i>
+            <p><strong>Real-time Observability</strong></p>
+            <small>Click "Start Live Monitoring" to view real-time metrics for active ingestion jobs</small>
+        </div>
+
+        <!-- Live Metrics Display -->
+        <div id="observability-active" style="display: none;">
+            <!-- Connection Status -->
+            <div class="alert alert-info d-flex align-items-center mb-3" id="connection-status">
+                <i class="bi bi-wifi me-2"></i>
+                <span id="connection-text">Connecting to real-time metrics...</span>
+                <div class="spinner-border spinner-border-sm ms-auto" role="status" id="connection-spinner">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+
+            <!-- Current Job Selector -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="active-job-select" class="form-label">Monitor Job:</label>
+                    <select class="form-select" id="active-job-select" onchange="switchObservableJob(this.value)">
+                        <option value="">Select an active job...</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Job Status:</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="health-indicator" id="job-health-indicator"></div>
+                        <span id="job-status-text" class="fw-bold">No job selected</span>
+                        <span id="job-progress-text" class="text-muted small"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Progress Bars -->
+            <div class="row mb-4" id="progress-section" style="display: none;">
+                <div class="col-12">
+                    <h6>Pipeline Progress</h6>
+                    <div class="progress-pipeline">
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass A - Parse & Chunk</small>
+                                <small id="parse-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-primary" id="parse-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass B - Enrich</small>
+                                <small id="enrich-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-warning" id="enrich-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass C - Graph Compile</small>
+                                <small id="compile-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-success" id="compile-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Metrics Charts -->
+            <div class="row" id="charts-section" style="display: none;">
+                <div class="col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">Records Processing Rate</h6>
+                            <canvas id="processing-rate-chart" width="400" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">Success vs Failure Rate</h6>
+                            <canvas id="success-failure-chart" width="400" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Alerts -->
+            <div id="error-alerts" class="mt-3"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Historical Metrics Modal -->
+<div class="modal fade" id="historical-metrics-modal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Historical Job Analysis</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="historical-env-select" class="form-label">Environment:</label>
+                        <select class="form-select" id="historical-env-select" onchange="loadHistoricalMetrics()">
+                            <option value="dev">Development</option>
+                            <option value="test">Testing</option>
+                            <option value="prod">Production</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="historical-limit" class="form-label">Job Limit:</label>
+                        <select class="form-select" id="historical-limit" onchange="loadHistoricalMetrics()">
+                            <option value="10">Last 10 jobs</option>
+                            <option value="25">Last 25 jobs</option>
+                            <option value="50">Last 50 jobs</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button class="btn btn-primary" onclick="loadHistoricalMetrics()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="historical-metrics-content">
+                    <div class="text-center py-4">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Job Monitoring Section -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -1154,6 +1312,481 @@ async function runNightly(environment) {
         console.error('Failed to start nightly:', e);
         AdminUtils.showToast('Failed to start nightly run', 'danger');
     }
+}
+
+// ====================== FR-034: Real-time Observability ======================
+
+let observabilityWebSocket = null;
+let isObservabilityActive = false;
+let currentObservableJob = null;
+let processingRateChart = null;
+let successFailureChart = null;
+let metricsHistory = [];
+
+// Initialize observability functionality
+function startObservabilityMode() {
+    isObservabilityActive = true;
+
+    // Update UI state
+    document.getElementById('observability-inactive').style.display = 'none';
+    document.getElementById('observability-active').style.display = 'block';
+    document.getElementById('start-observability-btn').style.display = 'none';
+    document.getElementById('stop-observability-btn').style.display = 'inline-block';
+
+    // Load active jobs for selection
+    loadActiveJobsForObservability();
+
+    // Initialize charts
+    initializeObservabilityCharts();
+
+    AdminUtils.showToast('Real-time observability started', 'success');
+}
+
+function stopObservabilityMode() {
+    isObservabilityActive = false;
+
+    // Close WebSocket connection
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+        observabilityWebSocket = null;
+    }
+
+    // Update UI state
+    document.getElementById('observability-inactive').style.display = 'block';
+    document.getElementById('observability-active').style.display = 'none';
+    document.getElementById('start-observability-btn').style.display = 'inline-block';
+    document.getElementById('stop-observability-btn').style.display = 'none';
+
+    // Reset charts
+    if (processingRateChart) processingRateChart.destroy();
+    if (successFailureChart) successFailureChart.destroy();
+
+    AdminUtils.showToast('Real-time observability stopped', 'info');
+}
+
+async function loadActiveJobsForObservability() {
+    try {
+        const response = await fetch(`/api/admin/ingestion/recent`);
+        const data = await response.json();
+
+        const jobSelect = document.getElementById('active-job-select');
+        jobSelect.innerHTML = '<option value="">Select an active job...</option>';
+
+        // Filter for running jobs
+        const runningJobs = data.jobs?.filter(job => job.status === 'running') || [];
+
+        if (runningJobs.length === 0) {
+            jobSelect.innerHTML = '<option value="">No active jobs found</option>';
+            updateConnectionStatus('No active jobs to monitor', 'warning');
+            return;
+        }
+
+        runningJobs.forEach(job => {
+            const option = document.createElement('option');
+            option.value = job.job_id;
+            option.textContent = `${job.job_id} - ${job.source_file}`;
+            jobSelect.appendChild(option);
+        });
+
+        updateConnectionStatus('Select a job to start monitoring', 'info');
+
+    } catch (error) {
+        console.error('Failed to load active jobs:', error);
+        updateConnectionStatus('Failed to load active jobs', 'error');
+    }
+}
+
+function switchObservableJob(jobId) {
+    if (!jobId) {
+        disconnectFromJob();
+        return;
+    }
+
+    currentObservableJob = jobId;
+    connectToJobWebSocket(jobId);
+}
+
+function connectToJobWebSocket(jobId) {
+    // Close existing connection
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+    }
+
+    updateConnectionStatus('Connecting to real-time metrics...', 'info');
+
+    try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/admin/ingestion/${jobId}/metrics`;
+
+        observabilityWebSocket = new WebSocket(wsUrl);
+
+        observabilityWebSocket.onopen = function(event) {
+            updateConnectionStatus(`Connected to ${jobId}`, 'success');
+            document.getElementById('progress-section').style.display = 'block';
+            document.getElementById('charts-section').style.display = 'block';
+
+            // Update job status
+            document.getElementById('job-status-text').textContent = 'Connected';
+            document.getElementById('job-health-indicator').className = 'health-indicator health-green';
+        };
+
+        observabilityWebSocket.onmessage = function(event) {
+            try {
+                const metrics = JSON.parse(event.data);
+                updateRealTimeMetrics(metrics);
+            } catch (error) {
+                console.error('Failed to parse metrics:', error);
+            }
+        };
+
+        observabilityWebSocket.onclose = function(event) {
+            updateConnectionStatus('Connection closed', 'warning');
+            document.getElementById('job-status-text').textContent = 'Disconnected';
+            document.getElementById('job-health-indicator').className = 'health-indicator health-red';
+        };
+
+        observabilityWebSocket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            updateConnectionStatus('Connection error', 'error');
+        };
+
+    } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        updateConnectionStatus('Failed to connect', 'error');
+    }
+}
+
+function disconnectFromJob() {
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+        observabilityWebSocket = null;
+    }
+
+    currentObservableJob = null;
+    document.getElementById('progress-section').style.display = 'none';
+    document.getElementById('charts-section').style.display = 'none';
+    document.getElementById('job-status-text').textContent = 'No job selected';
+    document.getElementById('job-health-indicator').className = 'health-indicator';
+    updateConnectionStatus('Select a job to start monitoring', 'info');
+}
+
+function updateRealTimeMetrics(metrics) {
+    // Update progress bars
+    updateProgressBars(metrics);
+
+    // Add to metrics history for charts
+    metricsHistory.push({
+        timestamp: Date.now(),
+        ...metrics
+    });
+
+    // Keep only last 50 data points
+    if (metricsHistory.length > 50) {
+        metricsHistory.shift();
+    }
+
+    // Update charts
+    updateObservabilityCharts();
+
+    // Update job status
+    document.getElementById('job-status-text').textContent = `${metrics.phase} - ${metrics.status}`;
+    document.getElementById('job-progress-text').textContent =
+        `${metrics.processed_sources}/${metrics.total_sources} sources`;
+
+    // Show estimated completion time
+    if (metrics.estimated_completion) {
+        const eta = new Date(metrics.estimated_completion * 1000);
+        document.getElementById('job-progress-text').textContent +=
+            ` (ETA: ${eta.toLocaleTimeString()})`;
+    }
+
+    // Handle errors
+    if (metrics.status === 'failed' || metrics.records_failed > 0) {
+        showErrorAlert(metrics);
+    }
+}
+
+function updateProgressBars(metrics) {
+    const phaseMap = {
+        'parse': 'parse',
+        'enrich': 'enrich',
+        'compile': 'compile'
+    };
+
+    const currentPhase = phaseMap[metrics.phase];
+
+    if (currentPhase) {
+        const progressPercent = Math.round((metrics.processed_sources / metrics.total_sources) * 100);
+        const progressBar = document.getElementById(`${currentPhase}-progress-bar`);
+        const progressText = document.getElementById(`${currentPhase}-progress-text`);
+
+        if (progressBar && progressText) {
+            progressBar.style.width = `${progressPercent}%`;
+            progressText.textContent = `${progressPercent}%`;
+
+            // Add visual feedback for active phase
+            if (metrics.status === 'progress') {
+                progressBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+            } else {
+                progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            }
+        }
+    }
+}
+
+function initializeObservabilityCharts() {
+    // Processing Rate Chart
+    const processingRateCtx = document.getElementById('processing-rate-chart').getContext('2d');
+    processingRateChart = new Chart(processingRateCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Records/sec',
+                data: [],
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            },
+            animation: {
+                duration: 0
+            }
+        }
+    });
+
+    // Success/Failure Chart
+    const successFailureCtx = document.getElementById('success-failure-chart').getContext('2d');
+    successFailureChart = new Chart(successFailureCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Processed', 'Failed'],
+            datasets: [{
+                data: [0, 0],
+                backgroundColor: ['rgb(34, 197, 94)', 'rgb(239, 68, 68)']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function updateObservabilityCharts() {
+    if (metricsHistory.length === 0) return;
+
+    const latest = metricsHistory[metricsHistory.length - 1];
+
+    // Update processing rate chart
+    if (processingRateChart) {
+        const labels = metricsHistory.map(m => new Date(m.timestamp).toLocaleTimeString());
+        const data = metricsHistory.map(m => m.processing_rate || 0);
+
+        processingRateChart.data.labels = labels;
+        processingRateChart.data.datasets[0].data = data;
+        processingRateChart.update('none');
+    }
+
+    // Update success/failure chart
+    if (successFailureChart) {
+        const processed = latest.records_processed || 0;
+        const failed = latest.records_failed || 0;
+
+        successFailureChart.data.datasets[0].data = [processed, failed];
+        successFailureChart.update('none');
+    }
+}
+
+function showErrorAlert(metrics) {
+    const alertsContainer = document.getElementById('error-alerts');
+
+    const alert = document.createElement('div');
+    alert.className = 'alert alert-danger alert-dismissible fade show';
+    alert.innerHTML = `
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        <strong>Error in ${metrics.phase} phase:</strong>
+        ${metrics.records_failed} record(s) failed to process
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    alertsContainer.appendChild(alert);
+
+    // Auto-remove alert after 10 seconds
+    setTimeout(() => {
+        if (alert.parentNode) {
+            alert.remove();
+        }
+    }, 10000);
+}
+
+function updateConnectionStatus(message, type) {
+    const statusElement = document.getElementById('connection-status');
+    const textElement = document.getElementById('connection-text');
+    const spinnerElement = document.getElementById('connection-spinner');
+
+    textElement.textContent = message;
+
+    // Update alert class
+    statusElement.className = `alert d-flex align-items-center mb-3`;
+    switch (type) {
+        case 'success':
+            statusElement.classList.add('alert-success');
+            spinnerElement.style.display = 'none';
+            break;
+        case 'warning':
+            statusElement.classList.add('alert-warning');
+            spinnerElement.style.display = 'none';
+            break;
+        case 'error':
+            statusElement.classList.add('alert-danger');
+            spinnerElement.style.display = 'none';
+            break;
+        default:
+            statusElement.classList.add('alert-info');
+            spinnerElement.style.display = 'block';
+    }
+}
+
+// Historical Metrics Modal
+function showHistoricalMetrics() {
+    const modal = new bootstrap.Modal(document.getElementById('historical-metrics-modal'));
+    modal.show();
+    loadHistoricalMetrics();
+}
+
+async function loadHistoricalMetrics() {
+    const env = document.getElementById('historical-env-select').value;
+    const limit = document.getElementById('historical-limit').value;
+    const contentDiv = document.getElementById('historical-metrics-content');
+
+    contentDiv.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`/api/admin/ingestion/${env}/historical?limit=${limit}`);
+        const data = await response.json();
+
+        if (!data.historical_jobs || data.historical_jobs.length === 0) {
+            contentDiv.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-clock-history display-4 mb-2"></i>
+                    <p>No historical jobs found for ${env} environment</p>
+                </div>
+            `;
+            return;
+        }
+
+        renderHistoricalMetrics(data.historical_jobs);
+
+    } catch (error) {
+        console.error('Failed to load historical metrics:', error);
+        contentDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Failed to load historical metrics: ${error.message}
+            </div>
+        `;
+    }
+}
+
+function renderHistoricalMetrics(jobs) {
+    const contentDiv = document.getElementById('historical-metrics-content');
+
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Type</th>
+                        <th>Sources</th>
+                        <th>Duration</th>
+                        <th>Processing Rate</th>
+                        <th>Success Rate</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    jobs.forEach(job => {
+        const duration = job.duration ? `${Math.round(job.duration / 60)}m` : '-';
+        const processingRate = job.processing_rate ? `${job.processing_rate.toFixed(1)}/s` : '-';
+        const successRate = job.success_rate ? `${Math.round(job.success_rate * 100)}%` : '-';
+        const completedAt = job.completed_at ? AdminUtils.formatTimestamp(job.completed_at) : '-';
+
+        html += `
+            <tr>
+                <td><code>${job.job_id}</code></td>
+                <td><span class="badge bg-secondary">${job.job_type}</span></td>
+                <td>${job.source_count}</td>
+                <td>${duration}</td>
+                <td>${processingRate}</td>
+                <td>${successRate}</td>
+                <td>${completedAt}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    // Add summary statistics
+    const avgDuration = jobs.reduce((sum, job) => sum + (job.duration || 0), 0) / jobs.length;
+    const avgProcessingRate = jobs.reduce((sum, job) => sum + (job.processing_rate || 0), 0) / jobs.length;
+    const avgSuccessRate = jobs.reduce((sum, job) => sum + (job.success_rate || 0), 0) / jobs.length;
+
+    html += `
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Duration</h6>
+                        <h4 class="text-primary">${Math.round(avgDuration / 60)}m</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Processing Rate</h6>
+                        <h4 class="text-info">${avgProcessingRate.toFixed(1)}/s</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Success Rate</h6>
+                        <h4 class="text-success">${Math.round(avgSuccessRate * 100)}%</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    contentDiv.innerHTML = html;
 }
 </script>
 {% endblock %}
