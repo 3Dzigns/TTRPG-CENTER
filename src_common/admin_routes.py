@@ -2054,6 +2054,230 @@ async def get_sources_health_summary(environment: str):
 
 
 # -------------------------
+# Ingestion Observability - FR-034
+# -------------------------
+
+class JobMetricsWebSocketManager:
+    """WebSocket manager for real-time ingestion metrics broadcasting"""
+
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.job_subscriptions: Dict[str, List[str]] = {}  # job_id -> [websocket_ids]
+
+    async def connect(self, websocket: WebSocket, job_id: str, websocket_id: str):
+        """Connect a WebSocket for job metrics"""
+        await websocket.accept()
+
+        if job_id not in self.active_connections:
+            self.active_connections[job_id] = []
+        if job_id not in self.job_subscriptions:
+            self.job_subscriptions[job_id] = []
+
+        self.active_connections[job_id].append(websocket)
+        self.job_subscriptions[job_id].append(websocket_id)
+
+        logger.info(f"WebSocket {websocket_id} connected for job {job_id}")
+
+    def disconnect(self, job_id: str, websocket_id: str):
+        """Disconnect a WebSocket"""
+        if job_id in self.job_subscriptions:
+            if websocket_id in self.job_subscriptions[job_id]:
+                self.job_subscriptions[job_id].remove(websocket_id)
+
+        if job_id in self.active_connections:
+            # Remove the corresponding WebSocket (find by index)
+            try:
+                index = self.job_subscriptions.get(job_id, []).index(websocket_id)
+                if index < len(self.active_connections[job_id]):
+                    self.active_connections[job_id].pop(index)
+            except (ValueError, IndexError):
+                pass
+
+        logger.info(f"WebSocket {websocket_id} disconnected from job {job_id}")
+
+    async def broadcast_metrics(self, job_id: str, metrics: Dict[str, Any]):
+        """Broadcast metrics to all connected WebSockets for a job"""
+        if job_id not in self.active_connections:
+            return
+
+        disconnected_websockets = []
+
+        for websocket in self.active_connections[job_id]:
+            try:
+                await websocket.send_json(metrics)
+            except Exception as e:
+                logger.warning(f"Failed to send metrics to WebSocket: {e}")
+                disconnected_websockets.append(websocket)
+
+        # Clean up disconnected WebSockets
+        for websocket in disconnected_websockets:
+            if websocket in self.active_connections[job_id]:
+                self.active_connections[job_id].remove(websocket)
+
+# Global WebSocket manager instance
+metrics_ws_manager = JobMetricsWebSocketManager()
+
+@admin_router.websocket("/api/admin/ingestion/{job_id}/metrics")
+async def websocket_job_metrics(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for real-time job metrics"""
+    import uuid
+    websocket_id = str(uuid.uuid4())
+
+    try:
+        await metrics_ws_manager.connect(websocket, job_id, websocket_id)
+
+        # Register metrics callback for this job
+        async def metrics_callback(metrics):
+            if metrics.job_id == job_id:
+                await metrics_ws_manager.broadcast_metrics(job_id, asdict(metrics))
+
+        ingestion_service.register_metrics_callback(metrics_callback)
+
+        # Send initial job status if available
+        try:
+            initial_metrics = await ingestion_service.get_job_metrics(job_id)
+            await websocket.send_json(initial_metrics)
+        except Exception as e:
+            logger.warning(f"Failed to send initial metrics for job {job_id}: {e}")
+
+        # Keep connection alive and listen for client messages
+        while True:
+            try:
+                data = await websocket.receive_text()
+                # Handle client messages (ping/pong, status requests, etc.)
+                if data == "ping":
+                    await websocket.send_text("pong")
+                elif data == "get_status":
+                    current_metrics = await ingestion_service.get_job_metrics(job_id)
+                    await websocket.send_json(current_metrics)
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket for job {job_id}: {e}")
+                break
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket connection error for job {job_id}: {e}")
+    finally:
+        # Clean up
+        metrics_ws_manager.disconnect(job_id, websocket_id)
+        try:
+            ingestion_service.unregister_metrics_callback(metrics_callback)
+        except:
+            pass
+
+@admin_router.get("/api/admin/ingestion/{job_id}/metrics")
+async def get_job_metrics_endpoint(job_id: str):
+    """Get current metrics for a specific job"""
+    try:
+        metrics = await ingestion_service.get_job_metrics(job_id)
+        return metrics
+    except Exception as e:
+        logger.error(f"Failed to get metrics for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/ingestion/{environment}/historical")
+async def get_historical_metrics(environment: str, limit: int = 10):
+    """Get historical job metrics for trend analysis"""
+    try:
+        if environment not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        historical_metrics = await ingestion_service.get_historical_job_metrics(environment, limit)
+
+        return {
+            "environment": environment,
+            "historical_jobs": historical_metrics,
+            "total_count": len(historical_metrics),
+            "timestamp": time.time()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get historical metrics for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@admin_router.get("/api/admin/ingestion/{environment}/trends")
+async def get_ingestion_trends(environment: str, days: int = 7):
+    """Get ingestion trends and performance analysis"""
+    try:
+        if environment not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        # Get historical data
+        historical_jobs = await ingestion_service.get_historical_job_metrics(environment, limit=50)
+
+        # Filter by time range
+        cutoff_time = time.time() - (days * 24 * 3600)
+        recent_jobs = [
+            job for job in historical_jobs
+            if job.get("created_at", 0) > cutoff_time
+        ]
+
+        # Calculate trends
+        total_jobs = len(recent_jobs)
+        successful_jobs = len([job for job in recent_jobs if job.get("status") == "completed"])
+        failed_jobs = len([job for job in recent_jobs if job.get("status") == "failed"])
+
+        avg_duration = 0
+        if recent_jobs:
+            durations = []
+            for job in recent_jobs:
+                if job.get("completed_at") and job.get("created_at"):
+                    duration = job["completed_at"] - job["created_at"]
+                    durations.append(duration)
+            if durations:
+                avg_duration = sum(durations) / len(durations)
+
+        # Phase-specific metrics
+        phase_metrics = {}
+        for phase in ["parse", "enrich", "compile"]:
+            phase_jobs = [job for job in recent_jobs if phase in job.get("phases", {})]
+            if phase_jobs:
+                avg_processed = sum(
+                    job["phases"][phase].get("processed_count", 0)
+                    for job in phase_jobs
+                ) / len(phase_jobs)
+                avg_duration_phase = sum(
+                    job["phases"][phase].get("duration_seconds", 0)
+                    for job in phase_jobs
+                ) / len(phase_jobs)
+
+                phase_metrics[phase] = {
+                    "avg_processed_count": avg_processed,
+                    "avg_duration_seconds": avg_duration_phase,
+                    "success_rate": len([
+                        job for job in phase_jobs
+                        if job["phases"][phase].get("status") == "completed"
+                    ]) / len(phase_jobs) * 100
+                }
+
+        return {
+            "environment": environment,
+            "time_range_days": days,
+            "summary": {
+                "total_jobs": total_jobs,
+                "successful_jobs": successful_jobs,
+                "failed_jobs": failed_jobs,
+                "success_rate": (successful_jobs / total_jobs * 100) if total_jobs > 0 else 0,
+                "avg_duration_seconds": avg_duration
+            },
+            "phase_metrics": phase_metrics,
+            "recent_jobs": recent_jobs[:10],  # Last 10 jobs for detail
+            "timestamp": time.time()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get ingestion trends for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
 # Log Management - FR-008
 # -------------------------
 
