@@ -16,6 +16,8 @@ from .policies import load_policies, choose_plan
 from .router import pick_model
 from .graph_expander import GraphQueryExpander
 from .hybrid_reranker import HybridReranker, RerankingConfig, RerankingStrategy
+from .provenance_tracker import ProvenanceTracker
+from .provenance_models import ProvenanceConfig
 
 logger = get_logger(__name__)
 
@@ -34,6 +36,7 @@ class QueryPlanner:
         self.context = PlanGenerationContext(environment=self.environment)
         self.graph_expander = GraphQueryExpander(environment=self.environment)
         self.reranker = HybridReranker(environment=self.environment)
+        self.provenance_tracker = ProvenanceTracker(environment=self.environment)
 
         logger.info(f"QueryPlanner initialized for environment: {self.environment}")
 
@@ -92,10 +95,13 @@ class QueryPlanner:
         # 5. Generate reranking configuration
         reranking_config = self._generate_reranking_config(classification, query)
 
-        # 6. Generate performance hints
+        # 6. Generate provenance configuration
+        provenance_config = self._generate_provenance_config(classification, query)
+
+        # 7. Generate performance hints
         performance_hints = self._generate_performance_hints(classification, query)
 
-        # 7. Create the plan
+        # 8. Create the plan
         plan = QueryPlan.create_from_query(
             query=query,
             classification=classification,
@@ -104,6 +110,7 @@ class QueryPlanner:
             performance_hints=performance_hints,
             graph_expansion=graph_expansion,
             reranking_config=reranking_config,
+            provenance_config=provenance_config,
             cache_ttl=self._calculate_cache_ttl(classification)
         )
 
@@ -513,6 +520,86 @@ class QueryPlanner:
                         config["weights"][key] /= total_weight
 
         logger.debug(f"Generated reranking config: {config}")
+
+        return config
+
+    def _generate_provenance_config(self, classification: Classification, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate provenance tracking configuration for the query plan.
+
+        Args:
+            classification: Query classification
+            query: Original user query
+
+        Returns:
+            Provenance configuration dictionary or None if disabled
+        """
+        if not self.context.enable_provenance_tracking:
+            return None
+
+        # Base provenance configuration
+        config = {
+            "enabled": True,
+            "track_query_processing": self.context.track_query_processing,
+            "track_retrieval": self.context.track_retrieval,
+            "track_reranking": self.context.track_reranking,
+            "track_answer_generation": self.context.track_answer_generation,
+            "detail_level": self.context.provenance_detail_level,
+            "max_tracking_time_ms": self.context.max_provenance_time_ms
+        }
+
+        # Adapt configuration based on query characteristics
+        intent = classification.intent
+        domain = classification.domain
+        complexity = classification.complexity
+
+        # Adjust detail level based on query complexity and type
+        if complexity == "high" or intent == "multi_hop_reasoning":
+            config["detail_level"] = "full"
+            config["include_reasoning_steps"] = True
+            config["include_alternative_paths"] = True
+            config["max_source_excerpts"] = 10
+
+        elif complexity == "low" and intent == "fact_lookup":
+            config["detail_level"] = "standard"
+            config["include_reasoning_steps"] = False
+            config["include_alternative_paths"] = False
+            config["max_source_excerpts"] = 3
+
+        else:
+            config["detail_level"] = "standard"
+            config["include_reasoning_steps"] = True
+            config["include_alternative_paths"] = False
+            config["max_source_excerpts"] = 5
+
+        # Domain-specific adjustments
+        if domain == "ttrpg_rules":
+            config["include_signal_details"] = True
+            config["track_source_authority"] = True
+            config["enable_cross_validation"] = True
+
+        # Performance adjustments for different environments
+        if self.environment == "prod":
+            config["max_tracking_time_ms"] = min(30, config["max_tracking_time_ms"])
+            config["enable_async_tracking"] = True
+
+        elif self.environment == "dev":
+            config["max_tracking_time_ms"] = max(100, config["max_tracking_time_ms"])
+            config["include_debug_info"] = True
+
+        # Query-specific adjustments
+        query_lower = query.lower()
+
+        # Enhanced tracking for specific query types
+        if any(term in query_lower for term in ["why", "how", "explain", "reasoning"]):
+            config["include_reasoning_steps"] = True
+            config["track_decision_points"] = True
+
+        if any(term in query_lower for term in ["source", "reference", "cite", "attribution"]):
+            config["enhanced_source_tracking"] = True
+            config["include_source_excerpts"] = True
+
+        logger.debug(f"Generated provenance config: {config}")
 
         return config
 

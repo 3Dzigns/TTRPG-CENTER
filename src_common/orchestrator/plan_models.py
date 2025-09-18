@@ -43,6 +43,9 @@ class QueryPlan:
     # Reranking configuration metadata
     reranking_config: Optional[Dict[str, Any]] = None
 
+    # Provenance tracking configuration
+    provenance_config: Optional[Dict[str, Any]] = None
+
     # Cache metadata
     cache_ttl: int = 3600  # Time-to-live in seconds
     created_at: float = 0.0  # Unix timestamp
@@ -58,6 +61,7 @@ class QueryPlan:
         performance_hints: Optional[Dict[str, Any]] = None,
         graph_expansion: Optional[Dict[str, Any]] = None,
         reranking_config: Optional[Dict[str, Any]] = None,
+        provenance_config: Optional[Dict[str, Any]] = None,
         cache_ttl: int = 3600
     ) -> QueryPlan:
         """Create a new QueryPlan from query components."""
@@ -72,6 +76,7 @@ class QueryPlan:
             performance_hints=performance_hints or {},
             graph_expansion=graph_expansion,
             reranking_config=reranking_config,
+            provenance_config=provenance_config,
             cache_ttl=cache_ttl,
             created_at=time.time(),
             hit_count=0
@@ -153,6 +158,15 @@ class PlanGenerationContext:
     reranking_strategy: str = "hybrid_full"  # vector_only, graph_enhanced, domain_aware, hybrid_full
     max_results_to_rerank: int = 20
     reranking_timeout_ms: int = 100
+
+    # Provenance tracking settings
+    enable_provenance_tracking: bool = True
+    track_query_processing: bool = True
+    track_retrieval: bool = True
+    track_reranking: bool = True
+    track_answer_generation: bool = True
+    provenance_detail_level: str = "full"  # minimal, standard, full
+    max_provenance_time_ms: int = 50
 
     # Static heuristic weights
     complexity_multiplier: Dict[str, float] = None
