@@ -15,6 +15,7 @@ from .plan_cache import get_cache
 from .policies import load_policies, choose_plan
 from .router import pick_model
 from .graph_expander import GraphQueryExpander
+from .hybrid_reranker import HybridReranker, RerankingConfig, RerankingStrategy
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,7 @@ class QueryPlanner:
         self.cache = get_cache(self.environment)
         self.context = PlanGenerationContext(environment=self.environment)
         self.graph_expander = GraphQueryExpander(environment=self.environment)
+        self.reranker = HybridReranker(environment=self.environment)
 
         logger.info(f"QueryPlanner initialized for environment: {self.environment}")
 
@@ -87,10 +89,13 @@ class QueryPlanner:
         # 4. Generate graph expansion (if enabled)
         graph_expansion = self._generate_graph_expansion(classification, query)
 
-        # 5. Generate performance hints
+        # 5. Generate reranking configuration
+        reranking_config = self._generate_reranking_config(classification, query)
+
+        # 6. Generate performance hints
         performance_hints = self._generate_performance_hints(classification, query)
 
-        # 6. Create the plan
+        # 7. Create the plan
         plan = QueryPlan.create_from_query(
             query=query,
             classification=classification,
@@ -98,6 +103,7 @@ class QueryPlanner:
             model_config=model_config,
             performance_hints=performance_hints,
             graph_expansion=graph_expansion,
+            reranking_config=reranking_config,
             cache_ttl=self._calculate_cache_ttl(classification)
         )
 
@@ -395,6 +401,120 @@ class QueryPlanner:
 
         # Hybrid for everything else
         return "hybrid"
+
+    def _generate_reranking_config(self, classification: Classification, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate reranking configuration for the query plan.
+
+        Args:
+            classification: Query classification
+            query: Original user query
+
+        Returns:
+            Reranking configuration dictionary or None if disabled
+        """
+        if not self.context.enable_hybrid_reranking:
+            return None
+
+        # Base reranking configuration
+        config = {
+            "strategy": self.context.reranking_strategy,
+            "max_results": self.context.max_results_to_rerank,
+            "timeout_ms": self.context.reranking_timeout_ms,
+            "enable_caching": True
+        }
+
+        # Adapt configuration based on query characteristics
+        intent = classification.intent
+        domain = classification.domain
+        complexity = classification.complexity
+
+        # Strategy selection based on query type
+        if intent == "fact_lookup":
+            config["strategy"] = "vector_only"
+            config["weights"] = {
+                "vector": 0.6,
+                "content": 0.3,
+                "metadata": 0.1,
+                "graph": 0.0,
+                "domain": 0.0
+            }
+
+        elif intent == "multi_hop_reasoning":
+            config["strategy"] = "graph_enhanced"
+            config["weights"] = {
+                "vector": 0.3,
+                "graph": 0.4,
+                "content": 0.2,
+                "domain": 0.1,
+                "metadata": 0.0
+            }
+
+        elif domain == "ttrpg_rules":
+            config["strategy"] = "domain_aware"
+            config["weights"] = {
+                "vector": 0.25,
+                "graph": 0.25,
+                "content": 0.25,
+                "domain": 0.4,
+                "metadata": 0.05
+            }
+
+        elif complexity == "high":
+            config["strategy"] = "hybrid_full"
+            config["weights"] = {
+                "vector": 0.3,
+                "graph": 0.2,
+                "content": 0.2,
+                "domain": 0.2,
+                "metadata": 0.1
+            }
+
+        else:
+            # Default balanced approach
+            config["strategy"] = "hybrid_full"
+            config["weights"] = {
+                "vector": 0.3,
+                "graph": 0.2,
+                "content": 0.2,
+                "domain": 0.2,
+                "metadata": 0.1
+            }
+
+        # Performance adjustments
+        if complexity == "low":
+            config["max_results"] = min(10, config["max_results"])
+            config["timeout_ms"] = 50
+
+        elif complexity == "high":
+            config["timeout_ms"] = min(150, config["timeout_ms"] * 1.5)
+
+        # Query-specific adjustments
+        query_lower = query.lower()
+
+        # Boost domain signals for rules queries
+        if any(term in query_lower for term in ["rule", "mechanic", "stat", "ability"]):
+            if "weights" in config:
+                config["weights"]["domain"] = min(0.5, config["weights"]["domain"] * 1.5)
+                # Normalize weights
+                total_weight = sum(config["weights"].values())
+                if total_weight > 1.0:
+                    for key in config["weights"]:
+                        config["weights"][key] /= total_weight
+
+        # Boost graph signals for relationship queries
+        if any(term in query_lower for term in ["compare", "difference", "similar", "related"]):
+            if "weights" in config:
+                config["weights"]["graph"] = min(0.5, config["weights"]["graph"] * 1.3)
+                # Normalize weights
+                total_weight = sum(config["weights"].values())
+                if total_weight > 1.0:
+                    for key in config["weights"]:
+                        config["weights"][key] /= total_weight
+
+        logger.debug(f"Generated reranking config: {config}")
+
+        return config
 
     def get_cache_metrics(self):
         """Get current cache performance metrics."""

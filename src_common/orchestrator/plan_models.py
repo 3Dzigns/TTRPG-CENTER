@@ -40,9 +40,12 @@ class QueryPlan:
     # Graph expansion metadata
     graph_expansion: Optional[Dict[str, Any]] = None
 
+    # Reranking configuration metadata
+    reranking_config: Optional[Dict[str, Any]] = None
+
     # Cache metadata
-    cache_ttl: int  # Time-to-live in seconds
-    created_at: float  # Unix timestamp
+    cache_ttl: int = 3600  # Time-to-live in seconds
+    created_at: float = 0.0  # Unix timestamp
     hit_count: int = 0  # Number of times this plan was reused
 
     @classmethod
@@ -54,6 +57,7 @@ class QueryPlan:
         model_config: Dict[str, Any],
         performance_hints: Optional[Dict[str, Any]] = None,
         graph_expansion: Optional[Dict[str, Any]] = None,
+        reranking_config: Optional[Dict[str, Any]] = None,
         cache_ttl: int = 3600
     ) -> QueryPlan:
         """Create a new QueryPlan from query components."""
@@ -67,6 +71,7 @@ class QueryPlan:
             model_config=model_config,
             performance_hints=performance_hints or {},
             graph_expansion=graph_expansion,
+            reranking_config=reranking_config,
             cache_ttl=cache_ttl,
             created_at=time.time(),
             hit_count=0
@@ -142,6 +147,12 @@ class PlanGenerationContext:
     graph_expansion_strategy: str = "hybrid"  # alias, graph, cross_ref, hybrid
     max_graph_expansions: int = 10
     min_expansion_confidence: float = 0.3
+
+    # Reranking settings
+    enable_hybrid_reranking: bool = True
+    reranking_strategy: str = "hybrid_full"  # vector_only, graph_enhanced, domain_aware, hybrid_full
+    max_results_to_rerank: int = 20
+    reranking_timeout_ms: int = 100
 
     # Static heuristic weights
     complexity_multiplier: Dict[str, float] = None

@@ -158,6 +158,8 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
             if len(results) >= max(1, limit):
                 break
         if results:
+            # Apply reranking if enabled
+            results = _apply_reranking(results, plan, query, env)
             return results
 
     candidates = list(_iter_candidate_chunks(env))
@@ -188,6 +190,10 @@ def retrieve(plan: Union[Dict[str, Any], 'QueryPlan'], query: str, env: str, lim
             continue
         seen.append(sig)
         results.append(ch)
+
+    # Apply reranking if enabled
+    results = _apply_reranking(results, plan, query, env)
+
     return results
 
 
@@ -257,3 +263,117 @@ def _apply_graph_boost(base_score: float, chunk: DocChunk, graph_expansion: Dict
                     f"(factor: {boost_factor:.2f})")
 
     return boosted_score
+
+
+def _apply_reranking(
+    results: List[DocChunk],
+    plan: Union[Dict[str, Any], 'QueryPlan'],
+    query: str,
+    env: str
+) -> List[DocChunk]:
+    """
+    Apply hybrid reranking to results if enabled in the plan.
+
+    Args:
+        results: Initial retrieval results
+        plan: Query plan (dict or QueryPlan object)
+        query: Original user query
+        env: Environment
+
+    Returns:
+        Reranked results as DocChunk list
+    """
+    if not results:
+        return results
+
+    # Check if reranking is enabled
+    reranking_config = None
+    classification = None
+
+    if hasattr(plan, 'reranking_config'):
+        # QueryPlan object
+        reranking_config = getattr(plan, 'reranking_config', None)
+        classification = getattr(plan, 'classification', None)
+        query_plan_dict = {
+            'retrieval_strategy': plan.retrieval_strategy,
+            'graph_expansion': getattr(plan, 'graph_expansion', None)
+        }
+    else:
+        # Legacy dict plan - no reranking support
+        return results
+
+    if not reranking_config:
+        return results
+
+    try:
+        # Import reranker components
+        from .hybrid_reranker import HybridReranker, RerankingConfig, RerankingStrategy
+
+        # Create reranker
+        reranker = HybridReranker(environment=env)
+
+        # Convert reranking config to RerankingConfig object
+        strategy = RerankingStrategy(reranking_config.get("strategy", "hybrid_full"))
+        weights = reranking_config.get("weights", {})
+
+        config = RerankingConfig(
+            strategy=strategy,
+            max_results_to_rerank=reranking_config.get("max_results", 20),
+            reranking_timeout_ms=reranking_config.get("timeout_ms", 100),
+            enable_signal_caching=reranking_config.get("enable_caching", True)
+        )
+
+        # Apply custom weights if provided
+        if weights:
+            config.vector_weight = weights.get("vector", 0.3)
+            config.graph_weight = weights.get("graph", 0.2)
+            config.content_weight = weights.get("content", 0.2)
+            config.domain_weight = weights.get("domain", 0.2)
+            config.metadata_weight = weights.get("metadata", 0.1)
+
+        # Convert DocChunk to dict format for reranker
+        results_dicts = []
+        for chunk in results:
+            result_dict = {
+                'id': chunk.id,
+                'content': chunk.text,
+                'score': chunk.score,
+                'metadata': chunk.metadata.copy() if chunk.metadata else {},
+                'source': chunk.source
+            }
+            results_dicts.append(result_dict)
+
+        # Apply reranking
+        reranked_results = reranker.rerank_results(
+            query=query,
+            results=results_dicts,
+            config=config,
+            query_plan=query_plan_dict,
+            classification=classification
+        )
+
+        # Convert back to DocChunk format
+        final_results = []
+        for reranked in reranked_results:
+            original = reranked.original_result
+
+            doc_chunk = DocChunk(
+                id=original['id'],
+                text=original['content'],
+                source=original['source'],
+                score=reranked.final_score,
+                metadata=original['metadata']
+            )
+            final_results.append(doc_chunk)
+
+        logger.info(f"Applied reranking: {len(results)} -> {len(final_results)} results")
+
+        return final_results
+
+    except ImportError:
+        logger.warning("Reranker components not available, skipping reranking")
+        return results
+
+    except Exception as e:
+        logger.warning(f"Error during reranking: {e}, returning original results")
+        return results
