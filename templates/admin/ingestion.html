@@ -1120,6 +1120,50 @@ async function ingestFile(fileName) {
     }
 }
 
+async function ingestSelected() {
+    if (selectedUploads.size === 0) {
+        AdminUtils.showToast('Please select files to ingest', 'warning');
+        return;
+    }
+
+    try {
+        AdminUtils.showToast(`Starting selective ingestion for ${selectedUploads.size} file(s)...`, 'info');
+
+        const response = await fetch('/api/admin/ingestion/selective', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                env: currentEnvironment,
+                selected_sources: Array.from(selectedUploads),
+                options: { job_type: 'selective' }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(errorData.detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        AdminUtils.showToast(`Selective ingestion started for ${data.source_count} file(s) (Job ID: ${data.job_id})`, 'success');
+
+        // Clear selections and refresh
+        selectedUploads.clear();
+        updateBulkActions();
+        document.querySelectorAll('.upload-checkbox').forEach(cb => cb.checked = false);
+
+        // Refresh jobs list after a short delay
+        setTimeout(() => {
+            loadJobs();
+            loadUploads(); // Refresh upload status
+        }, 2000);
+
+    } catch (error) {
+        console.error('Selective ingestion failed:', error);
+        AdminUtils.showToast(`Failed to start selective ingestion: ${error.message}`, 'danger');
+    }
+}
+
 // ====================== Source Health Monitoring ======================
 
 async function loadSources() {
