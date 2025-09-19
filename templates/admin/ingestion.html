@@ -500,6 +500,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     setupVisibilityHandlers();
     setupCleanupHandlers();
+    setupGlobalDragDropPrevention();
     console.log('✅ Ingestion Console ready! Use drag & drop to upload files.');
 });
 
@@ -550,6 +551,39 @@ function setupCleanupHandlers() {
     });
 }
 
+// Global drag and drop prevention to stop browser from opening files
+function setupGlobalDragDropPrevention() {
+    console.log('🛡️ Setting up global drag & drop prevention...');
+
+    // Prevent default drag behaviors on the entire document
+    document.addEventListener('dragover', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'none';
+        }
+    });
+
+    document.addEventListener('drop', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            console.log('🛡️ Prevented browser file opening - files dropped outside upload area');
+        }
+    });
+
+    // Prevent dragging files from the page
+    document.addEventListener('dragstart', function(event) {
+        if (event.target.tagName === 'IMG' || event.target.type === 'file') {
+            event.preventDefault();
+        }
+    });
+
+    console.log('✅ Global drag & drop prevention enabled');
+}
+
 // Note: Browse button functionality disabled due to browser security restrictions
 // when accessing through ngrok. Drag & drop functionality works perfectly.
 
@@ -573,20 +607,38 @@ function setupEventListeners() {
         console.log('✅ Hidden file input listener added');
     }
 
-    // Browse button listener
-    if (browseBtn && hiddenInput) {
-        browseBtn.addEventListener('click', function() {
-            console.log('🔘 Browse button clicked, triggering hidden input');
-            hiddenInput.click();
+    // Browse button listener with improved error handling
+    if (browseBtn) {
+        browseBtn.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            console.log('🔘 Browse button clicked, triggering file picker');
+
+            // Try hidden input first, fallback to visible input
+            const inputToTrigger = hiddenInput || visibleInput;
+            if (inputToTrigger) {
+                try {
+                    inputToTrigger.click();
+                    console.log('✅ File picker opened successfully');
+                } catch (error) {
+                    console.error('❌ Failed to open file picker:', error);
+                    AdminUtils.showToast('Failed to open file picker. Try drag & drop instead.', 'warning');
+                }
+            } else {
+                console.error('❌ No file input elements found');
+                AdminUtils.showToast('File picker not available. Use drag & drop.', 'warning');
+            }
         });
         console.log('✅ Browse button listener added');
+    } else {
+        console.warn('⚠️ Browse button not found');
     }
 
     // Debug info
     console.log('Available elements:', {
-        'upload-input-visible': visibleInput,
-        'upload-input-hidden': hiddenInput,
-        'browse-btn': browseBtn
+        'upload-input-visible': !!visibleInput,
+        'upload-input-hidden': !!hiddenInput,
+        'browse-btn': !!browseBtn
     });
 }
 
@@ -679,6 +731,7 @@ function showUploadPreview(files) {
 // Enhanced Drag & Drop handlers with better validation and feedback
 function dragEnterHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
     const uploadArea = document.getElementById('upload-area');
     uploadArea.classList.add('dragover');
 
@@ -690,11 +743,13 @@ function dragEnterHandler(event) {
 
 function dragOverHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
 }
 
 function dragLeaveHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
 
     // Only remove dragover when actually leaving the drop zone
     const rect = event.currentTarget.getBoundingClientRect();
@@ -708,8 +763,10 @@ function dragLeaveHandler(event) {
 
 function dropHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
     resetUploadAreaVisuals();
 
+    console.log('🎯 Drop handler called - processing files...');
     const files = Array.from(event.dataTransfer.files);
     console.log('Files dropped:', files.map(f => f.name));
 
