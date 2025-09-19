@@ -37,6 +37,8 @@ from src_common.admin import (
 )
 # OAuth integration
 from src_common.oauth_endpoints import oauth_router
+# Admin routes
+from src_common.admin_routes import admin_router
 
 
 # Initialize logging
@@ -84,6 +86,7 @@ except Exception as e:
 
 # Include OAuth router
 app.include_router(oauth_router)
+app.include_router(admin_router)
 
 # Static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")

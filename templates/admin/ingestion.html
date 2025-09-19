@@ -500,6 +500,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     setupVisibilityHandlers();
     setupCleanupHandlers();
+    setupGlobalDragDropPrevention();
     console.log('✅ Ingestion Console ready! Use drag & drop to upload files.');
 });
 
@@ -550,44 +551,125 @@ function setupCleanupHandlers() {
     });
 }
 
+// Global drag and drop prevention to stop browser from opening files
+function setupGlobalDragDropPrevention() {
+    console.log('🛡️ Setting up global drag & drop prevention...');
+
+    // Prevent default drag behaviors on the entire document
+    document.addEventListener('dragover', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'none';
+        }
+    });
+
+    document.addEventListener('drop', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            console.log('🛡️ Prevented browser file opening - files dropped outside upload area');
+        }
+    });
+
+    // Prevent dragging files from the page
+    document.addEventListener('dragstart', function(event) {
+        if (event.target.tagName === 'IMG' || event.target.type === 'file') {
+            event.preventDefault();
+        }
+    });
+
+    console.log('✅ Global drag & drop prevention enabled');
+}
+
 // Note: Browse button functionality disabled due to browser security restrictions
 // when accessing through ngrok. Drag & drop functionality works perfectly.
 
 function setupEventListeners() {
-    console.log('Setting up event listeners for drag & drop upload...');
+    console.log('🎧 Setting up event listeners for upload functionality...');
 
-    // Set up both file inputs
+    // Diagnostic check for upload area
+    const uploadArea = document.getElementById('upload-area');
+    if (!uploadArea) {
+        console.error('❌ Critical: Upload area element not found!');
+        return;
+    }
+
+    // Set up both file inputs with diagnostics
     const visibleInput = document.getElementById('upload-input-visible');
     const hiddenInput = document.getElementById('upload-input-hidden');
     const browseBtn = document.getElementById('browse-btn');
 
-    // Visible input listener
+    // Enhanced diagnostics
+    console.log('🔍 Upload element discovery:', {
+        uploadArea: !!uploadArea,
+        visibleInput: !!visibleInput,
+        hiddenInput: !!hiddenInput,
+        browseBtn: !!browseBtn,
+        AdminUtils: typeof AdminUtils !== 'undefined',
+        currentEnvironment: typeof currentEnvironment !== 'undefined' ? currentEnvironment : 'undefined'
+    });
+
+    // Visible input listener with enhanced logging
     if (visibleInput) {
-        visibleInput.addEventListener('change', handleFileSelect);
+        visibleInput.addEventListener('change', function(event) {
+            console.log('📁 Visible input changed, files:', event.target.files ? event.target.files.length : 'none');
+            handleFileSelect(event);
+        });
         console.log('✅ Visible file input listener added');
+    } else {
+        console.warn('⚠️ Visible file input not found');
     }
 
-    // Hidden input listener
+    // Hidden input listener with enhanced logging
     if (hiddenInput) {
-        hiddenInput.addEventListener('change', handleFileSelect);
+        hiddenInput.addEventListener('change', function(event) {
+            console.log('📁 Hidden input changed, files:', event.target.files ? event.target.files.length : 'none');
+            handleFileSelect(event);
+        });
         console.log('✅ Hidden file input listener added');
+    } else {
+        console.warn('⚠️ Hidden file input not found');
     }
 
-    // Browse button listener
-    if (browseBtn && hiddenInput) {
-        browseBtn.addEventListener('click', function() {
-            console.log('🔘 Browse button clicked, triggering hidden input');
-            hiddenInput.click();
+    // Browse button listener with comprehensive error handling
+    if (browseBtn) {
+        browseBtn.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            console.log('🔘 Browse button clicked - attempting to open file picker');
+
+            // Enhanced safety checks
+            if (typeof AdminUtils === 'undefined') {
+                console.error('❌ AdminUtils not available for browse button');
+                alert('Upload system not initialized. Please refresh the page.');
+                return;
+            }
+
+            // Try hidden input first, fallback to visible input
+            const inputToTrigger = hiddenInput || visibleInput;
+            if (inputToTrigger) {
+                try {
+                    console.log(`🎯 Triggering ${inputToTrigger.id} file input`);
+                    inputToTrigger.click();
+                    console.log('✅ File picker opened successfully');
+                } catch (error) {
+                    console.error('❌ Failed to open file picker:', error);
+                    AdminUtils.showToast('Failed to open file picker. Try drag & drop instead.', 'warning');
+                }
+            } else {
+                console.error('❌ No file input elements found');
+                AdminUtils.showToast('File picker not available. Use drag & drop.', 'warning');
+            }
         });
         console.log('✅ Browse button listener added');
+    } else {
+        console.warn('⚠️ Browse button not found - this will disable browse functionality');
     }
 
-    // Debug info
-    console.log('Available elements:', {
-        'upload-input-visible': visibleInput,
-        'upload-input-hidden': hiddenInput,
-        'browse-btn': browseBtn
-    });
+    console.log('🎧 Event listeners setup complete');
 }
 
 // Request deduplication for console refresh
@@ -679,6 +761,7 @@ function showUploadPreview(files) {
 // Enhanced Drag & Drop handlers with better validation and feedback
 function dragEnterHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
     const uploadArea = document.getElementById('upload-area');
     uploadArea.classList.add('dragover');
 
@@ -690,11 +773,13 @@ function dragEnterHandler(event) {
 
 function dragOverHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
 }
 
 function dragLeaveHandler(event) {
     event.preventDefault();
+    event.stopPropagation();
 
     // Only remove dragover when actually leaving the drop zone
     const rect = event.currentTarget.getBoundingClientRect();
@@ -707,21 +792,53 @@ function dragLeaveHandler(event) {
 }
 
 function dropHandler(event) {
+    console.log('🎯 Drop handler triggered');
     event.preventDefault();
+    event.stopPropagation();
     resetUploadAreaVisuals();
 
-    const files = Array.from(event.dataTransfer.files);
-    console.log('Files dropped:', files.map(f => f.name));
+    // Enhanced diagnostics for drop handling
+    if (!event.dataTransfer) {
+        console.error('❌ No dataTransfer object in drop event');
+        return;
+    }
 
-    // Validate files
+    if (!event.dataTransfer.files) {
+        console.error('❌ No files property in dataTransfer');
+        return;
+    }
+
+    const files = Array.from(event.dataTransfer.files);
+    console.log('📥 Files dropped:', {
+        count: files.length,
+        files: files.map(f => ({ name: f.name, size: f.size, type: f.type }))
+    });
+
+    if (files.length === 0) {
+        console.warn('⚠️ No files in drop event');
+        return;
+    }
+
+    // Check AdminUtils availability
+    if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
+        console.error('❌ AdminUtils not available in drop handler');
+        alert('Upload system not ready. Please refresh the page.');
+        return;
+    }
+
+    // Validate files with enhanced logging
+    console.log('🔍 Validating dropped files...');
     const validationResult = validateFiles(files);
 
     if (!validationResult.valid) {
+        console.warn('⚠️ File validation failed:', validationResult.message);
         AdminUtils.showToast(validationResult.message, 'warning');
         return;
     }
 
     const validFiles = validationResult.files;
+    console.log('✅ File validation passed:', validFiles.map(f => f.name));
+
     AdminUtils.showToast(`Uploading ${validFiles.length} file(s)...`, 'info');
     uploadFiles(validFiles);
 }
@@ -950,15 +1067,34 @@ function testFileInput() {
 }
 
 async function uploadFiles(files) {
+    console.log('📤 Starting upload for files:', files.map(f => f.name));
+
+    // Validate AdminUtils is available
+    if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
+        console.error('❌ AdminUtils not available - cannot show toast notifications');
+        alert('Upload system not properly initialized. Please refresh the page.');
+        return;
+    }
+
+    // Get progress elements with defensive checks
     const progressContainer = document.getElementById('upload-progress');
     const progressBar = document.getElementById('upload-progress-bar');
     const progressText = document.getElementById('upload-progress-text');
+
+    if (!progressContainer || !progressBar || !progressText) {
+        console.error('❌ Upload progress elements not found');
+        AdminUtils.showToast('Upload UI elements missing. Please refresh the page.', 'danger');
+        return;
+    }
 
     progressContainer.style.display = 'block';
 
     try {
         const formData = new FormData();
-        files.forEach(file => formData.append('files', file));
+        files.forEach(file => {
+            console.log(`📎 Adding file to form: ${file.name} (${file.size} bytes)`);
+            formData.append('files', file);
+        });
 
         const xhr = new XMLHttpRequest();
 
@@ -972,28 +1108,63 @@ async function uploadFiles(files) {
         };
 
         xhr.onload = function() {
+            console.log(`📥 Upload response: status=${xhr.status}, response=${xhr.responseText.substring(0, 100)}...`);
             progressContainer.style.display = 'none';
+
             if (xhr.status === 200) {
-                AdminUtils.showToast(`${files.length} file(s) uploaded successfully`, 'success');
-                document.getElementById('upload-input').value = '';
-                loadUploads();
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    console.log('✅ Upload successful:', response);
+                    AdminUtils.showToast(`${files.length} file(s) uploaded successfully`, 'success');
+
+                    // Clear both file inputs after successful upload
+                    const visibleInput = document.getElementById('upload-input-visible');
+                    const hiddenInput = document.getElementById('upload-input-hidden');
+                    if (visibleInput) {
+                        visibleInput.value = '';
+                        console.log('🗑️ Cleared visible input');
+                    }
+                    if (hiddenInput) {
+                        hiddenInput.value = '';
+                        console.log('🗑️ Cleared hidden input');
+                    }
+
+                    // Reload uploads list to show new files
+                    setTimeout(() => loadUploads(), 500);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse upload response:', parseError);
+                    AdminUtils.showToast('Upload completed but response parsing failed', 'warning');
+                }
             } else {
-                throw new Error('Upload failed');
+                console.error(`❌ Upload failed with status ${xhr.status}: ${xhr.responseText}`);
+                AdminUtils.showToast(`Upload failed (HTTP ${xhr.status})`, 'danger');
             }
         };
 
         xhr.onerror = function() {
+            console.error('❌ Upload network error');
             progressContainer.style.display = 'none';
-            throw new Error('Upload failed');
+            AdminUtils.showToast('Upload failed - network error', 'danger');
         };
 
-        xhr.open('POST', `/api/uploads?env=${currentEnvironment}`);
+        xhr.ontimeout = function() {
+            console.error('❌ Upload timeout');
+            progressContainer.style.display = 'none';
+            AdminUtils.showToast('Upload timed out', 'danger');
+        };
+
+        // Set timeout for uploads (5 minutes)
+        xhr.timeout = 300000;
+
+        const uploadUrl = `/api/uploads?env=${currentEnvironment}`;
+        console.log(`🚀 Starting upload to: ${uploadUrl}`);
+        xhr.open('POST', uploadUrl);
         xhr.send(formData);
 
     } catch (error) {
+        console.error('❌ Upload exception:', error);
         progressContainer.style.display = 'none';
-        console.error('Upload failed:', error);
-        AdminUtils.showToast('Upload failed', 'danger');
+        AdminUtils.showToast(`Upload failed: ${error.message}`, 'danger');
     }
 }
 
