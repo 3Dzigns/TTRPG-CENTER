@@ -15,6 +15,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from ..ttrpg_logging import get_logger
+from .logs import AdminLogService
 
 
 logger = get_logger(__name__)
@@ -32,7 +33,8 @@ class IngestionJob:
     source_file: str
     total_phases: int
     completed_phases: int
-    current_phase: Optional[str]
+    current_phase: Optional[str] = None
+    job_type: str = "unknown"
     error_message: Optional[str] = None
     artifacts_path: Optional[str] = None
     process_id: Optional[int] = None
@@ -121,9 +123,10 @@ class AdminIngestionService:
     def __init__(self):
         self.environments = ['dev', 'test', 'prod']
         self._active_jobs = {}  # Track running async tasks
-        self._pass_sequence = ["parse", "enrich", "compile"]  # Lane A pipeline phases
+        self._pass_sequence = ["A", "B", "C", "D", "E", "F", "G"]  # Lane A pipeline phases
         self._metrics_callbacks: List[Callable[[IngestionMetrics], None]] = []  # FR-034: Metrics broadcasting
         self._job_progress: Dict[str, Dict[str, PhaseProgress]] = {}  # Track phase progress per job
+        self.log_service = AdminLogService()
         logger.info("Admin Ingestion Service initialized")
     
     async def get_ingestion_overview(self) -> Dict[str, Any]:
@@ -349,7 +352,7 @@ class AdminIngestionService:
                 "job_type": job_type,
                 "lane": lane_value,
                 "log_file": log_filename,
-                "phases": ["parse", "enrich", "compile", "hgrn_validate"],
+                "phases": ["A", "B", "C", "D", "E", "F", "G"],
                 "hgrn_enabled": options_dict.get("hgrn_enabled", True),
                 "selected_sources": selected_sources,
                 "source_count": len(selected_sources) if selected_sources else 1,
@@ -527,7 +530,7 @@ class AdminIngestionService:
         log_file_path: Path
     ) -> None:
         """
-        Unified Lane A pipeline execution for all job types
+        Real Lane A pipeline execution implementing Passes A-G
 
         Args:
             job_id: Job identifier
@@ -540,108 +543,404 @@ class AdminIngestionService:
             job_type = manifest.get("job_type", "ad_hoc")
             selected_sources = manifest.get("selected_sources", [])
 
-            logger.info(f"Starting unified Lane A pipeline for {job_type} job {job_id}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Starting unified Lane A pipeline")
+            logger.info(f"Starting Lane A pipeline (Passes A-G) for {job_type} job {job_id}")
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Starting Lane A pipeline (Passes A-G)")
 
             # Determine sources to process
             if job_type == "selective" and selected_sources:
                 sources_to_process = selected_sources
                 await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Processing {len(sources_to_process)} selected sources")
             else:
-                sources_to_process = [manifest.get("source_file", "unknown.pdf")]
+                source_file = manifest.get("source_file", "unknown.pdf")
+                if not source_file or source_file == "unknown.pdf":
+                    raise ValueError("No valid source file specified for ingestion")
+                sources_to_process = [source_file]
                 await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Processing single source: {sources_to_process[0]}")
 
             # Initialize job progress tracking
             if job_id not in self._job_progress:
                 self._job_progress[job_id] = {}
 
-            # Execute each phase with enhanced progress tracking and metrics emission
-            for idx, phase in enumerate(self._pass_sequence, start=1):
-                # Initialize phase progress
-                phase_start_time = time.time()
-                self._job_progress[job_id][phase] = PhaseProgress(
-                    phase=phase,
-                    status="started",
-                    start_time=phase_start_time,
-                    current_time=phase_start_time,
-                    total_items=len(sources_to_process),
-                    completed_items=0,
-                    failed_items=0,
-                    current_item=None,
-                    processing_rate=0.0,
-                    estimated_completion=None
-                )
+            # Process each source file through Passes A-G
+            for source_file in sources_to_process:
+                # Resolve source file path
+                source_path = await self._resolve_source_path(source_file, environment)
+                if not source_path.exists():
+                    raise FileNotFoundError(f"Source file not found: {source_path}")
 
-                # Emit job start metrics
-                await self._emit_metrics(IngestionMetrics(
-                    job_id=job_id,
-                    environment=environment,
-                    timestamp=phase_start_time,
-                    phase=phase,
-                    status="started",
-                    total_sources=len(sources_to_process),
-                    processed_sources=0,
-                    current_source=None,
-                    records_processed=0,
-                    records_failed=0,
-                    processing_rate=0.0,
-                    estimated_completion=None
-                ))
+                # Gate 0: SHA-based bypass check
+                should_bypass = await self._check_gate_0_bypass(source_path, job_path, log_file_path)
+                if should_bypass:
+                    await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Bypassing {source_file} - already up to date")
+                    continue
 
-                phase_result = await self._execute_phase_unified(
-                    phase=phase,
-                    job_path=job_path,
-                    manifest=manifest,
-                    job_id=job_id,
-                    sources_to_process=sources_to_process,
-                    log_file_path=log_file_path
-                )
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Processing {source_file} - changes detected")
 
-                # Update phase progress to completed
-                phase_end_time = time.time()
-                phase_progress = self._job_progress[job_id][phase]
-                phase_progress.status = "completed"
-                phase_progress.current_time = phase_end_time
-                phase_progress.completed_items = len(sources_to_process)
-                phase_progress.processing_rate = self._calculate_processing_rate(
-                    phase_progress.completed_items,
-                    phase_progress.duration_seconds
-                )
+                # Execute Passes A-G in sequence
+                manifest_file = job_path / "manifest.json"
 
-                # Update manifest with phase results
-                manifest[f"{phase}_result"] = phase_result
-                manifest["completed_phases"] = idx
+                for idx, pass_name in enumerate(self._pass_sequence, start=1):
+                    phase_start_time = time.time()
 
-                # Emit completion metrics
-                await self._emit_metrics(IngestionMetrics(
-                    job_id=job_id,
-                    environment=environment,
-                    timestamp=phase_end_time,
-                    phase=phase,
-                    status="completed",
-                    total_sources=len(sources_to_process),
-                    processed_sources=len(sources_to_process),
-                    current_source=None,
-                    records_processed=phase_result.get("processed_count", 0),
-                    records_failed=0,
-                    processing_rate=phase_progress.processing_rate,
-                    estimated_completion=None
-                ))
+                    # Initialize phase progress
+                    self._job_progress[job_id][pass_name] = PhaseProgress(
+                        phase=pass_name,
+                        status="started",
+                        start_time=phase_start_time,
+                        current_time=phase_start_time,
+                        total_items=1,
+                        completed_items=0,
+                        failed_items=0,
+                        current_item=source_file,
+                        processing_rate=0.0,
+                        estimated_completion=None
+                    )
 
-                await self._append_log(log_file_path,
-                    f"[{datetime.now().isoformat()}] Phase {phase} completed: "
-                    f"processed={phase_result['processed_count']}, "
-                    f"artifacts={phase_result['artifact_count']}, "
-                    f"checksum={phase_result['checksum'][:8]}, "
-                    f"rate={phase_progress.processing_rate:.2f}/s")
+                    # Emit start metrics
+                    await self._emit_metrics(IngestionMetrics(
+                        job_id=job_id,
+                        environment=environment,
+                        timestamp=phase_start_time,
+                        phase=pass_name,
+                        status="started",
+                        total_sources=len(sources_to_process),
+                        processed_sources=0,
+                        current_source=source_file,
+                        records_processed=0,
+                        records_failed=0,
+                        processing_rate=0.0,
+                        estimated_completion=None
+                    ))
 
-            logger.info(f"Unified Lane A pipeline completed for job {job_id}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Unified Lane A pipeline completed successfully")
+                    # Execute the actual pass
+                    pass_result = await self._execute_real_pass(
+                        pass_name=pass_name,
+                        source_path=source_path,
+                        job_path=job_path,
+                        job_id=job_id,
+                        environment=environment,
+                        log_file_path=log_file_path
+                    )
+
+                    # Update phase progress
+                    phase_end_time = time.time()
+                    phase_progress = self._job_progress[job_id][pass_name]
+                    phase_progress.status = "completed"
+                    phase_progress.current_time = phase_end_time
+                    phase_progress.completed_items = 1
+                    phase_progress.processing_rate = self._calculate_processing_rate(1, phase_progress.duration_seconds)
+
+                    # Update manifest with pass results
+                    manifest[f"pass_{pass_name.lower()}_result"] = pass_result
+                    manifest["completed_phases"] = idx
+
+                    # Emit completion metrics
+                    await self._emit_metrics(IngestionMetrics(
+                        job_id=job_id,
+                        environment=environment,
+                        timestamp=phase_end_time,
+                        phase=pass_name,
+                        status="completed",
+                        total_sources=len(sources_to_process),
+                        processed_sources=1,
+                        current_source=source_file,
+                        records_processed=pass_result.get("processed_count", 0),
+                        records_failed=0,
+                        processing_rate=phase_progress.processing_rate,
+                        estimated_completion=None
+                    ))
+
+                    await self._append_log(log_file_path,
+                        f"[{datetime.now().isoformat()}] Pass {pass_name} completed: "
+                        f"processed={pass_result.get('processed_count', 0)}, "
+                        f"artifacts={pass_result.get('artifact_count', 0)}, "
+                        f"duration={phase_progress.duration_seconds:.2f}s")
+
+            logger.info(f"Lane A pipeline (Passes A-G) completed for job {job_id}")
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Lane A pipeline completed successfully")
 
         except Exception as e:
-            logger.error(f"Error in unified Lane A pipeline for job {job_id}: {e}")
+            logger.error(f"Error in Lane A pipeline for job {job_id}: {e}")
             await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pipeline failed: {str(e)}")
             raise
+
+    async def _resolve_source_path(self, source_file: str, environment: str) -> Path:
+        """Resolve source file path based on environment and upload directories"""
+        # Try different possible upload directory locations
+        upload_dirs = [
+            Path(f"env/{environment}/data/uploads"),
+            Path(f"uploads"),
+            Path(f"data/uploads"),
+            Path(".")  # Current directory as fallback
+        ]
+
+        for upload_dir in upload_dirs:
+            potential_path = upload_dir / source_file
+            if potential_path.exists():
+                return potential_path
+
+        # If not found in upload dirs, try as absolute path
+        source_path = Path(source_file)
+        if source_path.exists():
+            return source_path
+
+        # Default to first upload directory for error reporting
+        return upload_dirs[0] / source_file
+
+    async def _check_gate_0_bypass(self, source_path: Path, job_path: Path, log_file_path: Path) -> bool:
+        """
+        Gate 0: Check if file should be bypassed based on SHA and chunk count cache
+
+        Returns True if file should be bypassed (already up to date)
+        """
+        try:
+            # Calculate current file SHA
+            current_sha = await self._calculate_file_sha(source_path)
+
+            # Check cache file
+            cache_file = job_path / "source_cache.json"
+            if not cache_file.exists():
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: No cache found, proceeding with ingestion")
+                return False
+
+            # Load cache data
+            cache_data = json.loads(cache_file.read_text())
+            cached_sha = cache_data.get("file_sha")
+            cached_chunk_count = cache_data.get("chunk_count", 0)
+
+            if current_sha == cached_sha and cached_chunk_count > 0:
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: SHA match ({current_sha[:8]}) with {cached_chunk_count} chunks - bypassing")
+                return True
+
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: SHA mismatch or no chunks - proceeding with ingestion")
+            return False
+
+        except Exception as e:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Cache check failed - {e}")
+            return False
+
+    async def _calculate_file_sha(self, file_path: Path) -> str:
+        """Calculate SHA-256 hash of file"""
+        def _compute():
+            hash_sha256 = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_sha256.update(chunk)
+            return hash_sha256.hexdigest()
+
+        return await asyncio.to_thread(_compute)
+
+    async def _execute_real_pass(
+        self,
+        pass_name: str,
+        source_path: Path,
+        job_path: Path,
+        job_id: str,
+        environment: str,
+        log_file_path: Path
+    ) -> Dict[str, Any]:
+        """Execute actual pass implementation instead of stub"""
+        try:
+            if pass_name == "A":
+                return await self._execute_pass_a(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "B":
+                return await self._execute_pass_b(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "C":
+                return await self._execute_pass_c(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "D":
+                return await self._execute_pass_d(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "E":
+                return await self._execute_pass_e(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "F":
+                return await self._execute_pass_f(source_path, job_path, job_id, environment, log_file_path)
+            elif pass_name == "G":
+                return await self._execute_pass_g(source_path, job_path, job_id, environment, log_file_path)
+            else:
+                raise ValueError(f"Unknown pass: {pass_name}")
+
+        except Exception as e:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass {pass_name} failed: {str(e)}")
+            raise
+
+    async def _execute_pass_a(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass A: TOC → Metadata via OpenAI"""
+        from ..pass_a_toc_parser import process_pass_a
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: TOC parsing and metadata extraction")
+
+        def _run_pass_a():
+            return process_pass_a(source_path, job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_a)
+
+        return {
+            "processed_count": result.dictionary_entries,
+            "artifact_count": len(result.artifacts),
+            "sections_parsed": result.sections_parsed,
+            "duration_ms": result.processing_time_ms,
+            "success": result.success,
+            "error_message": result.error_message
+        }
+
+    async def _execute_pass_b(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass B: Size-based Split (>25 MB)"""
+        from ..pass_b_logical_splitter import process_pass_b
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B: Logical splitting check")
+
+        def _run_pass_b():
+            return process_pass_b(source_path, job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_b)
+
+        return {
+            "processed_count": result.parts_created,
+            "artifact_count": len(result.artifacts),
+            "split_performed": result.split_performed,
+            "total_pages": result.total_pages,
+            "duration_ms": result.processing_time_ms,
+            "success": result.success,
+            "error_message": result.error_message
+        }
+
+    async def _execute_pass_c(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass C: Unstructured.io → Chunking"""
+        from ..pass_c_extraction import process_pass_c
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass C: Unstructured.io extraction")
+
+        def _run_pass_c():
+            return process_pass_c(source_path, job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_c)
+
+        return {
+            "processed_count": result.chunks_extracted,
+            "artifact_count": len(result.artifacts),
+            "chunks_loaded": result.chunks_loaded,
+            "parts_processed": result.parts_processed,
+            "duration_ms": result.processing_time_ms,
+            "success": result.success,
+            "error_message": result.error_message
+        }
+
+    async def _execute_pass_d(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass D: Haystack Enrichment"""
+        from ..pass_d_vector_enrichment import process_pass_d
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass D: Haystack enrichment and vectorization")
+
+        def _run_pass_d():
+            return process_pass_d(job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_d)
+
+        return {
+            "processed_count": result.chunks_vectorized if hasattr(result, 'chunks_vectorized') else 0,
+            "artifact_count": len(result.artifacts) if hasattr(result, 'artifacts') else 0,
+            "duration_ms": result.processing_time_ms if hasattr(result, 'processing_time_ms') else 0,
+            "success": result.success if hasattr(result, 'success') else True,
+            "error_message": result.error_message if hasattr(result, 'error_message') else None
+        }
+
+    async def _execute_pass_e(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass E: LlamaIndex Graph"""
+        from ..pass_e_graph_builder import process_pass_e
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass E: LlamaIndex graph building")
+
+        def _run_pass_e():
+            return process_pass_e(job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_e)
+
+        return {
+            "processed_count": result.chunks_processed if hasattr(result, 'chunks_processed') else 0,
+            "artifact_count": len(result.artifacts) if hasattr(result, 'artifacts') else 0,
+            "graph_nodes": result.graph_nodes if hasattr(result, 'graph_nodes') else 0,
+            "graph_edges": result.graph_edges if hasattr(result, 'graph_edges') else 0,
+            "duration_ms": result.processing_time_ms if hasattr(result, 'processing_time_ms') else 0,
+            "success": result.success if hasattr(result, 'success') else True,
+            "error_message": result.error_message if hasattr(result, 'error_message') else None
+        }
+
+    async def _execute_pass_f(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass F: Cleanup"""
+        from ..pass_f_finalizer import process_pass_f
+
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass F: Cleanup artifacts and temp files")
+
+        def _run_pass_f():
+            return process_pass_f(job_path, job_id, environment)
+
+        result = await asyncio.to_thread(_run_pass_f)
+
+        # Additionally update source cache for Gate 0
+        file_sha = await self._calculate_file_sha(source_path)
+
+        # Get chunk count from Pass C results
+        chunk_count = 0
+        pass_c_file = job_path / f"{job_id}_pass_c_raw_chunks.jsonl"
+        if pass_c_file.exists():
+            chunk_count = len(pass_c_file.read_text().strip().split('\n'))
+
+        cache_data = {
+            "file_sha": file_sha,
+            "chunk_count": chunk_count,
+            "last_updated": time.time(),
+            "source_file": source_path.name
+        }
+
+        cache_file = job_path / "source_cache.json"
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+
+        return {
+            "processed_count": result.processed_count if hasattr(result, 'processed_count') else 0,
+            "artifact_count": len(result.artifacts) if hasattr(result, 'artifacts') else 1,
+            "cache_updated": True,
+            "file_sha": file_sha[:8],
+            "chunk_count": chunk_count,
+            "duration_ms": result.processing_time_ms if hasattr(result, 'processing_time_ms') else 0,
+            "success": result.success if hasattr(result, 'success') else True,
+            "error_message": result.error_message if hasattr(result, 'error_message') else None
+        }
+
+    async def _execute_pass_g(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
+        """Execute Pass G: HGRN Sanity Check"""
+        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass G: HGRN sanity checks")
+
+        try:
+            # Run HGRN validation if available
+            hgrn_success = await self.run_pass_d_hgrn(job_id, environment, job_path)
+
+            recommendations_count = 0
+            high_priority_count = 0
+
+            # Check for HGRN report
+            hgrn_report_file = job_path / "hgrn_report.json"
+            if hgrn_report_file.exists():
+                hgrn_data = json.loads(hgrn_report_file.read_text())
+                recommendations_count = len(hgrn_data.get("recommendations", []))
+                high_priority_count = len([r for r in hgrn_data.get("recommendations", []) if r.get("priority") == "high"])
+
+            return {
+                "processed_count": 1,
+                "artifact_count": 1 if hgrn_report_file.exists() else 0,
+                "recommendations_count": recommendations_count,
+                "high_priority_count": high_priority_count,
+                "hgrn_success": hgrn_success,
+                "success": True
+            }
+
+        except Exception as e:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass G: HGRN failed - {str(e)}")
+            return {
+                "processed_count": 0,
+                "artifact_count": 0,
+                "success": False,
+                "error_message": str(e)
+            }
 
     async def _execute_phase_unified(
         self,
@@ -1027,8 +1326,8 @@ class AdminIngestionService:
             # Get sources from local artifacts (previously ingested)
             local_sources = await self._get_local_sources(environment)
 
-            # Get sources from AstraDB (currently ingested)
-            astradb_sources = await self._get_astradb_sources(environment)
+            # Get sources from vector store (currently ingested)
+            vector_sources = await self._get_vector_store_sources(environment)
 
             # Combine and deduplicate sources
             source_map = {}
@@ -1042,8 +1341,8 @@ class AdminIngestionService:
                     'last_local_ingestion': source.get('last_modified', 0)
                 }
 
-            # Add/update with AstraDB sources
-            for source in astradb_sources:
+            # Add/update with vector store sources
+            for source in vector_sources:
                 key = source.get('source_file', source.get('id', 'unknown'))
                 if key in source_map:
                     source_map[key].update({
@@ -1331,6 +1630,7 @@ class AdminIngestionService:
                 started_at=manifest.get("started_at"),
                 completed_at=manifest.get("completed_at"),
                 source_file=manifest.get("source_file", "unknown"),
+                job_type=manifest.get("job_type", manifest.get("name", "unknown")),
                 lane=manifest.get("lane", "A"),
                 total_phases=len(manifest.get("phases", [])),
                 completed_phases=manifest.get("completed_phases", 0),
@@ -1451,11 +1751,11 @@ class AdminIngestionService:
             # Get sources from local artifacts
             local_sources = await self._get_local_sources(environment)
 
-            # Get sources from AstraDB (the source of truth)
-            astradb_sources = await self._get_astradb_sources(environment)
+            # Get sources from the active vector store backend
+            vector_sources = await self._get_vector_store_sources(environment)
 
             # Combine and correlate sources from both locations
-            combined_sources = await self._combine_source_data(local_sources, astradb_sources, environment)
+            combined_sources = await self._combine_source_data(local_sources, vector_sources, environment)
 
             # Sort by health (red, yellow, green) then by name
             health_priority = {'red': 0, 'yellow': 1, 'green': 2}
@@ -1493,91 +1793,90 @@ class AdminIngestionService:
 
         return sources
 
-    async def _get_astradb_sources(self, environment: str) -> List[Dict[str, Any]]:
-        """Get sources from AstraDB (source of truth)"""
+    async def _get_vector_store_sources(self, environment: str) -> List[Dict[str, Any]]:
+        """Get sources from the active vector store backend."""
         try:
-            # Import AstraLoader to query the database
             from ..astra_loader import AstraLoader
 
             loader = AstraLoader(env=environment)
-
-            # Get detailed source information with chunk counts
+            backend = getattr(loader, "backend", "vector_store")
             sources_data = loader.get_sources_with_chunk_counts()
 
             if sources_data.get('status') == 'simulation_mode':
-                logger.info(f"AstraDB in simulation mode for {environment}")
-                # Convert simulation data to expected format
-                astra_sources = []
+                logger.info(f"Vector store backend={backend} in simulation mode for {environment}")
+                store_sources: List[Dict[str, Any]] = []
                 for source in sources_data.get('sources', []):
-                    astra_sources.append({
-                        'id': source['source_hash'][:12],  # Truncated hash for display
+                    store_sources.append({
+                        'id': source['source_hash'][:12],
                         'source_file': source['source_file'],
-                        'chunk_count': source['chunk_count'],
+                        'chunk_count': source.get('chunk_count', 0),
                         'health': 'green',
                         'status': 'ingested',
-                        'source_type': 'astradb',
+                        'source_type': backend,
                         'source_hash': source['source_hash'],
-                        'last_modified': source['last_updated']
+                        'last_modified': source.get('last_updated')
                     })
-                return astra_sources
+                return store_sources
 
             if sources_data.get('status') == 'error':
-                logger.warning(f"Error accessing AstraDB for {environment}: {sources_data.get('error', 'Unknown error')}")
+                logger.warning(
+                    f"Error accessing vector store backend={backend} for {environment}: "
+                    f"{sources_data.get('error', 'Unknown error')}"
+                )
                 return []
 
-            # Convert real AstraDB sources to expected format
-            astra_sources = []
+            store_sources: List[Dict[str, Any]] = []
             for source in sources_data.get('sources', []):
-                # Determine health based on chunk count
-                health = 'green' if source['chunk_count'] >= 5 else 'yellow' if source['chunk_count'] > 0 else 'red'
-
-                astra_sources.append({
-                    'id': source['source_hash'][:12],  # Truncated hash for display
-                    'source_file': source['source_file'],
-                    'chunk_count': source['chunk_count'],
+                chunk_count = source.get('chunk_count', 0)
+                health = 'green' if chunk_count >= 5 else 'yellow' if chunk_count > 0 else 'red'
+                store_sources.append({
+                    'id': source['source_hash'][:12],
+                    'source_file': source.get('source_file'),
+                    'chunk_count': chunk_count,
                     'health': health,
                     'status': 'ingested',
-                    'source_type': 'astradb',
-                    'source_hash': source['source_hash'],
-                    'last_modified': source['last_updated']
+                    'source_type': backend,
+                    'source_hash': source.get('source_hash'),
+                    'last_modified': source.get('last_updated')
                 })
 
-            logger.info(f"Retrieved {len(astra_sources)} sources from AstraDB for {environment}")
-            return astra_sources
+            logger.info(
+                f"Retrieved {len(store_sources)} sources from vector store backend={backend} for {environment}"
+            )
+            return store_sources
 
         except Exception as e:
-            logger.warning(f"Could not query AstraDB for {environment}: {e}")
+            logger.warning(f"Could not query vector store for {environment}: {e}")
             return []
-
     async def _combine_source_data(self, local_sources: List[Dict[str, Any]],
-                                   astradb_sources: List[Dict[str, Any]],
+                                   vector_sources: List[Dict[str, Any]],
                                    environment: str) -> List[Dict[str, Any]]:
-        """Combine local and AstraDB source data for comprehensive health view"""
-        combined = []
+        """Combine local and vector store source data for comprehensive health view"""
+        combined: List[Dict[str, Any]] = []
+        vector_backend = vector_sources[0].get('source_type', 'vector_store') if vector_sources else 'vector_store'
 
         # Add all local sources
         for source in local_sources:
             combined.append(source)
 
-        # Add AstraDB sources (these represent the actual ingested data)
-        for source in astradb_sources:
+        # Add vector store sources (these represent the actual ingested data)
+        for source in vector_sources:
             combined.append(source)
 
-        # If we have AstraDB data but no local sources, it means sources are ingested
+        # If we have vector store data but no local sources, it means sources are ingested
         # but local artifacts may have been cleaned up
-        if astradb_sources and not local_sources:
-            logger.info(f"Found {len(astradb_sources)} sources in AstraDB but no local artifacts for {environment}")
+        if vector_sources and not local_sources:
+            logger.info(f"Found {len(vector_sources)} vector store sources but no local artifacts for {environment}")
 
-        # If we have local sources but no AstraDB data, it means ingestion may have failed
-        if local_sources and not astradb_sources:
-            logger.warning(f"Found {len(local_sources)} local sources but no AstraDB data for {environment}")
+        # If we have local sources but no vector store data, ingestion may have failed
+        if local_sources and not vector_sources:
+            logger.warning(f"Found {len(local_sources)} local sources but no vector store data for {environment}")
             # Mark local sources as potentially problematic
             for source in combined:
-                if source.get('source_type') != 'astradb' and source.get('health') == 'green':
-                    source['health'] = 'yellow'  # Downgrade since not in AstraDB
+                if source.get('source_type') != vector_backend and source.get('health') == 'green':
+                    source['health'] = 'yellow'  # Downgrade since missing from vector store
 
         return combined
-
     async def remove_source(self, environment: str, source_id: str) -> bool:
         """
         Remove an ingested source and all its artifacts
@@ -1854,12 +2153,44 @@ class AdminIngestionService:
             all_jobs.sort(key=lambda x: x['created_at'], reverse=True)
             recent_jobs = all_jobs[:limit]
 
+            # Enrich with log-derived status information when available
+            for job in recent_jobs:
+                await self._hydrate_job_status_from_logs(job)
+
             logger.info(f"Retrieved {len(recent_jobs)} recent jobs from all environments")
             return recent_jobs
 
         except Exception as e:
             logger.error(f"Error getting recent jobs: {e}")
             return []
+
+    async def _hydrate_job_status_from_logs(self, job: Dict[str, Any]) -> None:
+        """Update job metadata using the log management service for consistency."""
+        try:
+            job_id = job.get('job_id')
+            env = job.get('environment', 'dev')
+            if not job_id:
+                return
+            log_status = await self.log_service.get_job_status(job_id, env)
+        except Exception as exc:
+            logger.debug(f"Log status lookup failed for {job.get('job_id')}: {exc}")
+            return
+
+        status = log_status.get('status')
+        if status in {'pending', 'running', 'completed', 'failed', 'cancelled', 'killed'}:
+            job['status'] = status
+            job['standardized_status'] = self._standardize_job_status(status)
+
+        start_time = log_status.get('start_time')
+        if start_time and not job.get('started_at'):
+            job['started_at'] = start_time
+
+        end_time = log_status.get('end_time')
+        if end_time:
+            job['completed_at'] = end_time
+
+        if log_status.get('pid') is not None:
+            job['process_id'] = log_status['pid']
 
     def _standardize_job_status(self, raw_status: str) -> Dict[str, Any]:
         """
@@ -1894,14 +2225,21 @@ class AdminIngestionService:
                 'icon': 'check-circle'
             },
             'failed': {
-                'display': 'Completed',
+                'display': 'Failed',
                 'description': 'Finished (Failed)',
                 'category': 'completed',
                 'color': 'danger',
                 'icon': 'x-circle'
             },
             'killed': {
-                'display': 'Completed',
+                'display': 'Cancelled',
+                'description': 'Finished (Cancelled)',
+                'category': 'completed',
+                'color': 'secondary',
+                'icon': 'stop-circle'
+            },
+            'cancelled': {
+                'display': 'Cancelled',
                 'description': 'Finished (Cancelled)',
                 'category': 'completed',
                 'color': 'secondary',
@@ -1916,3 +2254,13 @@ class AdminIngestionService:
             'color': 'secondary',
             'icon': 'question-circle'
         })
+
+
+
+
+
+
+
+
+
+
