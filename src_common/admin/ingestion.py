@@ -2011,23 +2011,16 @@ class AdminIngestionService:
         """Get sources from the uploads directory (new files waiting to be ingested)."""
         sources = []
         try:
-            # Try multiple possible upload directory locations
-            upload_paths = [
-                Path(f"env/{environment}/data/uploads"),
-                Path(f"env/{environment}/uploads"),
-                Path(f"uploads/{environment}"),
-                Path("uploads")
-            ]
+            # Use the same upload directory logic as admin_routes.py
+            import os
+            uploads_dir_path = os.getenv("UPLOADS_DIR", "/data/uploads")
+            uploads_dir = Path(uploads_dir_path)
 
-            uploads_dir = None
-            for path in upload_paths:
-                if path.exists():
-                    uploads_dir = path
-                    logger.debug(f"Found uploads directory at: {path}")
-                    break
+            # Ensure directory exists (should already exist from container setup)
+            os.makedirs(uploads_dir, exist_ok=True)
 
-            if not uploads_dir:
-                logger.info(f"No uploads directory found for {environment}")
+            if not uploads_dir.exists():
+                logger.warning(f"Uploads directory does not exist: {uploads_dir}")
                 return sources
 
             # Scan for PDF files in uploads directory
@@ -2058,11 +2051,11 @@ class AdminIngestionService:
                         logger.warning(f"Could not analyze uploaded file {file_path}: {e}")
                         continue
 
-            logger.info(f"Found {len(sources)} uploaded files in {uploads_dir} for {environment}")
+            logger.info(f"Found {len(sources)} uploaded files in {uploads_dir}")
             return sources
 
         except Exception as e:
-            logger.error(f"Error scanning uploads directory for {environment}: {e}")
+            logger.error(f"Error scanning uploads directory {uploads_dir}: {e}")
             return []
 
     async def _combine_source_data(self, local_sources: List[Dict[str, Any]],
