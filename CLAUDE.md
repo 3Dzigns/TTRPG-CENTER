@@ -155,6 +155,13 @@ Each pass must use real tools (no mocks in acceptance tests) and emit contract-c
 - Admin UI toggle for cache disabling
 - Fast retest behavior with config change reflection within seconds
 
+### Performance Optimization Patterns (BUG-031 Implementation)
+- **Timer Lifecycle Management**: All polling timers must implement proper cleanup on page unload/hide
+- **Visibility-Based Resource Management**: Pause polling and WebSocket connections when page is hidden
+- **Staggered Loading**: Critical data loads first, secondary data loads with delays to improve perceived performance
+- **Request Deduplication**: Track active requests to prevent duplicate API calls during navigation
+- **Proper Event Cleanup**: Use both `beforeunload` and `pagehide` events for comprehensive cleanup
+
 ## Dependencies & External Services
 
 - **AstraDB:** Vector database for chunk storage and retrieval

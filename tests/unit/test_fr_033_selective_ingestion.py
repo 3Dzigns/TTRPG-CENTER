@@ -225,7 +225,7 @@ class TestFR033UnifiedIngestionPipeline:
     async def test_get_available_sources(self, ingestion_service):
         """Test source discovery for selective ingestion"""
         with patch.object(ingestion_service, '_get_local_sources') as mock_local:
-            with patch.object(ingestion_service, '_get_astradb_sources') as mock_astradb:
+            with patch.object(ingestion_service, '_get_vector_store_sources') as mock_vector:
                 # Mock local sources
                 mock_local.return_value = [
                     {
@@ -236,11 +236,11 @@ class TestFR033UnifiedIngestionPipeline:
                     }
                 ]
 
-                # Mock AstraDB sources
-                mock_astradb.return_value = [
+                # Mock vector store sources
+                mock_vector.return_value = [
                     {
-                        "id": "astra_doc1",
-                        "source_file": "astra_doc1.pdf",
+                        "id": "cassandra_doc1",
+                        "source_file": "cassandra_doc1.pdf",
                         "health": "green",
                         "chunk_count": 25,
                         "last_modified": 2000000
@@ -256,9 +256,9 @@ class TestFR033UnifiedIngestionPipeline:
                 local_source = next(s for s in sources if s["source_file"] == "local_doc1.pdf")
                 assert local_source["available_for_reingestion"] is True
 
-                # Check that AstraDB source without local artifacts cannot be reingested
-                astra_source = next(s for s in sources if s["source_file"] == "astra_doc1.pdf")
-                assert astra_source["available_for_reingestion"] is False
+                # Check that vector store source without local artifacts cannot be reingested
+                vector_source = next(s for s in sources if s["source_file"] == "cassandra_doc1.pdf")
+                assert vector_source["available_for_reingestion"] is False
 
     @pytest.mark.asyncio
     async def test_start_selective_ingestion_job(self, ingestion_service):
@@ -408,3 +408,5 @@ class TestFR033UnifiedIngestionPipeline:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+

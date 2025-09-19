@@ -488,14 +488,67 @@
 let currentEnvironment = 'dev';
 let selectedUploads = new Set();
 let selectedSources = new Set();
+let isPageVisible = true;
+let activeRequests = new Map();
+let observabilityWebSocket = null;
+let reconnectTimeout = null;
 
-// Initialize console
+// Initialize console with proper cleanup handlers
 document.addEventListener('DOMContentLoaded', function() {
     console.log('📋 Ingestion Console initializing...');
     refreshConsole();
     setupEventListeners();
+    setupVisibilityHandlers();
+    setupCleanupHandlers();
     console.log('✅ Ingestion Console ready! Use drag & drop to upload files.');
 });
+
+// Visibility-based resource management
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Page is now hidden - pause resource-intensive operations
+            isPageVisible = false;
+            if (observabilityWebSocket) {
+                stopObservabilityMode();
+                console.log('Ingestion page hidden - observability stopped');
+            }
+        } else {
+            // Page is now visible - resume operations
+            isPageVisible = true;
+            console.log('Ingestion page visible - ready to resume operations');
+            // Refresh console data when page becomes visible
+            refreshConsole();
+        }
+    });
+}
+
+// Proper cleanup on page unload
+function setupCleanupHandlers() {
+    window.addEventListener('beforeunload', function() {
+        console.log('Ingestion page unloading - cleaning up connections and timers');
+        if (observabilityWebSocket) {
+            observabilityWebSocket.close();
+            observabilityWebSocket = null;
+        }
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+    });
+
+    window.addEventListener('pagehide', function() {
+        console.log('Ingestion page hiding - cleaning up connections and timers');
+        if (observabilityWebSocket) {
+            observabilityWebSocket.close();
+            observabilityWebSocket = null;
+        }
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+    });
+}
 
 // Note: Browse button functionality disabled due to browser security restrictions
 // when accessing through ngrok. Drag & drop functionality works perfectly.
@@ -537,14 +590,31 @@ function setupEventListeners() {
     });
 }
 
+// Request deduplication for console refresh
 async function refreshConsole() {
+    // Prevent duplicate refresh requests
+    if (activeRequests.has('refresh')) {
+        console.log('Console refresh already in progress, skipping duplicate request');
+        return;
+    }
+
+    activeRequests.set('refresh', true);
     AdminUtils.showToast('Refreshing ingestion console...', 'info');
-    await Promise.all([
-        loadUploads(),
-        loadSources(),
-        loadJobs()
-    ]);
-    AdminUtils.showToast('Console refreshed', 'success');
+
+    try {
+        // Parallel loading with proper error handling
+        await Promise.allSettled([
+            loadUploads(),
+            loadSources(),
+            loadJobs()
+        ]);
+        AdminUtils.showToast('Console refreshed', 'success');
+    } catch (error) {
+        console.error('Error refreshing console:', error);
+        AdminUtils.showToast('Error refreshing console', 'danger');
+    } finally {
+        activeRequests.delete('refresh');
+    }
 }
 
 function switchEnvironment(env) {
@@ -1345,10 +1415,17 @@ function startObservabilityMode() {
 function stopObservabilityMode() {
     isObservabilityActive = false;
 
-    // Close WebSocket connection
+    // Clear any pending reconnect timeout
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
+    // Close WebSocket connection with proper cleanup
     if (observabilityWebSocket) {
         observabilityWebSocket.close();
         observabilityWebSocket = null;
+        console.log('Observability WebSocket disconnected and cleaned up');
     }
 
     // Update UI state
@@ -1357,9 +1434,18 @@ function stopObservabilityMode() {
     document.getElementById('start-observability-btn').style.display = 'inline-block';
     document.getElementById('stop-observability-btn').style.display = 'none';
 
-    // Reset charts
-    if (processingRateChart) processingRateChart.destroy();
-    if (successFailureChart) successFailureChart.destroy();
+    // Reset charts with proper cleanup
+    if (processingRateChart) {
+        processingRateChart.destroy();
+        processingRateChart = null;
+    }
+    if (successFailureChart) {
+        successFailureChart.destroy();
+        successFailureChart = null;
+    }
+
+    // Clear metrics history
+    metricsHistory = [];
 
     AdminUtils.showToast('Real-time observability stopped', 'info');
 }
@@ -1407,9 +1493,23 @@ function switchObservableJob(jobId) {
 }
 
 function connectToJobWebSocket(jobId) {
-    // Close existing connection
+    // Close existing connection with cleanup
     if (observabilityWebSocket) {
         observabilityWebSocket.close();
+        observabilityWebSocket = null;
+    }
+
+    // Clear any pending reconnect timeout
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
+    // Only connect if page is visible
+    if (!isPageVisible) {
+        console.log('Page not visible - WebSocket connection deferred');
+        updateConnectionStatus('Page not visible - connection deferred', 'warning');
+        return;
     }
 
     updateConnectionStatus('Connecting to real-time metrics...', 'info');
@@ -1444,6 +1544,13 @@ function connectToJobWebSocket(jobId) {
             updateConnectionStatus('Connection closed', 'warning');
             document.getElementById('job-status-text').textContent = 'Disconnected';
             document.getElementById('job-health-indicator').className = 'health-indicator health-red';
+            observabilityWebSocket = null;
+
+            // Only attempt reconnection if page is still visible and observability is active
+            if (isPageVisible && isObservabilityActive) {
+                console.log('Scheduling observability WebSocket reconnect...');
+                reconnectTimeout = setTimeout(() => connectToJobWebSocket(jobId), 5000);
+            }
         };
 
         observabilityWebSocket.onerror = function(error) {

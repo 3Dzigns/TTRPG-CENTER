@@ -184,6 +184,7 @@
 let currentLogData = null;
 let autoRefreshTimer = null;
 let isAutoRefreshing = false;
+let isPageVisible = true;
 
 const encodeDataAttr = (value) => encodeURIComponent(String(value ?? ''));
 const decodeDataAttr = (value) => {
@@ -237,7 +238,7 @@ const getEnvClass = (environment) => {
             return 'secondary';
     }
 };
-// Initialize page
+// Initialize page with proper cleanup handlers
 document.addEventListener('DOMContentLoaded', function() {
     // Handle URL parameters for direct navigation from job controls (FR-014)
     const urlParams = new URLSearchParams(window.location.search);
@@ -260,6 +261,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load logs data (this will respect the environment filter)
     loadLogsData();
+    setupVisibilityHandlers();
+    setupCleanupHandlers();
 
     const logsTableBody = document.getElementById('logs-table-body');
     if (logsTableBody) {
@@ -273,6 +276,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 1000); // Wait for logs to load
     }
 });
+
+// Visibility-based auto-refresh management
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Page is now hidden - pause auto-refresh
+            isPageVisible = false;
+            if (isAutoRefreshing) {
+                stopAutoRefresh();
+                console.log('Logs page hidden - auto-refresh paused');
+            }
+        } else {
+            // Page is now visible - resume auto-refresh if it was active
+            isPageVisible = true;
+            console.log('Logs page visible - ready to resume auto-refresh');
+            // Note: Auto-refresh will resume when user clicks the button or it was already active
+        }
+    });
+}
+
+// Proper cleanup on page unload
+function setupCleanupHandlers() {
+    window.addEventListener('beforeunload', function() {
+        console.log('Logs page unloading - cleaning up auto-refresh timer');
+        stopAutoRefresh();
+    });
+
+    window.addEventListener('pagehide', function() {
+        console.log('Logs page hiding - cleaning up auto-refresh timer');
+        stopAutoRefresh();
+    });
+}
 
 async function loadLogsData() {
     try {
@@ -514,19 +549,36 @@ function toggleAutoRefresh() {
 }
 
 function startAutoRefresh() {
-    if (autoRefreshTimer) return;
+    // Clear any existing timer first to prevent overlapping timers
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+
+    // Only start auto-refresh if page is visible
+    if (!isPageVisible) {
+        console.log('Page not visible - auto-refresh not started');
+        return;
+    }
 
     isAutoRefreshing = true;
     document.getElementById('auto-refresh-btn').innerHTML = '<i class="bi bi-pause-circle me-1"></i>Stop Auto';
     document.getElementById('auto-refresh-btn').className = 'btn btn-warning btn-sm';
 
-    autoRefreshTimer = setInterval(updateLogView, 3000); // Update every 3 seconds
+    autoRefreshTimer = setInterval(() => {
+        // Check if page is still visible before refreshing
+        if (isPageVisible && currentLogData) {
+            updateLogView();
+        }
+    }, 3000); // Update every 3 seconds
+    console.log('Auto-refresh started (3s interval)');
 }
 
 function stopAutoRefresh() {
     if (autoRefreshTimer) {
         clearInterval(autoRefreshTimer);
         autoRefreshTimer = null;
+        console.log('Auto-refresh stopped');
     }
 
     isAutoRefreshing = false;
@@ -618,8 +670,9 @@ async function exportLogs() {
     }
 }
 
-// Cleanup on modal close
+// Cleanup on modal close with enhanced cleanup
 document.getElementById('logViewModal').addEventListener('hidden.bs.modal', function() {
+    console.log('Log view modal closed - cleaning up auto-refresh');
     stopAutoRefresh();
     currentLogData = null;
 });
