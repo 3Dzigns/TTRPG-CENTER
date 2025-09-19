@@ -893,11 +893,19 @@ let selectedBugs = new Set();
 let filterOptions = {};
 let activeTestExecutions = new Map();
 
-// WebSocket connection for real-time test updates
+// WebSocket connection for real-time test updates with proper cleanup
 let testWs = null;
+let isPageVisible = true;
+let reconnectTimeout = null;
 
 function connectTestWebSocket() {
     if (testWs && testWs.readyState === WebSocket.OPEN) {
+        return;
+    }
+
+    // Only connect if page is visible
+    if (!isPageVisible) {
+        console.log('Page not visible - WebSocket connection deferred');
         return;
     }
 
@@ -906,6 +914,11 @@ function connectTestWebSocket() {
 
     testWs.onopen = function() {
         console.log('Test WebSocket connected');
+        // Clear any pending reconnect timeout
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
     };
 
     testWs.onmessage = function(event) {
@@ -914,13 +927,32 @@ function connectTestWebSocket() {
     };
 
     testWs.onclose = function() {
-        console.log('Test WebSocket disconnected, reconnecting...');
-        setTimeout(connectTestWebSocket, 5000);
+        console.log('Test WebSocket disconnected');
+        testWs = null;
+
+        // Only attempt reconnection if page is still visible
+        if (isPageVisible) {
+            console.log('Scheduling WebSocket reconnect...');
+            reconnectTimeout = setTimeout(connectTestWebSocket, 5000);
+        }
     };
 
     testWs.onerror = function(error) {
         console.error('Test WebSocket error:', error);
     };
+}
+
+function disconnectTestWebSocket() {
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
+    if (testWs) {
+        testWs.close();
+        testWs = null;
+        console.log('Test WebSocket disconnected and cleaned up');
+    }
 }
 
 function handleTestWebSocketMessage(data) {
@@ -943,10 +975,12 @@ function handleTestWebSocketMessage(data) {
     }
 }
 
-// Initialize page
+// Initialize page with proper cleanup handlers
 document.addEventListener('DOMContentLoaded', function() {
     loadTestingData();
     connectTestWebSocket();
+    setupVisibilityHandlers();
+    setupCleanupHandlers();
 
     // Setup tab change handlers
     document.querySelectorAll('#mainTabs button[data-bs-toggle="tab"]').forEach(tab => {
@@ -958,6 +992,38 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// Visibility-based WebSocket management
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Page is now hidden - disconnect WebSocket to save resources
+            isPageVisible = false;
+            disconnectTestWebSocket();
+            console.log('Testing page hidden - WebSocket disconnected');
+        } else {
+            // Page is now visible - reconnect WebSocket
+            isPageVisible = true;
+            connectTestWebSocket();
+            console.log('Testing page visible - WebSocket reconnecting');
+            // Refresh data when page becomes visible
+            loadTestingData();
+        }
+    });
+}
+
+// Proper cleanup on page unload
+function setupCleanupHandlers() {
+    window.addEventListener('beforeunload', function() {
+        console.log('Testing page unloading - cleaning up WebSocket connections');
+        disconnectTestWebSocket();
+    });
+
+    window.addEventListener('pagehide', function() {
+        console.log('Testing page hiding - cleaning up WebSocket connections');
+        disconnectTestWebSocket();
+    });
+}
 
 async function loadTestingData() {
     AdminUtils.showToast('Loading testing data...', 'info');
@@ -2102,6 +2168,9 @@ async function stopAllTests() {
 
         AdminUtils.showToast('All tests stopped', 'warning');
         updateTestExecutionStatus('ready', 'Ready');
+
+        // Clean up any active test executions from our tracking
+        activeTestExecutions.clear();
 
     } catch (error) {
         console.error('Error stopping tests:', error);

@@ -18,6 +18,7 @@ from .mongo_dictionary_service import get_dictionary_service
 from .neo4j_graph_service import get_graph_service
 from .redis_service import get_redis_service
 from .container_scheduler_service import get_scheduler_service
+from .vector_store.factory import make_vector_store
 
 logger = get_logger(__name__)
 
@@ -80,7 +81,7 @@ class ContainerHealthService:
             ("neo4j", self._check_neo4j_health(include_details)),
             ("redis", self._check_redis_health(include_details)),
             ("scheduler", self._check_scheduler_health(include_details)),
-            ("astradb", self._check_astradb_health(include_details)),
+            ("vector_store", self._check_vector_store_health(include_details)),
             ("openai", self._check_openai_health(include_details))
         ]
         
@@ -186,39 +187,63 @@ class ContainerHealthService:
         except Exception as e:
             return {"status": "error", "error": str(e)}
     
-    async def _check_astradb_health(self, include_details: bool) -> Dict[str, Any]:
-        """Check AstraDB connectivity"""
+    async def _check_vector_store_health(self, include_details: bool) -> Dict[str, Any]:
+        """Check vector store connectivity."""
+        backend = (os.getenv("VECTOR_STORE_BACKEND") or "").strip().lower()
+        if not backend:
+            backend = "cassandra" if self.app_env.lower() in {"dev", "development", "local"} else "astra"
+        if backend in {"memory", "mock"}:
+            return {
+                "status": "disabled",
+                "backend": backend,
+                "reason": "In-memory vector store configured for tests"
+            }
+
+        contact_points = os.getenv("CASSANDRA_CONTACT_POINTS") or os.getenv("CASSANDRA_HOST")
+        if backend == "cassandra" and not contact_points:
+            return {
+                "status": "disabled",
+                "backend": "cassandra",
+                "reason": "Cassandra contact points not configured"
+            }
+
         try:
-            # Check if AstraDB configuration is available
-            astra_endpoint = os.getenv("ASTRA_DB_API_ENDPOINT")
-            astra_token = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
-            
-            if not astra_endpoint or not astra_token:
-                return {
-                    "status": "disabled",
-                    "reason": "AstraDB credentials not configured"
-                }
-            
-            # Basic connectivity check (import here to avoid circular dependencies)
+            store = make_vector_store(self.app_env, backend=backend, fresh=True)
+            backend_name = getattr(store, "backend_name", backend)
+            document_count = 0
             try:
-                from .astra_loader import AstraLoader
-                astra = AstraLoader()
-                
-                if astra.collection:
-                    # Try a simple operation
-                    # This is a basic check - in production you might want a dedicated health check endpoint
-                    return {"status": "healthy", "configured": True}
+                document_count = store.count_documents()
+            except Exception as count_error:
+                logger.warning("Unable to fetch vector store document count: %s", count_error)
+
+            health: Dict[str, Any] = {
+                "status": "healthy",
+                "backend": backend_name,
+                "document_count": document_count
+            }
+
+            if include_details:
+                if backend_name == "cassandra":
+                    health["details"] = {
+                        "contact_points": contact_points or "cassandra-dev",
+                        "keyspace": os.getenv("CASSANDRA_KEYSPACE", "ttrpg"),
+                        "table": os.getenv("CASSANDRA_TABLE", "chunks")
+                    }
                 else:
-                    return {"status": "error", "error": "AstraDB collection not available"}
-                    
-            except ImportError:
-                return {"status": "error", "error": "AstraDB client not available"}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-                
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-    
+                    health["details"] = {
+                        "endpoint": os.getenv("ASTRA_DB_API_ENDPOINT", ""),
+                        "keyspace": os.getenv("ASTRA_DB_KEYSPACE", "")
+                    }
+
+            return health
+
+        except Exception as exc:
+            return {
+                "status": "error",
+                "backend": backend or "auto",
+                "error": str(exc)
+            }
+
     async def _check_openai_health(self, include_details: bool) -> Dict[str, Any]:
         """Check OpenAI API connectivity"""
         try:
@@ -352,3 +377,7 @@ def get_health_service() -> ContainerHealthService:
     if _health_service is None:
         _health_service = ContainerHealthService()
     return _health_service
+
+
+
+

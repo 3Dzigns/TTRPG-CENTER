@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib
 import os
@@ -49,9 +49,15 @@ def _resolve_backend_choice(env: str, backend_override: str | None) -> str:
 
 
 def _default_backend_for_env(env: str) -> str:
-    env_name = (env or "").strip().lower()
+    env_name = (env or "").strip().lower() or os.getenv("APP_ENV", "").strip().lower()
     if _running_under_pytest() or env_name in {"test", "ci"}:
         return "memory"
+    if env_name in {"dev", "development", "local"}:
+        return "cassandra"
+    cassandra_configured = bool(os.getenv("CASSANDRA_CONTACT_POINTS") or os.getenv("CASSANDRA_HOST"))
+    astra_configured = bool(os.getenv("ASTRA_DB_API_ENDPOINT") or os.getenv("ASTRA_DB_APPLICATION_TOKEN"))
+    if cassandra_configured and not astra_configured:
+        return "cassandra"
     return "astra"
 
 
@@ -73,3 +79,4 @@ def _load_backend_class(name: str) -> Type[VectorStore]:
 
 
 __all__ = ["make_vector_store"]
+

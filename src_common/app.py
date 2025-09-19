@@ -16,9 +16,18 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .ttrpg_logging import setup_logging, get_logger, LogContext
-from .orchestrator.service import rag_router
-
+try:
+    from .ttrpg_logging import setup_logging, get_logger, LogContext
+except ImportError:  # pragma: no cover - allows import when src_common is on sys.path
+    from ttrpg_logging import setup_logging, get_logger, LogContext
+try:
+    from .orchestrator.service import rag_router
+except ImportError:  # pragma: no cover
+    from orchestrator.service import rag_router
+try:
+    from .mock_ingest import run_mock_job
+except ImportError:  # pragma: no cover
+    from mock_ingest import run_mock_job
 
 # Initialize logging
 logger = setup_logging()
@@ -405,14 +414,14 @@ app = ttrpg_app.app
 @app.post("/mock-ingest/{job_id}")
 async def run_mock_ingestion(job_id: str):
     """Mock ingestion job for testing status flows."""
-    from .mock_ingest import run_mock_job
-    
     try:
         result = await run_mock_job(job_id, ttrpg_app.broadcast_to_websockets)
         return JSONResponse(content=result)
     except Exception as e:
-        logger.error(f"Mock ingestion failed: {str(e)}", extra={'job_id': job_id})
+        logger.error(f"Mock ingestion failed: {str(e)}", extra={{'job_id': job_id}})
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 if __name__ == "__main__":
@@ -429,3 +438,6 @@ if __name__ == "__main__":
         reload=(env == 'dev'),
         log_config=None  # We handle logging ourselves
     )
+
+
+

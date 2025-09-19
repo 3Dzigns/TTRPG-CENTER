@@ -38,6 +38,8 @@ from .personas.metrics import PersonaMetricsTracker
 from .admin.wireframe_editor import WireframeEditorService
 from .admin.template_generator import TemplateGenerator
 from .admin.testing import BugSeverity, BugPriority, BugStatus, BugComponent
+from .container_scheduler_service import get_scheduler_service
+from .vector_store.factory import make_vector_store
 
 # Initialize logging and services
 logger = get_logger(__name__)
@@ -2391,37 +2393,47 @@ async def export_all_logs(environment: Optional[str] = Query(None)):
 
 
 # -------------------------
-# AstraDB Health Status
+# Vector Store Health Status
 # -------------------------
 
+@admin_router.get("/api/admin/vector-store/sources/{environment}")
 @admin_router.get("/api/admin/astradb/sources/{environment}")
-async def get_astradb_sources(environment: str):
-    """Get sources with chunk counts directly from AstraDB for the specified environment."""
+async def get_vector_store_sources(environment: str):
+    """Get sources with chunk counts from the active vector store backend."""
     try:
-        # Import AstraLoader to query the database
-        from .astra_loader import AstraLoader
-
         if environment not in ['dev', 'test', 'prod']:
             raise HTTPException(status_code=400, detail="Invalid environment")
 
-        loader = AstraLoader(env=environment)
-        sources_data = loader.get_sources_with_chunk_counts()
+        store = make_vector_store(environment, fresh=True)
+        try:
+            sources_data = store.get_sources_with_chunk_counts()
+            backend = getattr(store, "backend_name", "unknown")
+        finally:
+            close_fn = getattr(store, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    logger.debug("Vector store close() raised but was suppressed", exc_info=True)
 
         return {
-            "status": "success",
+            "status": sources_data.get("status", "success"),
             "environment": environment,
+            "backend": backend,
             "data": sources_data,
             "timestamp": time.time()
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting AstraDB sources for {environment}: {e}")
+        logger.error(f"Error getting vector store sources for {environment}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @admin_router.get("/api/admin/sources/health/{environment}")
 async def get_sources_health_status(environment: str):
-    """Get comprehensive health status combining local artifacts and AstraDB sources."""
+    """Get comprehensive health status combining local artifacts and vector store sources."""
     try:
         if environment not in ['dev', 'test', 'prod']:
             raise HTTPException(status_code=400, detail="Invalid environment")
@@ -2441,6 +2453,63 @@ async def get_sources_health_status(environment: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+def _parse_scheduler_time(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    candidates = [value, value.replace(' ', 'T'), value.replace('Z', '+00:00')]
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+    return None
+
+
+def _get_next_scheduled_ingestion_job() -> Optional[Dict[str, Any]]:
+    try:
+        scheduler_service = get_scheduler_service()
+    except Exception:
+        return None
+    if not scheduler_service:
+        return None
+    try:
+        jobs = scheduler_service.get_jobs()
+    except Exception:
+        return None
+
+    upcoming: Optional[tuple[datetime, Dict[str, Any]]] = None
+    for job in jobs:
+        next_run_str = job.get('next_run')
+        if not next_run_str:
+            continue
+        run_dt = _parse_scheduler_time(next_run_str)
+        if not run_dt:
+            continue
+        if upcoming is None or run_dt < upcoming[0]:
+            upcoming = (run_dt, job)
+
+    if not upcoming:
+        return None
+
+    run_dt, job = upcoming
+    return {
+        'job_id': job.get('id'),
+        'name': job.get('name'),
+        'job_type': job.get('name') or job.get('job_type', 'scheduled'),
+        'scheduled_for': run_dt.isoformat(),
+        'scheduled_for_epoch': run_dt.timestamp(),
+        'standardized_status': {
+            'display': 'Pending',
+            'description': 'Scheduled',
+            'category': 'pending',
+            'color': 'warning',
+            'icon': 'clock',
+        },
+    }
+
+
 @admin_router.get("/api/admin/ingestion/recent")
 async def get_recent_ingestion_jobs(limit: int = 3):
     """Get the most recent ingestion jobs across all environments with standardized status."""
@@ -2453,6 +2522,7 @@ async def get_recent_ingestion_jobs(limit: int = 3):
         return {
             "status": "success",
             "jobs": recent_jobs,
+            "next_job": _get_next_scheduled_ingestion_job(),
             "total_returned": len(recent_jobs),
             "timestamp": time.time()
         }
@@ -3292,3 +3362,7 @@ async def get_persona_alerts(hours: int = 24):
     except Exception as e:
         logger.error(f"Error getting persona alerts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+

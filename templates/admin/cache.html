@@ -547,6 +547,8 @@ let cacheData = {};
 let metricsInterval = null;
 let cacheWs = null;
 let pendingOperation = null;
+let isPageVisible = true;
+let activeRequests = new Map();
 
 // WebSocket connection for real-time cache updates
 function connectCacheWebSocket() {
@@ -596,11 +598,13 @@ function handleCacheWebSocketMessage(data) {
     }
 }
 
-// Initialize page
+// Initialize page with proper cleanup handlers
 document.addEventListener('DOMContentLoaded', function() {
     loadCacheData();
     connectCacheWebSocket();
     startMetricsPolling();
+    setupVisibilityHandlers();
+    setupCleanupHandlers();
 
     // Setup tab change handlers
     document.querySelectorAll('#cacheTabs button[data-bs-toggle="tab"]').forEach(tab => {
@@ -614,6 +618,46 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// Visibility-based polling management
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Page is now hidden - pause polling
+            isPageVisible = false;
+            stopMetricsPolling();
+            console.log('Cache page hidden - polling paused');
+        } else {
+            // Page is now visible - resume polling
+            isPageVisible = true;
+            startMetricsPolling();
+            console.log('Cache page visible - polling resumed');
+            // Immediately refresh data when page becomes visible
+            loadCacheData();
+        }
+    });
+}
+
+// Proper cleanup on page unload
+function setupCleanupHandlers() {
+    window.addEventListener('beforeunload', function() {
+        console.log('Cache page unloading - cleaning up timers and connections');
+        stopMetricsPolling();
+        if (cacheWs) {
+            cacheWs.close();
+            cacheWs = null;
+        }
+    });
+
+    window.addEventListener('pagehide', function() {
+        console.log('Cache page hiding - cleaning up timers and connections');
+        stopMetricsPolling();
+        if (cacheWs) {
+            cacheWs.close();
+            cacheWs = null;
+        }
+    });
+}
 
 async function loadCacheData() {
     AdminUtils.showToast('Loading cache data...', 'info');
@@ -722,18 +766,49 @@ function updateMetricsDisplay(data) {
 }
 
 function startMetricsPolling() {
-    // Poll for metrics every 5 seconds
-    metricsInterval = setInterval(async () => {
-        try {
-            const response = await fetch('/api/cache/overview');
-            if (response.ok) {
-                const data = await response.json();
-                updateMetricsDisplay(data);
+    // Clear any existing timer first to prevent overlapping timers
+    if (metricsInterval) {
+        clearInterval(metricsInterval);
+        metricsInterval = null;
+    }
+
+    // Only start polling if page is visible
+    if (isPageVisible) {
+        // Poll for metrics every 5 seconds with proper cleanup
+        metricsInterval = setInterval(async () => {
+            // Check if page is still visible before making request
+            if (!isPageVisible) {
+                return;
             }
-        } catch (error) {
-            console.error('Metrics polling error:', error);
-        }
-    }, 5000);
+
+            // Prevent duplicate requests
+            if (activeRequests.has('metrics')) {
+                return;
+            }
+
+            activeRequests.set('metrics', true);
+            try {
+                const response = await fetch('/api/cache/overview');
+                if (response.ok) {
+                    const data = await response.json();
+                    updateMetricsDisplay(data);
+                }
+            } catch (error) {
+                console.error('Metrics polling error:', error);
+            } finally {
+                activeRequests.delete('metrics');
+            }
+        }, 5000);
+        console.log('Cache metrics polling started (5s interval)');
+    }
+}
+
+function stopMetricsPolling() {
+    if (metricsInterval) {
+        clearInterval(metricsInterval);
+        metricsInterval = null;
+        console.log('Cache metrics polling stopped');
+    }
 }
 
 // Cache Operations
@@ -1243,15 +1318,7 @@ async function refreshCacheData() {
     }
 }
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', function() {
-    if (metricsInterval) {
-        clearInterval(metricsInterval);
-    }
-    if (cacheWs) {
-        cacheWs.close();
-    }
-});
+// Note: Cleanup handlers are now handled in setupCleanupHandlers() above
 </script>
 {% endblock %}
 

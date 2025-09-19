@@ -2,32 +2,21 @@
 # scripts/init-environments.sh
 set -euo pipefail
 
-# Parse command line argument
 ENV_NAME="${1:-dev}"
-
-# Validate environment name
 case "$ENV_NAME" in
     dev|test|prod) ;;
-    *) echo "❌ Error: Environment must be 'dev', 'test', or 'prod'" >&2; exit 1 ;;
+    *) echo "Error: Environment must be 'dev', 'test', or 'prod'" >&2; exit 1 ;;
 esac
 
-# Get script directory and project root
 ROOT="$(cd "$(dirname "$0")"/.. && pwd)"
 ENV_ROOT="$ROOT/env/$ENV_NAME"
 
-# Create directory structure
-echo "📁 Creating directory structure for $ENV_NAME..."
 mkdir -p "$ENV_ROOT/code" "$ENV_ROOT/config" "$ENV_ROOT/data" "$ENV_ROOT/logs"
 
-# Set port based on environment
-case "$ENV_NAME" in
-    dev) PORT=8000 ;;
-    test) PORT=8181 ;;
-    prod) PORT=8282 ;;
-esac
+declare -A PORTS=([dev]=8000 [test]=8181 [prod]=8282)
+PORT="${PORTS[$ENV_NAME]}"
 
-# Create ports.json configuration
-cat > "$ENV_ROOT/config/ports.json" << EOF
+cat > "$ENV_ROOT/config/ports.json" <<EOF
 {
   "http_port": $PORT,
   "websocket_port": $((PORT + 1000)),
@@ -35,22 +24,29 @@ cat > "$ENV_ROOT/config/ports.json" << EOF
 }
 EOF
 
-# Create environment-specific .env template
-CACHE_TTL=0
 case "$ENV_NAME" in
     dev) CACHE_TTL=0 ;;
     test) CACHE_TTL=5 ;;
     prod) CACHE_TTL=300 ;;
 esac
 
-cat > "$ENV_ROOT/config/.env.template" << EOF
+cat > "$ENV_ROOT/config/.env.template" <<EOF
 # Environment: $ENV_NAME
 APP_ENV=$ENV_NAME
 PORT=$PORT
 LOG_LEVEL=INFO
 ARTIFACTS_PATH=./artifacts/$ENV_NAME
 
-# Database Configuration (fill in actual values)
+# Vector store configuration (DEV defaults to Cassandra)
+VECTOR_STORE_BACKEND=cassandra
+CASSANDRA_CONTACT_POINTS=cassandra-dev
+CASSANDRA_PORT=9042
+CASSANDRA_KEYSPACE=ttrpg
+CASSANDRA_TABLE=chunks
+CASSANDRA_USERNAME=
+CASSANDRA_PASSWORD=
+
+# Legacy AstraDB configuration (optional)
 ASTRA_DB_API_ENDPOINT=
 ASTRA_DB_APPLICATION_TOKEN=
 ASTRA_DB_ID=
@@ -69,8 +65,11 @@ JWT_SECRET=
 CACHE_TTL_SECONDS=$CACHE_TTL
 EOF
 
-# Create logging configuration
-cat > "$ENV_ROOT/config/logging.json" << EOF
+if [[ ! -f "$ENV_ROOT/config/.env" ]]; then
+    cp "$ENV_ROOT/config/.env.template" "$ENV_ROOT/config/.env"
+fi
+
+cat > "$ENV_ROOT/config/logging.json" <<EOF
 {
   "version": 1,
   "formatters": {
@@ -101,13 +100,7 @@ cat > "$ENV_ROOT/config/logging.json" << EOF
 }
 EOF
 
-# Set proper permissions on POSIX systems
-if [[ "$OSTYPE" != "cygwin" && "$OSTYPE" != "msys" && "$OSTYPE" != "win32" ]]; then
-    chmod 600 "$ENV_ROOT/config/.env.template"
-    echo "🔒 Set secure permissions on .env.template (600)"
-fi
-
-echo "✅ Initialized $ENV_NAME environment at $ENV_ROOT"
-echo "📁 Created directories: code, config, data, logs"
-echo "🔧 Port configured: $PORT"
-echo "⚠️  Remember to copy .env.template to .env and fill in actual secrets"
+echo "Initialized $ENV_NAME environment at $ENV_ROOT"
+echo "Created directories: code, config, data, logs"
+echo "Ports JSON written with HTTP port $PORT"
+echo "Generated config/.env.template (and config/.env if missing)"
