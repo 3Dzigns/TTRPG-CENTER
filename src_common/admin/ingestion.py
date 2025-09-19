@@ -1465,17 +1465,39 @@ class AdminIngestionService:
             # Get sources from vector store (currently ingested)
             vector_sources = await self._get_vector_store_sources(environment)
 
+            # Get uploaded files waiting to be ingested
+            uploaded_sources = await self._get_uploaded_sources(environment)
+
             # Combine and deduplicate sources
             source_map = {}
 
-            # Add local sources
-            for source in local_sources:
+            # Add uploaded sources (new files waiting to be ingested)
+            for source in uploaded_sources:
                 key = source.get('source_file', source.get('id', 'unknown'))
                 source_map[key] = {
                     **source,
-                    'available_for_reingestion': True,
-                    'last_local_ingestion': source.get('last_modified', 0)
+                    'available_for_ingestion': True,
+                    'available_for_reingestion': False,
+                    'is_new_upload': True,
+                    'last_upload': source.get('last_modified', 0)
                 }
+
+            # Add local sources (previously ingested, can be re-ingested)
+            for source in local_sources:
+                key = source.get('source_file', source.get('id', 'unknown'))
+                if key in source_map:
+                    # Update existing uploaded file with reingestion capability
+                    source_map[key].update({
+                        'available_for_reingestion': True,
+                        'last_local_ingestion': source.get('last_modified', 0)
+                    })
+                else:
+                    source_map[key] = {
+                        **source,
+                        'available_for_reingestion': True,
+                        'is_new_upload': False,
+                        'last_local_ingestion': source.get('last_modified', 0)
+                    }
 
             # Add/update with vector store sources
             for source in vector_sources:
@@ -1984,6 +2006,65 @@ class AdminIngestionService:
         except Exception as e:
             logger.warning(f"Could not query vector store for {environment}: {e}")
             return []
+
+    async def _get_uploaded_sources(self, environment: str) -> List[Dict[str, Any]]:
+        """Get sources from the uploads directory (new files waiting to be ingested)."""
+        sources = []
+        try:
+            # Try multiple possible upload directory locations
+            upload_paths = [
+                Path(f"env/{environment}/data/uploads"),
+                Path(f"env/{environment}/uploads"),
+                Path(f"uploads/{environment}"),
+                Path("uploads")
+            ]
+
+            uploads_dir = None
+            for path in upload_paths:
+                if path.exists():
+                    uploads_dir = path
+                    logger.debug(f"Found uploads directory at: {path}")
+                    break
+
+            if not uploads_dir:
+                logger.info(f"No uploads directory found for {environment}")
+                return sources
+
+            # Scan for PDF files in uploads directory
+            for file_path in uploads_dir.iterdir():
+                if file_path.is_file() and file_path.suffix.lower() == '.pdf':
+                    try:
+                        stat = file_path.stat()
+                        file_size = stat.st_size
+
+                        # Create source info for uploaded file
+                        source_info = {
+                            'id': file_path.stem,  # filename without extension
+                            'source_file': file_path.name,
+                            'file_path': str(file_path),
+                            'file_size': file_size,
+                            'file_size_mb': round(file_size / (1024 * 1024), 2),
+                            'last_modified': stat.st_mtime,
+                            'health': 'blue',  # Use blue to indicate "new upload"
+                            'status': 'uploaded',
+                            'source_type': 'upload',
+                            'description': f"New upload: {file_path.name} ({round(file_size / (1024 * 1024), 2)} MB)"
+                        }
+
+                        sources.append(source_info)
+                        logger.debug(f"Found uploaded file: {file_path.name} ({round(file_size / (1024 * 1024), 2)} MB)")
+
+                    except Exception as e:
+                        logger.warning(f"Could not analyze uploaded file {file_path}: {e}")
+                        continue
+
+            logger.info(f"Found {len(sources)} uploaded files in {uploads_dir} for {environment}")
+            return sources
+
+        except Exception as e:
+            logger.error(f"Error scanning uploads directory for {environment}: {e}")
+            return []
+
     async def _combine_source_data(self, local_sources: List[Dict[str, Any]],
                                    vector_sources: List[Dict[str, Any]],
                                    environment: str) -> List[Dict[str, Any]]:

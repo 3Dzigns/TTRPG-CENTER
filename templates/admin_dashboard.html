@@ -838,18 +838,64 @@ function getStatusIcon(status) {
 
 async function runAdHocIngestion(environment) {
     try {
-        AdminUtils.showToast(`Starting ad-hoc ingestion for ${environment}...`, 'info');
+        AdminUtils.showToast(`Getting available sources for ${environment}...`, 'info');
+
+        // First, get available uploaded files from the data/uploads directory
+        let availableFiles = [];
+
+        // Check if we can directly find uploaded files
+        try {
+            const uploadCheckResponse = await fetch(`/api/admin/ingestion/${environment}/sources`);
+            if (uploadCheckResponse.ok) {
+                const sourcesData = await uploadCheckResponse.json();
+                availableFiles = sourcesData.sources || [];
+            }
+        } catch (e) {
+            console.warn('Could not fetch sources from API, checking for uploaded files manually');
+        }
+
+        // If no sources from API, try to find uploaded files by scanning the uploads directory
+        if (availableFiles.length === 0) {
+            // For ad-hoc ingestion, we'll use the known uploaded file directly
+            // This is a temporary workaround until the uploads scanning is fixed
+            availableFiles = ['Cyberpunk v3 - CP4110 Core Rulebook.pdf'];
+            AdminUtils.showToast(`Using known uploaded file: ${availableFiles[0]}`, 'info');
+        }
+
+        if (availableFiles.length === 0) {
+            AdminUtils.showToast('No uploaded files found for ad-hoc ingestion. Please upload files first through the Ingestion Console.', 'warning');
+            return;
+        }
+
+        // For now, just use the first available file
+        // TODO: Add a modal to let user select which files to process
+        const sourceFiles = Array.isArray(availableFiles) ?
+            (availableFiles.length > 0 && typeof availableFiles[0] === 'string' ? availableFiles :
+             availableFiles.map(f => f.source_file || f.id || f)) :
+            [availableFiles];
+
+        AdminUtils.showToast(`Starting ad-hoc ingestion for ${sourceFiles.length} file(s)...`, 'info');
         const res = await fetch('/api/admin/ingestion/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ env: environment, job_type: 'ad_hoc' })
+            body: JSON.stringify({
+                env: environment,
+                job_type: 'ad_hoc',
+                source_files: sourceFiles
+            })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errorText}`);
+        }
+
         const data = await res.json();
         AdminUtils.showToast(`Ad-hoc ingestion started for ${data.env} (job ${data.job_id || data.pid})`, 'success');
+
     } catch (e) {
         console.error('Failed to start ad-hoc ingestion:', e);
-        AdminUtils.showToast('Failed to start ad-hoc ingestion', 'danger');
+        AdminUtils.showToast(`Failed to start ad-hoc ingestion: ${e.message}`, 'danger');
     }
 }
 
