@@ -377,6 +377,24 @@ class AdminIngestionService:
             with open(log_file_path, 'w', encoding='utf-8') as log_file:
                 log_file.write("\n".join(log_lines) + "\n")
 
+            # Pre-flight validation: Verify source files exist and are readable
+            validation_results = await self._validate_source_files(
+                environment, source_file, selected_sources, log_file_path
+            )
+
+            if not validation_results["all_valid"]:
+                # Update job status to failed and log errors
+                await self._append_log(log_file_path,
+                    f"[{datetime.now().isoformat()}] Pre-flight validation failed: {validation_results['summary']}")
+
+                # Update manifest with failure
+                job_manifest["status"] = "failed"
+                job_manifest["error_message"] = f"Pre-flight validation failed: {validation_results['summary']}"
+                job_manifest["completed_at"] = datetime.now().timestamp()
+                with open(manifest_file, 'w', encoding='utf-8') as f:
+                    json.dump(job_manifest, f, indent=2)
+
+                raise ValueError(f"Source file validation failed: {validation_results['summary']}")
 
             self._start_ingestion_pipeline(
                 job_id=job_id,
@@ -665,27 +683,145 @@ class AdminIngestionService:
             raise
 
     async def _resolve_source_path(self, source_file: str, environment: str) -> Path:
-        """Resolve source file path based on environment and upload directories"""
-        # Try different possible upload directory locations
-        upload_dirs = [
+        """Resolve source file path with environment-aware configuration and proper validation"""
+        # Get uploads directory from environment configuration
+        uploads_dir = os.getenv('UPLOADS_DIR', f"env/{environment}/data/uploads")
+
+        # Try environment-specific path first (highest priority)
+        env_specific_dirs = [
+            Path(uploads_dir),
             Path(f"env/{environment}/data/uploads"),
-            Path(f"uploads"),
-            Path(f"data/uploads"),
-            Path(".")  # Current directory as fallback
         ]
 
-        for upload_dir in upload_dirs:
+        # Fallback paths for compatibility
+        fallback_dirs = [
+            Path("uploads"),
+            Path("data/uploads"),
+            Path(".")  # Current directory as last resort
+        ]
+
+        all_upload_dirs = env_specific_dirs + fallback_dirs
+
+        # Try each directory in priority order
+        for upload_dir in all_upload_dirs:
             potential_path = upload_dir / source_file
-            if potential_path.exists():
-                return potential_path
+            if potential_path.exists() and potential_path.is_file():
+                logger.info(f"Resolved source file '{source_file}' to '{potential_path.absolute()}'")
+                return potential_path.resolve()  # Return absolute path
 
         # If not found in upload dirs, try as absolute path
         source_path = Path(source_file)
-        if source_path.exists():
-            return source_path
+        if source_path.exists() and source_path.is_file():
+            logger.info(f"Using absolute path for source file: '{source_path.absolute()}'")
+            return source_path.resolve()
 
-        # Default to first upload directory for error reporting
-        return upload_dirs[0] / source_file
+        # Log attempted paths for debugging
+        attempted_paths = [str((upload_dir / source_file).absolute()) for upload_dir in all_upload_dirs]
+        logger.error(f"Source file '{source_file}' not found. Attempted paths: {attempted_paths}")
+
+        # Return environment-specific path for clear error reporting
+        preferred_path = env_specific_dirs[0] / source_file
+        return preferred_path
+
+    async def _validate_source_files(
+        self,
+        environment: str,
+        source_file: str,
+        selected_sources: Optional[List[str]],
+        log_file_path: Path
+    ) -> Dict[str, Any]:
+        """
+        Pre-flight validation to verify source files exist and are readable
+
+        Returns:
+            Dict containing validation results with 'all_valid' boolean and detailed results
+        """
+        validation_results = {
+            "all_valid": True,
+            "valid_files": [],
+            "invalid_files": [],
+            "summary": "",
+            "details": {}
+        }
+
+        try:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Starting pre-flight validation")
+
+            # Determine which source files to validate
+            files_to_validate = []
+            if selected_sources:
+                # Selective ingestion - validate all selected sources
+                files_to_validate = selected_sources
+                await self._append_log(log_file_path, f"Validating {len(selected_sources)} selected sources")
+            elif source_file and source_file not in ["nightly_run"]:
+                # Single file ingestion (exclude special nightly placeholder)
+                files_to_validate = [source_file]
+                await self._append_log(log_file_path, f"Validating single source: {source_file}")
+            else:
+                # Nightly runs or special cases - skip validation
+                await self._append_log(log_file_path, "Skipping validation for special job type")
+                validation_results["summary"] = "Validation skipped for special job type"
+                return validation_results
+
+            # Validate each source file
+            for file_name in files_to_validate:
+                try:
+                    resolved_path = await self._resolve_source_path(file_name, environment)
+
+                    if resolved_path.exists() and resolved_path.is_file():
+                        # Check if file is readable and get size
+                        file_size = resolved_path.stat().st_size
+                        validation_results["valid_files"].append({
+                            "name": file_name,
+                            "path": str(resolved_path.absolute()),
+                            "size_bytes": file_size,
+                            "size_mb": round(file_size / (1024 * 1024), 2)
+                        })
+                        await self._append_log(log_file_path,
+                            f"✓ {file_name} -> {resolved_path.absolute()} ({round(file_size / (1024 * 1024), 2)} MB)")
+                    else:
+                        validation_results["invalid_files"].append({
+                            "name": file_name,
+                            "expected_path": str(resolved_path.absolute()),
+                            "error": "File not found or not readable"
+                        })
+                        validation_results["all_valid"] = False
+                        await self._append_log(log_file_path,
+                            f"✗ {file_name} -> NOT FOUND at {resolved_path.absolute()}")
+
+                except Exception as e:
+                    validation_results["invalid_files"].append({
+                        "name": file_name,
+                        "error": f"Validation error: {str(e)}"
+                    })
+                    validation_results["all_valid"] = False
+                    await self._append_log(log_file_path, f"✗ {file_name} -> ERROR: {str(e)}")
+
+            # Generate summary
+            valid_count = len(validation_results["valid_files"])
+            invalid_count = len(validation_results["invalid_files"])
+
+            if validation_results["all_valid"]:
+                validation_results["summary"] = f"All {valid_count} source file(s) validated successfully"
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✓ Pre-flight validation passed")
+            else:
+                invalid_names = [f["name"] for f in validation_results["invalid_files"]]
+                validation_results["summary"] = f"{invalid_count} file(s) failed validation: {invalid_names}"
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✗ Pre-flight validation failed")
+
+            validation_results["details"] = {
+                "total_files": len(files_to_validate),
+                "valid_count": valid_count,
+                "invalid_count": invalid_count,
+                "validation_timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            validation_results["all_valid"] = False
+            validation_results["summary"] = f"Validation process error: {str(e)}"
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✗ Validation process failed: {str(e)}")
+
+        return validation_results
 
     async def _check_gate_0_bypass(self, source_path: Path, job_path: Path, log_file_path: Path) -> bool:
         """

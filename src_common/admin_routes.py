@@ -1876,9 +1876,13 @@ async def run_ingestion_job(request: IngestionRunRequest):
         if request.job_type == "nightly":
             source_file = "nightly_run"
         else:
-            # For ad-hoc jobs, use first source file if provided, otherwise placeholder
-            source_file = (request.source_files[0] if request.source_files
-                          else "ad_hoc_run")
+            # For ad-hoc jobs, require explicit source files
+            if not request.source_files:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ad-hoc ingestion requires explicit source files. Use selective ingestion for uploaded sources."
+                )
+            source_file = request.source_files[0]
 
         lane = (request.lane or "A").strip().upper()
         if lane not in {"A", "B", "C"}:
