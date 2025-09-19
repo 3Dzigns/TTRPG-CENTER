@@ -18,6 +18,7 @@ Welcome to the TTRPG Center documentation hub. This system provides intelligent 
 
 ### For Operations Teams
 - **[Deployment Guide](./PROJECT_ARCHITECTURE.md#deployment--operations)** - Production deployment and monitoring
+- **[Ingestion Pipeline Runbook](./ingestion-pipeline-runbook.md)** - Pass A-G architecture and operational procedures
 - **[API Reference](./PROJECT_ARCHITECTURE.md#api-reference)** - Complete endpoint documentation
 - **[Security Standards](./PROJECT_ARCHITECTURE.md#security--testing-standards)** - Security architecture and compliance
 
@@ -60,8 +61,10 @@ docs/
     phase4-test-guide.md
     phase4-test-summary.md
  bugs/                 # Bug reports and tracking
+    BUG-032.md        # Ingestion pipeline stub removal (RESOLVED)
     BP001.md          # Individual bug reports
     BP*.md            # Bug tracking documents
+ BUG-032-resolution-analysis.md  # Comprehensive bug resolution analysis
  reports/              # Analysis and status reports
      code_analysis_report.md
 ```
@@ -236,6 +239,7 @@ Infrastructure and operations focus:
 - `scripts/` - Deployment and environment automation
 - `env/` - Environment-specific configurations
 - `artifacts/` - Processing outputs and job artifacts
+- **[Ingestion Pipeline Runbook](./ingestion-pipeline-runbook.md)** - Operational procedures and troubleshooting
 
 ###  **QA Engineers**
 Testing and quality assurance:
