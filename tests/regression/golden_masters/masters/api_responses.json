@@ -1,0 +1,146 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-22T22:25:17.715171",
+    "master_type": "api_responses",
+    "checksum": "a226c61b15004aae6e265b2505383c6827767dcc0eda57cbd60f1d7498b59db0"
+  },
+  "search_api": {
+    "basic_search_response": {
+      "results": [
+        {
+          "id": "spell_fireball_001",
+          "title": "Fireball",
+          "type": "spell",
+          "level": 3,
+          "school": "evocation",
+          "relevance_score": 0.95,
+          "source": "Player's Handbook",
+          "excerpt": "A bright streak flashes from your pointing finger..."
+        }
+      ],
+      "total_matches": 1,
+      "query_time": 0.045,
+      "facets": {
+        "spell_level": {
+          "3": 1
+        },
+        "spell_school": {
+          "evocation": 1
+        },
+        "source_book": {
+          "Player's Handbook": 1
+        }
+      }
+    },
+    "faceted_search_response": {
+      "results": [],
+      "total_matches": 0,
+      "query_time": 0.032,
+      "applied_filters": {
+        "spell_level": [
+          1,
+          2
+        ],
+        "spell_school": [
+          "conjuration"
+        ]
+      },
+      "facet_counts": {
+        "spell_level": {
+          "1": 15,
+          "2": 8,
+          "3": 22
+        },
+        "spell_school": {
+          "conjuration": 5,
+          "evocation": 12
+        }
+      }
+    }
+  },
+  "content_api": {
+    "spell_detail_response": {
+      "id": "spell_magic_missile_001",
+      "name": "Magic Missile",
+      "level": 1,
+      "school": "evocation",
+      "casting_time": "1 action",
+      "range": "120 feet",
+      "components": [
+        "V",
+        "S"
+      ],
+      "duration": "Instantaneous",
+      "description": "You create three glowing darts of magical force...",
+      "damage": {
+        "dice": "1d4+1",
+        "type": "force",
+        "scaling": "one additional dart per slot level above 1st"
+      },
+      "classes": [
+        "wizard",
+        "sorcerer"
+      ],
+      "source": "Player's Handbook",
+      "page": 257
+    },
+    "spell_list_response": {
+      "spells": [],
+      "total_count": 0,
+      "page": 1,
+      "page_size": 20,
+      "filters_applied": [],
+      "sort_order": "alphabetical"
+    }
+  },
+  "admin_api": {
+    "ingestion_status_response": {
+      "job_id": "ing_20240315_143022",
+      "status": "completed",
+      "progress": 100,
+      "phases": {
+        "pass_a": {
+          "status": "completed",
+          "duration": 45.2,
+          "chunks_created": 1247
+        },
+        "pass_b": {
+          "status": "completed",
+          "duration": 32.8,
+          "items_enriched": 1247
+        },
+        "pass_c": {
+          "status": "completed",
+          "duration": 67.1,
+          "relationships_mapped": 3891
+        }
+      },
+      "total_duration": 145.1,
+      "created_at": "2024-03-15T14:30:22Z",
+      "completed_at": "2024-03-15T14:32:47Z"
+    },
+    "system_health_response": {
+      "status": "healthy",
+      "services": {
+        "database": {
+          "status": "healthy",
+          "response_time": 12
+        },
+        "vector_store": {
+          "status": "healthy",
+          "response_time": 8
+        },
+        "ai_models": {
+          "status": "healthy",
+          "response_time": 156
+        }
+      },
+      "performance_metrics": {
+        "avg_query_time": 89,
+        "active_sessions": 15,
+        "cache_hit_rate": 0.78
+      },
+      "last_check": "2024-03-15T14:35:00Z"
+    }
+  }
+}

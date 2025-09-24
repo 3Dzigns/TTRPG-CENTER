@@ -173,7 +173,7 @@ function Invoke-PhaseTests {
             $results = Test-Phase0
         }
         "1" {
-            Write-TestLog "Testing Phase 1: Three-Pass Ingestion Pipeline" -Level "PHASE" -Indent 1
+            Write-TestLog "Testing Phase 1: Seven-Pass Ingestion Pipeline (Lane A)" -Level "PHASE" -Indent 1
             $results = Test-Phase1
         }
         "2" {
@@ -212,7 +212,7 @@ function Invoke-PhaseTests {
     $phaseSkipped = ($results | Where-Object { $_.Status -eq "SKIP" }).Count
 
     # Store phase results
-    $script:PhaseResults["Phase$PhaseNumber"] = @{
+    $script:PhaseResults["Phase$($PhaseNumber.ToString())"] = @{
         "Passed" = $phasePassed
         "Failed" = $phaseFailed
         "Skipped" = $phaseSkipped
@@ -302,64 +302,144 @@ function Test-Phase1 {
 
     $results = @()
 
-    # US RAG-001A: Pass A with unstructured.io (HARD GATE)
+    # US RAG-001A: Pass A with unstructured.io (PDF parsing & ToC extraction) - HARD GATE
     try {
-        Write-TestLog "US RAG-001A: Testing Pass A with unstructured.io..." -Level "TEST" -Indent 3
+        Write-TestLog "US RAG-001A: Testing Pass A with unstructured.io (PDF parsing)..." -Level "TEST" -Indent 3
         $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001a_parse.py", "-v")
         if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
 
         $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-TestLog "US RAG-001A: PASS - Real tool integration validated" -Level "PASS" -Indent 4
-            $results += @{ Test = "US RAG-001A Parse/Chunk"; Status = "PASS"; Details = "unstructured.io integration validated"; Output = $output -join "`n" }
+            Write-TestLog "US RAG-001A: PASS - PDF parsing integration validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001A PDF Parse/ToC"; Status = "PASS"; Details = "unstructured.io PDF parsing validated"; Output = $output -join "`n" }
         } else {
             Write-TestLog "US RAG-001A: FAIL" -Level "FAIL" -Indent 4
-            $results += @{ Test = "US RAG-001A Parse/Chunk"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+            $results += @{ Test = "US RAG-001A PDF Parse/ToC"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
         }
     }
     catch {
         Write-TestLog "US RAG-001A: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
-        $results += @{ Test = "US RAG-001A Parse/Chunk"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+        $results += @{ Test = "US RAG-001A PDF Parse/ToC"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
     }
 
-    # US RAG-001B: Pass B with Haystack (HARD GATE)
+    # US RAG-001B: Pass B with PyPDF (logical splitting for large files) - HARD GATE
     try {
-        Write-TestLog "US RAG-001B: Testing Pass B with Haystack..." -Level "TEST" -Indent 3
-        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001b_enrich.py", "-v")
+        Write-TestLog "US RAG-001B: Testing Pass B with PyPDF (logical splitting)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001b_logical_split.py", "-v")
         if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
 
         $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-TestLog "US RAG-001B: PASS - Real tool integration validated" -Level "PASS" -Indent 4
-            $results += @{ Test = "US RAG-001B Enrich/Dictionary"; Status = "PASS"; Details = "Haystack integration validated"; Output = $output -join "`n" }
+            Write-TestLog "US RAG-001B: PASS - Logical splitting integration validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001B Logical Split"; Status = "PASS"; Details = "PyPDF logical splitting validated"; Output = $output -join "`n" }
         } else {
             Write-TestLog "US RAG-001B: FAIL" -Level "FAIL" -Indent 4
-            $results += @{ Test = "US RAG-001B Enrich/Dictionary"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+            $results += @{ Test = "US RAG-001B Logical Split"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
         }
     }
     catch {
         Write-TestLog "US RAG-001B: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
-        $results += @{ Test = "US RAG-001B Enrich/Dictionary"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+        $results += @{ Test = "US RAG-001B Logical Split"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
     }
 
-    # US RAG-001C: Pass C with LlamaIndex (HARD GATE)
+    # US RAG-001C: Pass C with unstructured.io (content extraction & chunking) - HARD GATE
     try {
-        Write-TestLog "US RAG-001C: Testing Pass C with LlamaIndex..." -Level "TEST" -Indent 3
-        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001c_graph.py", "-v")
+        Write-TestLog "US RAG-001C: Testing Pass C with unstructured.io (content extraction)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001c_extraction.py", "-v")
         if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
 
         $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-TestLog "US RAG-001C: PASS - Real tool integration validated" -Level "PASS" -Indent 4
-            $results += @{ Test = "US RAG-001C Graph Compile"; Status = "PASS"; Details = "LlamaIndex integration validated"; Output = $output -join "`n" }
+            Write-TestLog "US RAG-001C: PASS - Content extraction integration validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001C Content Extract"; Status = "PASS"; Details = "unstructured.io content extraction validated"; Output = $output -join "`n" }
         } else {
             Write-TestLog "US RAG-001C: FAIL" -Level "FAIL" -Indent 4
-            $results += @{ Test = "US RAG-001C Graph Compile"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+            $results += @{ Test = "US RAG-001C Content Extract"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
         }
     }
     catch {
         Write-TestLog "US RAG-001C: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
-        $results += @{ Test = "US RAG-001C Graph Compile"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+        $results += @{ Test = "US RAG-001C Content Extract"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+    }
+
+    # US RAG-001D: Pass D with Haystack (vector enrichment & NER) - HARD GATE
+    try {
+        Write-TestLog "US RAG-001D: Testing Pass D with Haystack (vector enrichment)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001d_vector_enrichment.py", "-v")
+        if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
+
+        $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-TestLog "US RAG-001D: PASS - Vector enrichment integration validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001D Vector Enrich"; Status = "PASS"; Details = "Haystack vector enrichment validated"; Output = $output -join "`n" }
+        } else {
+            Write-TestLog "US RAG-001D: FAIL" -Level "FAIL" -Indent 4
+            $results += @{ Test = "US RAG-001D Vector Enrich"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+        }
+    }
+    catch {
+        Write-TestLog "US RAG-001D: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
+        $results += @{ Test = "US RAG-001D Vector Enrich"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+    }
+
+    # US RAG-001E: Pass E with LlamaIndex (graph building & cross-references) - HARD GATE
+    try {
+        Write-TestLog "US RAG-001E: Testing Pass E with LlamaIndex (graph building)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001e_graph_builder.py", "-v")
+        if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
+
+        $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-TestLog "US RAG-001E: PASS - Graph building integration validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001E Graph Build"; Status = "PASS"; Details = "LlamaIndex graph building validated"; Output = $output -join "`n" }
+        } else {
+            Write-TestLog "US RAG-001E: FAIL" -Level "FAIL" -Indent 4
+            $results += @{ Test = "US RAG-001E Graph Build"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+        }
+    }
+    catch {
+        Write-TestLog "US RAG-001E: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
+        $results += @{ Test = "US RAG-001E Graph Build"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+    }
+
+    # US RAG-001F: Pass F (finalization & cleanup) - HARD GATE
+    try {
+        Write-TestLog "US RAG-001F: Testing Pass F (finalization & cleanup)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001f_finalizer.py", "-v")
+        if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
+
+        $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-TestLog "US RAG-001F: PASS - Finalization & cleanup validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001F Finalization"; Status = "PASS"; Details = "Finalization & cleanup validated"; Output = $output -join "`n" }
+        } else {
+            Write-TestLog "US RAG-001F: FAIL" -Level "FAIL" -Indent 4
+            $results += @{ Test = "US RAG-001F Finalization"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+        }
+    }
+    catch {
+        Write-TestLog "US RAG-001F: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
+        $results += @{ Test = "US RAG-001F Finalization"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
+    }
+
+    # US RAG-001G: Pass G with HGRN (validation & quality gates) - HARD GATE
+    try {
+        Write-TestLog "US RAG-001G: Testing Pass G with HGRN (validation & quality gates)..." -Level "TEST" -Indent 3
+        $testCmd = @("docker", "exec", "ttrpg-app-dev-local", "python", "-m", "pytest", "tests/regression/phase1/test_rag001g_hgrn_validation.py", "-v")
+        if ($TestPattern) { $testCmd += "-k"; $testCmd += $TestPattern }
+
+        $output = & $testCmd[0] $testCmd[1..($testCmd.Length-1)] 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-TestLog "US RAG-001G: PASS - HGRN validation & quality gates validated" -Level "PASS" -Indent 4
+            $results += @{ Test = "US RAG-001G HGRN Validation"; Status = "PASS"; Details = "HGRN validation & quality gates validated"; Output = $output -join "`n" }
+        } else {
+            Write-TestLog "US RAG-001G: FAIL" -Level "FAIL" -Indent 4
+            $results += @{ Test = "US RAG-001G HGRN Validation"; Status = "FAIL"; Details = "Exit code: $LASTEXITCODE"; Output = $output -join "`n" }
+        }
+    }
+    catch {
+        Write-TestLog "US RAG-001G: ERROR - $($_.Exception.Message)" -Level "ERROR" -Indent 4
+        $results += @{ Test = "US RAG-001G HGRN Validation"; Status = "ERROR"; Details = $_.Exception.Message; Output = "" }
     }
 
     return $results
@@ -852,7 +932,7 @@ try {
             $allResults += $phaseResults
         }
     } else {
-        $phaseResults = Invoke-PhaseTests -PhaseNumber $Phase
+        $phaseResults = Invoke-PhaseTests -PhaseNumber $Phase.ToString()
         $allResults += $phaseResults
     }
 

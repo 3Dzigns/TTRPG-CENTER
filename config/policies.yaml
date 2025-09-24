@@ -1,0 +1,63 @@
+# Retrieval/workflow/prompt flags configuration
+# MVP v2 Coding Standards - config/policies.yaml
+
+retrieval:
+  # Hybrid retrieval configuration
+  hybrid_enabled: true
+  vector_weight: 0.7
+  metadata_weight: 0.3
+
+  # Query classification thresholds
+  complexity_threshold:
+    low: 0.3
+    medium: 0.7
+    high: 0.9
+
+  # Retrieval limits
+  max_chunks: 20
+  min_chunks: 3
+  default_top_k: 8
+
+workflow:
+  # Pass pipeline configuration
+  passes:
+    pass_a:
+      enabled: true
+      timeout_seconds: 300
+    pass_b:
+      enabled: true
+      split_threshold_mb: 10  # MVP v2 requirement
+      timeout_seconds: 600
+    pass_c:
+      enabled: true
+      timeout_seconds: 900
+
+  # Pipeline controls
+  parallel_processing: true
+  max_concurrent_jobs: 3
+  retry_attempts: 2
+
+prompts:
+  # Model routing configuration
+  models:
+    classification: "gpt-4"
+    simple_queries: "gpt-3.5-turbo"
+    complex_queries: "gpt-4"
+    code_generation: "gpt-4"
+
+  # Temperature settings by intent
+  temperature:
+    fact_lookup: 0.1
+    procedural_howto: 0.3
+    creative_write: 0.8
+    code_help: 0.2
+    summarize: 0.3
+    multi_hop_reasoning: 0.4
+
+# Feature flags
+features:
+  graph_workflows: true
+  admin_test_console: true
+  external_test_execution: true
+  observability: true
+  metrics_collection: true

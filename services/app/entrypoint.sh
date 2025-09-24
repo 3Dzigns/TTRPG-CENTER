@@ -42,8 +42,8 @@ fi
 
 # Wait for MongoDB
 if [ -n "${MONGO_URI}" ]; then
-    # Extract host from MongoDB URI (simple parsing)
-    MONGO_HOST=$(echo "$MONGO_URI" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
+    # Extract host from MongoDB URI (handle credentials properly)
+    MONGO_HOST=$(echo "$MONGO_URI" | sed -n 's/.*@\([^:]*\):.*/\1/p')
     if [ -n "$MONGO_HOST" ]; then
         wait_for_service "$MONGO_HOST" "27017" "MongoDB"
     fi

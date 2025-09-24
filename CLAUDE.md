@@ -20,7 +20,7 @@ Each environment has isolated `code/`, `config/`, `data/`, and `logs/` directori
 The project is organized into 7 distinct phases, each with specific acceptance criteria:
 
 - **Phase 0:** Environment isolation, builds, and fast testing foundation
-- **Phase 1:** Three-pass ingestion pipeline (unstructured.io → Haystack → LlamaIndex)
+- **Phase 1:** Seven-pass ingestion pipeline "Lane A" (A→B→C→D→E→F→G)
 - **Phase 2:** RAG retrieval with query classification and model routing
 - **Phase 3:** Graph workflows for guided processes
 - **Phase 4:** Admin UI for operational tools
@@ -108,13 +108,17 @@ pytest tests/unit tests/functional
 
 ## Key Implementation Requirements
 
-### Ingestion Pipeline (Phase 1)
-Three-pass processing with hard acceptance gates:
-1. **Pass A:** PDF parsing and chunking using unstructured.io
-2. **Pass B:** Content enrichment and dictionary updates using Haystack
-3. **Pass C:** Graph compilation using LlamaIndex
+### Ingestion Pipeline (Phase 1) - Lane A
+Seven-pass processing pipeline with hard acceptance gates:
+1. **Pass A:** PDF parsing and ToC extraction using unstructured.io
+2. **Pass B:** Logical splitting for large files (>25MB) using PyPDF
+3. **Pass C:** Content extraction and chunking using unstructured.io
+4. **Pass D:** Vector enrichment and NER using Haystack with OpenAI embeddings
+5. **Pass E:** Graph building and cross-references using LlamaIndex
+6. **Pass F:** Finalization, validation, and cleanup operations
+7. **Pass G:** HGRN validation and quality gates
 
-Each pass must use real tools (no mocks in acceptance tests) and emit contract-compliant outputs.
+Each pass must use real tools (no mocks in acceptance tests) and emit contract-compliant outputs. The complete pipeline forms "Lane A" - the primary ingestion pathway that transforms raw PDFs into fully processed, searchable content.
 
 ### Query Processing (Phase 2)
 - Query Intent Classification (QIC) with sub-150ms p95 response time
@@ -127,6 +131,103 @@ Each pass must use real tools (no mocks in acceptance tests) and emit contract-c
 - Port assignments: dev=8000, test=8181, prod=8282
 - AstraDB configuration with vector search capabilities
 - OpenAI API integration for AI model access
+
+### Lane A Pipeline Architecture (7-Pass System)
+
+The ingestion pipeline has evolved from a 3-pass to a 7-pass architecture to provide comprehensive document processing:
+
+#### Pass A: PDF Parsing & ToC Extraction
+**Module:** `src_common/pass_a_toc_parser.py`
+**Purpose:** Extract text content and table of contents structure from PDF files
+**Tools:** unstructured.io
+**Output:** Raw chunks and ToC hierarchy
+**Key Operations:**
+- PDF text extraction and parsing
+- Table of contents structure identification
+- Page-level content segmentation
+- Initial metadata extraction
+
+#### Pass B: Logical Splitting
+**Module:** `src_common/pass_b_logical_splitter.py`
+**Purpose:** Split large PDFs (>25MB) into logical sections based on ToC structure
+**Tools:** PyPDF
+**Output:** Split PDF files or split index for large documents
+**Key Operations:**
+- File size threshold checking (25MB)
+- ToC-guided logical splitting
+- Page range extraction for sections
+- Split index generation
+
+#### Pass C: Content Extraction & Chunking
+**Module:** `src_common/pass_c_extraction.py`
+**Purpose:** Extract structured content chunks from processed PDFs
+**Tools:** unstructured.io
+**Output:** Structured content chunks with metadata
+**Key Operations:**
+- Advanced content extraction
+- Chunk boundary optimization
+- Element type classification
+- Structured metadata assignment
+
+#### Pass D: Vector Enrichment & NER
+**Module:** `src_common/pass_d_vector_enrichment.py`
+**Purpose:** Generate embeddings and extract named entities
+**Tools:** Haystack, OpenAI Embeddings API
+**Output:** Vectorized chunks with entity annotations
+**Key Operations:**
+- Text embedding generation (1536-dimensional vectors)
+- Named Entity Recognition (NER)
+- Keyword extraction and scoring
+- Chunk deduplication and merging
+
+#### Pass E: Graph Building & Cross-References
+**Module:** `src_common/pass_e_graph_builder.py`
+**Purpose:** Build document graph and extract cross-references
+**Tools:** LlamaIndex
+**Output:** Graph structure with entity relationships
+**Key Operations:**
+- Document hierarchy graph construction
+- Cross-reference extraction (spells ↔ classes/feats)
+- ToC lineage assignment
+- Entity relationship mapping
+
+#### Pass F: Finalization & Cleanup
+**Module:** `src_common/pass_f_finalizer.py`
+**Purpose:** Validate artifacts and finalize processing
+**Tools:** Native Python validation
+**Output:** Finalized manifest with checksums
+**Key Operations:**
+- Artifact integrity validation
+- Atomic file operations
+- Cleanup of temporary files
+- Manifest finalization with run summary
+
+#### Pass G: HGRN Validation & Quality Gates
+**Module:** `src_common/admin/ingestion.py` (execute_pass_g)
+**Purpose:** Final quality validation and compliance checking
+**Tools:** HGRN validation framework
+**Output:** Quality metrics and validation report
+**Key Operations:**
+- Content quality assessment
+- Structural integrity verification
+- Metadata consistency validation
+- Performance metrics collection
+
+#### Pipeline Flow & Data Contracts
+
+```
+PDF Input → Pass A → Pass B → Pass C → Pass D → Pass E → Pass F → Pass G → Complete
+          ↓        ↓        ↓        ↓        ↓        ↓        ↓
+        ToC/Raw   Split    Chunks   Vectors  Graph   Final   Valid
+       Content   Index             +NER    +XRefs  Manifest +QC
+```
+
+Each pass maintains strict data contracts:
+- **Input validation:** Verify prerequisites from previous passes
+- **Processing stage:** Perform pass-specific operations
+- **Output generation:** Emit contract-compliant artifacts
+- **Manifest update:** Record completion and metadata
+- **Error handling:** Graceful failure with diagnostic information
 
 ## Critical Development Guidelines
 
@@ -142,6 +243,33 @@ Each pass must use real tools (no mocks in acceptance tests) and emit contract-c
 - Security tests (Bandit) run on every PR
 - Regression tests run nightly on main branch
 - F1 score ≥ 0.85 required for classification components
+
+#### Phase 1 Regression Testing (7-Pass Pipeline)
+The Phase 1 regression suite validates the complete Lane A pipeline:
+
+**Individual Pass Tests:**
+- `test_rag001a_parse.py`: Pass A PDF parsing and ToC extraction
+- `test_rag001b_logical_split.py`: Pass B logical splitting with PyPDF
+- `test_rag001c_extraction.py`: Pass C content extraction with unstructured.io
+- `test_rag001d_vector_enrichment.py`: Pass D vector enrichment with Haystack
+- `test_rag001e_graph_builder.py`: Pass E graph building with LlamaIndex
+- `test_rag001f_finalizer.py`: Pass F finalization and cleanup
+- `test_rag001g_hgrn_validation.py`: Pass G HGRN validation and quality gates
+
+**Integration Testing:**
+- `test_lane_a_integration.py`: Complete pipeline flow (A→B→C→D→E→F→G)
+- Sequential execution validation
+- Data flow integrity testing
+- Error recovery and rollback capabilities
+- Performance baseline measurement
+- Manifest consistency throughout pipeline
+
+**Quality Gates:**
+- Each pass test includes HARD GATE requirements
+- Mock-based testing for external dependencies
+- Contract compliance validation
+- Performance baselines (processing time limits)
+- Error handling verification
 
 ### Logging & Status
 - Use structured JSON logging via `src_common/logging.py`

@@ -293,7 +293,8 @@ class PassEGraphBuilder:
     
     def _build_document_graph(self, chunks: List[Dict[str, Any]]):
         """Build hierarchical document graph from chunks"""
-        
+
+        logger.info(f"Pass E: Building document graph from {len(chunks)} chunks")
         # Group chunks by section hierarchy
         sections = defaultdict(list)
         

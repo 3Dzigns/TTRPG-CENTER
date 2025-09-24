@@ -1,0 +1,38 @@
+# Test dependencies for MVP v2 External Test Execution Architecture
+
+# Core testing frameworks
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-xdist>=3.3.0  # Parallel test execution
+pytest-cov>=4.1.0    # Coverage reporting
+pytest-mock>=3.11.0  # Mocking utilities
+pytest-html>=3.2.0   # HTML test reports
+pytest-json-report>=1.5.0  # JSON test reports
+
+# Test utilities
+httpx>=0.24.0         # HTTP client for API testing
+aiohttp>=3.8.0        # Async HTTP client
+websockets>=11.0.0    # WebSocket testing
+factory-boy>=3.3.0    # Test data factories
+faker>=19.0.0         # Fake data generation
+
+# Security testing
+bandit>=1.7.0         # Security linting
+safety>=2.3.0         # Dependency vulnerability scanning
+
+# Performance testing
+locust>=2.15.0        # Load testing
+memory-profiler>=0.61.0  # Memory profiling
+
+# Test data and fixtures
+pydantic>=2.0.0       # Data validation (already in main requirements)
+freezegun>=1.2.0      # Time mocking
+responses>=0.23.0     # HTTP response mocking
+
+# Database testing
+pytest-postgresql>=5.0.0  # PostgreSQL test fixtures (if needed)
+pytest-redis>=3.0.0       # Redis test fixtures
+
+# Additional test utilities
+testcontainers>=3.7.0     # Container-based testing
+docker>=6.1.0             # Docker API client

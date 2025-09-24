@@ -65,7 +65,7 @@ class MongoDictionaryService:
     def __init__(self, env: str = "dev"):
         self.env = env
         self.database_name = f"ttrpg_{env}"
-        self.collection_name = "dictionary"
+        self.collection_name = f"ttrpg_dictionary_{env}"  # Match DictionaryLoader collection name
         self.client: Optional[MongoClient] = None
         self.database: Optional[Database] = None
         self.collection: Optional[Collection] = None
@@ -220,45 +220,84 @@ class MongoDictionaryService:
             except Exception as fallback_error:
                 logger.error(f"Failed to create even basic indexes: {fallback_error}")
     
-    def upsert_entries(self, entries: List[DictEntry]) -> int:
+    def upsert_entries(self, entries: List[DictEntry]) -> tuple[int, List[Dict[str, Any]]]:
         """
         Insert or update dictionary entries
-        
+
         Args:
             entries: List of dictionary entries to upsert
-            
+
         Returns:
-            Number of entries processed
+            Tuple of (number of entries processed, list of individual results)
         """
         if not entries or self.collection is None:
-            return 0
+            return 0, []
         
         try:
+            logger.info(f"MongoDB: Starting upsert batch - {len(entries)} entries")
+
             # Deduplicate entries by term (keep last occurrence)
             entries_by_term = {}
             for entry in entries:
                 entries_by_term[entry.term.lower()] = entry
+
+            if len(entries_by_term) < len(entries):
+                duplicates_removed = len(entries) - len(entries_by_term)
+                logger.info(f"MongoDB: Deduplicated {duplicates_removed} duplicate terms, proceeding with {len(entries_by_term)} unique terms")
             
             upserted_count = 0
+            failed_terms = []
+            term_results = []
+
             for entry in entries_by_term.values():
-                doc = entry.to_mongo_doc()
-                
-                # Update existing or insert new
-                result = self.collection.replace_one(
-                    {"_id": doc["_id"]},
-                    doc,
-                    upsert=True
-                )
-                
-                if result.upserted_id or result.modified_count > 0:
-                    upserted_count += 1
-            
-            logger.info(f"Upserted {upserted_count} dictionary entries to MongoDB")
-            return upserted_count
+                try:
+                    doc = entry.to_mongo_doc()
+
+                    # Update existing or insert new
+                    result = self.collection.replace_one(
+                        {"_id": doc["_id"]},
+                        doc,
+                        upsert=True
+                    )
+
+                    if result.upserted_id:
+                        upserted_count += 1
+                        status = "inserted"
+                        logger.info(f"MongoDB: INSERTED term '{entry.term}' → {entry.category} (new)")
+                    elif result.modified_count > 0:
+                        upserted_count += 1
+                        status = "updated"
+                        logger.info(f"MongoDB: UPDATED term '{entry.term}' → {entry.category} (modified)")
+                    else:
+                        status = "unchanged"
+                        logger.debug(f"MongoDB: UNCHANGED term '{entry.term}' → {entry.category} (no changes)")
+
+                    term_results.append({
+                        "term": entry.term,
+                        "category": entry.category,
+                        "status": status,
+                        "error_message": None
+                    })
+
+                except Exception as term_error:
+                    failed_terms.append(entry.term)
+                    logger.error(f"MongoDB: FAILED term '{entry.term}' → {entry.category}: {term_error}")
+                    term_results.append({
+                        "term": entry.term,
+                        "category": entry.category,
+                        "status": "failed",
+                        "error_message": str(term_error)
+                    })
+
+            if failed_terms:
+                logger.warning(f"MongoDB: {len(failed_terms)} terms failed to upsert: {failed_terms[:5]}{'...' if len(failed_terms) > 5 else ''}")
+
+            logger.info(f"MongoDB: Batch complete - {upserted_count}/{len(entries_by_term)} terms upserted successfully")
+            return upserted_count, term_results
             
         except Exception as e:
             logger.error(f"Failed to upsert dictionary entries: {e}")
-            return 0
+            return 0, []
     
     def search_entries(
         self, 
@@ -326,46 +365,60 @@ class MongoDictionaryService:
     def get_entry(self, term: str) -> Optional[DictEntry]:
         """
         Get a specific dictionary entry by term
-        
+
         Args:
             term: The term to look up
-            
+
         Returns:
             Dictionary entry if found, None otherwise
         """
         if self.collection is None:
             return None
-        
+
         try:
-            doc = self.collection.find_one({"_id": term.lower()})
+            # Use same normalization as DictionaryLoader._normalize_term_id
+            normalized_id = self._normalize_term_id(term)
+            doc = self.collection.find_one({"_id": normalized_id})
             if doc:
                 return DictEntry.from_mongo_doc(doc)
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed to get dictionary entry '{term}': {e}")
             return None
+
+    def _normalize_term_id(self, term: str) -> str:
+        """Normalize a term to create a consistent, stable document ID (matches DictionaryLoader)"""
+        import re
+        t = term.strip().lower()
+        # Normalize whitespace and punctuation
+        t = re.sub(r"[^a-z0-9]+", "_", t)
+        t = re.sub(r"_+", "_", t)
+        t = t.strip('_')
+        return t
     
     def delete_entry(self, term: str) -> bool:
         """
         Delete a dictionary entry
-        
+
         Args:
             term: The term to delete
-            
+
         Returns:
             True if deleted, False otherwise
         """
         if self.collection is None:
             return False
-        
+
         try:
-            result = self.collection.delete_one({"_id": term.lower()})
+            # Use same normalization as DictionaryLoader._normalize_term_id
+            normalized_id = self._normalize_term_id(term)
+            result = self.collection.delete_one({"_id": normalized_id})
             success = result.deleted_count > 0
             if success:
                 logger.info(f"Deleted dictionary entry: {term}")
             return success
-            
+
         except Exception as e:
             logger.error(f"Failed to delete dictionary entry '{term}': {e}")
             return False
@@ -420,10 +473,43 @@ class MongoDictionaryService:
             logger.error(f"Failed to get dictionary stats: {e}")
             return {"error": str(e)}
     
+    def get_all_terms(self, limit: int = 1000) -> List[DictEntry]:
+        """
+        Get all dictionary terms without any filtering
+
+        Args:
+            limit: Maximum number of terms to return
+
+        Returns:
+            List of all dictionary entries
+        """
+        if self.collection is None:
+            return []
+
+        try:
+            # Get all documents, sorted by term name
+            cursor = self.collection.find({}).limit(limit).sort("term_normalized")
+
+            # Convert to DictEntry objects
+            entries = []
+            for doc in cursor:
+                try:
+                    entry = DictEntry.from_mongo_doc(doc)
+                    entries.append(entry)
+                except Exception as e:
+                    logger.warning(f"Failed to parse dictionary entry: {e}")
+
+            logger.debug(f"Retrieved {len(entries)} total dictionary entries")
+            return entries
+
+        except Exception as e:
+            logger.error(f"Failed to get all dictionary entries: {e}")
+            return []
+
     def health_check(self) -> Dict[str, Any]:
         """
         Check MongoDB connection health
-        
+
         Returns:
             Health status information
         """

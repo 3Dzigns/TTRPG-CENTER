@@ -147,7 +147,8 @@ class TestBUG032IngestionStubs:
 
                     # Set specific attributes based on pass type
                     if pass_name == "A":
-                        mock_result.dictionary_entries = 10
+                        mock_result.dictionary_entries_extracted = 12
+                        mock_result.dictionary_entries_upserted = 10
                         mock_result.sections_parsed = 5
                     elif pass_name == "B":
                         mock_result.parts_created = 2
@@ -203,7 +204,8 @@ class TestBUG032IngestionStubs:
             with patch("src_common.pass_a_toc_parser.process_pass_a") as mock_pass_a:
                 mock_result = Mock()
                 mock_result.success = True
-                mock_result.dictionary_entries = 15
+                mock_result.dictionary_entries_extracted = 18
+                mock_result.dictionary_entries_upserted = 15
                 mock_result.sections_parsed = 8
                 mock_result.processing_time_ms = 2500
                 mock_result.artifacts = ["toc_data.json", "dictionary.json"]
@@ -215,12 +217,13 @@ class TestBUG032IngestionStubs:
                 )
 
                 # Verify comprehensive result structure
-                expected_keys = {"processed_count", "artifact_count", "sections_parsed",
+                expected_keys = {"processed_count", "upserted_count", "artifact_count", "sections_parsed",
                                "duration_ms", "success", "error_message"}
                 assert all(key in result for key in expected_keys), "Pass A must return complete structure"
 
                 # Verify meaningful values
-                assert result["processed_count"] == 15, "Pass A should return dictionary entry count"
+                assert result["processed_count"] == 18, "Pass A should return extracted dictionary entry count"
+                assert result["upserted_count"] == 15, "Pass A should return upserted dictionary entry count"
                 assert result["artifact_count"] == 2, "Pass A should return artifact count"
                 assert result["sections_parsed"] == 8, "Pass A should return sections parsed"
                 assert result["duration_ms"] == 2500, "Pass A should return processing time"
@@ -322,7 +325,8 @@ class TestBUG032IngestionStubs:
         with patch("src_common.pass_a_toc_parser.process_pass_a") as mock_pass:
             mock_result = Mock()
             mock_result.success = True
-            mock_result.dictionary_entries = 20
+            mock_result.dictionary_entries_extracted = 25
+            mock_result.dictionary_entries_upserted = 20
             mock_result.sections_parsed = 10
             mock_result.processing_time_ms = 3000
             mock_result.artifacts = ["test.json"]
@@ -348,7 +352,8 @@ class TestBUG032IngestionStubs:
 
             # Since we're using structured logging, we don't write to the test log file directly
             # The real logging verification is that the function completed successfully with structured result
-            assert result["processed_count"] == 20, "Should return structured processed count"
+            assert result["processed_count"] == 25, "Should return structured extracted count"
+            assert result["upserted_count"] == 20, "Should return structured upserted count"
             assert result["artifact_count"] == 1, "Should return structured artifact count"
 
     async def test_minimal_pipeline_integration(self, ingestion_service, temp_job_path, mock_manifest):
@@ -382,7 +387,8 @@ class TestBUG032IngestionStubs:
 
                 # Add pass-specific attributes
                 if i == 1:  # Pass A
-                    mock_result.dictionary_entries = 10
+                    mock_result.dictionary_entries_extracted = 12
+                    mock_result.dictionary_entries_upserted = 10
                     mock_result.sections_parsed = 5
                 elif i == 2:  # Pass B
                     mock_result.parts_created = 1
@@ -525,7 +531,8 @@ class TestBUG032IngestionStubs:
             mock_result.success = True
             mock_result.processing_time_ms = 100
             mock_result.artifacts = ["result.json"]
-            mock_result.dictionary_entries = 5
+            mock_result.dictionary_entries_extracted = 6
+            mock_result.dictionary_entries_upserted = 5
             mock_result.sections_parsed = 3
             mock_result.error_message = None
             return mock_result

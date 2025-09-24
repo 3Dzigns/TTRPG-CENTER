@@ -20,6 +20,21 @@ class DictEntry:
     category: str
     sources: List[Dict[str, Any]]
 
+    def to_mongo_doc(self) -> Dict[str, Any]:
+        """Convert to MongoDB document format (compatible with mongo_dictionary_service)"""
+        doc = {
+            'term': self.term,
+            'definition': self.definition,
+            'category': self.category,
+            'sources': self.sources
+        }
+        doc['_id'] = self.term.lower()  # Use lowercase term as ID for uniqueness
+        doc['term_original'] = self.term  # Preserve original casing
+        doc['term_normalized'] = self.term.lower()
+        doc['created_at'] = time.time()
+        doc['updated_at'] = time.time()
+        return doc
+
 
 class DictionaryLoader:
     def __init__(self, env: str = "dev"):
@@ -73,9 +88,9 @@ class DictionaryLoader:
             logger.warning(f"DictionaryLoader Astra init failed: {e}")
             self.client = None
 
-    def upsert_entries(self, entries: List[DictEntry]) -> int:
+    def upsert_entries(self, entries: List[DictEntry]) -> tuple[int, List[Dict[str, Any]]]:
         if not entries:
-            return 0
+            return 0, []
             
         # Deduplicate entries by term (keep last occurrence)
         deduped_entries = self._deduplicate_entries(entries)
@@ -88,36 +103,71 @@ class DictionaryLoader:
         if self.backend == "mongo" and self.mongo_collection is not None:
             try:
                 upserted = 0
+                term_results = []
                 for e in deduped_entries:
-                    _id = self._normalize_term_id(e.term)
-                    now = time.time()
-                    self.mongo_collection.update_one(
-                        {"_id": _id},
-                        {
-                            "$setOnInsert": {"created_at": now, "sources": []},
-                            "$set": {
-                                "term": e.term,
-                                "definition": e.definition,
-                                "category": e.category,
-                                "updated_at": now,
+                    try:
+                        _id = self._normalize_term_id(e.term)
+                        now = time.time()
+                        result = self.mongo_collection.update_one(
+                            {"_id": _id},
+                            {
+                                "$setOnInsert": {"created_at": now, "sources": []},
+                                "$set": {
+                                    "term": e.term,
+                                    "definition": e.definition,
+                                    "category": e.category,
+                                    "updated_at": now,
+                                },
                             },
-                        },
-                        upsert=True,
-                    )
-                    if e.sources:
-                        self.mongo_collection.update_one(
-                            {"_id": _id}, {"$addToSet": {"sources": {"$each": e.sources}}}
+                            upsert=True,
                         )
-                    upserted += 1
+                        if e.sources:
+                            self.mongo_collection.update_one(
+                                {"_id": _id}, {"$addToSet": {"sources": {"$each": e.sources}}}
+                            )
+
+                        # Determine status
+                        if result.upserted_id:
+                            status = "inserted"
+                        elif result.modified_count > 0:
+                            status = "updated"
+                        else:
+                            status = "unchanged"
+
+                        upserted += 1
+                        term_results.append({
+                            "term": e.term,
+                            "category": e.category,
+                            "status": status,
+                            "error_message": None
+                        })
+                    except Exception as term_error:
+                        term_results.append({
+                            "term": e.term,
+                            "category": e.category,
+                            "status": "failed",
+                            "error_message": str(term_error)
+                        })
+
                 logger.info(f"Mongo dictionary upsert completed: {upserted}/{deduped_count}")
-                return upserted
+                return upserted, term_results
             except Exception as e:
                 logger.error(f"Mongo dictionary upsert error: {e}")
-                return 0
+                return 0, []
 
         if self.client is None:
             logger.info(f"SIMULATION: would upsert {deduped_count} dictionary entries into {self.collection_name}")
-            return deduped_count
+            # Generate simulated term results
+            simulated_results = [
+                {
+                    "term": e.term,
+                    "category": e.category,
+                    "status": "inserted",
+                    "error_message": None
+                }
+                for e in deduped_entries
+            ]
+            return deduped_count, simulated_results
             
         try:
             col = self.client.get_collection(self.collection_name)
@@ -149,11 +199,21 @@ class DictionaryLoader:
                     time.sleep(0.1)
             
             logger.info(f"Dictionary upsert completed: {upserted}/{deduped_count} entries processed")
-            return upserted
-            
+            # Generate basic term results for AstraDB (no detailed status tracking implemented)
+            astra_results = [
+                {
+                    "term": e.term,
+                    "category": e.category,
+                    "status": "inserted",
+                    "error_message": None
+                }
+                for e in deduped_entries
+            ]
+            return upserted, astra_results
+
         except Exception as e:
             logger.error(f"Dictionary upsert error: {e}")
-            return 0
+            return 0, []
     
     def _deduplicate_entries(self, entries: List[DictEntry]) -> List[DictEntry]:
         """Deduplicate entries by normalized term, keeping the last occurrence."""

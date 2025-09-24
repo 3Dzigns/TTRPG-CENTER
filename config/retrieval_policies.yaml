@@ -1,0 +1,89 @@
+# Policy engine inputs for retrieval decisions
+# MVP v2 Coding Standards - config/retrieval_policies.yaml
+
+query_classification:
+  intents:
+    - fact_lookup
+    - procedural_howto
+    - creative_write
+    - code_help
+    - summarize
+    - multi_hop_reasoning
+
+  domains:
+    - ttrpg_rules
+    - ttrpg_lore
+    - admin
+    - system
+    - unknown
+
+  complexity_levels:
+    - low
+    - medium
+    - high
+
+retrieval_strategies:
+  fact_lookup:
+    strategy: "vector_similarity"
+    top_k: 5
+    similarity_threshold: 0.8
+    use_metadata_filter: true
+
+  procedural_howto:
+    strategy: "hybrid"
+    top_k: 8
+    vector_weight: 0.6
+    metadata_weight: 0.4
+    use_graph_context: true
+
+  creative_write:
+    strategy: "diverse_sampling"
+    top_k: 12
+    similarity_threshold: 0.6
+    diversity_factor: 0.8
+
+  code_help:
+    strategy: "semantic_search"
+    top_k: 6
+    similarity_threshold: 0.85
+    prefer_recent: true
+
+  summarize:
+    strategy: "comprehensive"
+    top_k: 15
+    include_metadata: true
+    temporal_ranking: true
+
+  multi_hop_reasoning:
+    strategy: "graph_traversal"
+    top_k: 10
+    max_hops: 3
+    confidence_threshold: 0.7
+
+domain_policies:
+  ttrpg_rules:
+    precision_threshold: 0.9
+    citation_required: true
+    source_verification: true
+
+  ttrpg_lore:
+    creativity_allowed: true
+    source_attribution: true
+    cross_reference: true
+
+  admin:
+    access_control: true
+    audit_logging: true
+    permission_check: true
+
+  system:
+    restricted_access: true
+    admin_only: true
+    security_log: true
+
+reranking:
+  enabled: true
+  algorithm: "cross_encoder"
+  model: "ms-marco-MiniLM-L-6-v2"
+  top_k_rerank: 20
+  final_top_k: 8

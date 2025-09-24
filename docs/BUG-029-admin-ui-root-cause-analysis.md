@@ -194,14 +194,14 @@ Despite the issues identified, several admin UI components are functioning corre
 ## Files Requiring Attention
 
 **Critical**:
-- `C:\Users\anzak\Documents\TTRPG_Center\src_common\app.py` - WebSocket routes
-- `C:\Users\anzak\Documents\TTRPG_Center\env\dev\config\.env` - AstraDB config
-- `C:\Users\anzak\Documents\TTRPG_Center\templates\base.html` - WebSocket client
+- `E:\TTRPG_Center\src_common\app.py` - WebSocket routes
+- `E:\TTRPG_Center\env\dev\config\.env` - AstraDB config
+- `E:\TTRPG_Center\templates\base.html` - WebSocket client
 
 **Major**:
-- `C:\Users\anzak\Documents\TTRPG_Center\src_common\admin\*.py` - Service implementations
-- `C:\Users\anzak\Documents\TTRPG_Center\tests\functional\test_admin_api.py` - Test fixes
-- `C:\Users\anzak\Documents\TTRPG_Center\src_common\auth_models.py` - Dependency updates
+- `E:\TTRPG_Center\src_common\admin\*.py` - Service implementations
+- `E:\TTRPG_Center\tests\functional\test_admin_api.py` - Test fixes
+- `E:\TTRPG_Center\src_common\auth_models.py` - Dependency updates
 
 ## Conclusion
 

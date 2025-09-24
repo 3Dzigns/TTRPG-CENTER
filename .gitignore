@@ -245,5 +245,13 @@ test-results/
 # Claude documentation and analysis reports
 claudedocs/
 
-# Other temporary files  
+# MVP v2 External Test Execution Architecture
+test_external_integration.py
+test_pass_b_large_file.py
+test_upload_2.txt
+
+# Environment-specific artifacts directory
+env/*/artifacts/
+
+# Other temporary files
 nul

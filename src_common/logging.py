@@ -9,6 +9,7 @@ from .ttrpg_logging import (
     log_function_call,
     sanitize_for_logging,
     jlog,
+    TTRPGJsonFormatter,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "log_function_call",
     "sanitize_for_logging",
     "jlog",
+    "TTRPGJsonFormatter",
 ]

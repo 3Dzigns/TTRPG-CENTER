@@ -36,6 +36,16 @@
                 <li><a class="dropdown-item" href="#" onclick="importDictionary()">Import Terms</a></li>
             </ul>
         </div>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-danger dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-trash me-1"></i>Manage
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item text-danger" href="#" onclick="clearDictionary()">
+                    <i class="bi bi-trash me-1"></i>Clear All Terms
+                </a></li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -106,12 +116,12 @@
             <div class="col-md-3">
                 <select class="form-select" id="category-filter" onchange="filterTerms()">
                     <option value="">All Categories</option>
-                    <option value="spell">Spells</option>
-                    <option value="item">Items</option>
-                    <option value="creature">Creatures</option>
-                    <option value="location">Locations</option>
-                    <option value="rule">Rules</option>
-                    <option value="other">Other</option>
+                    <option value="general">General</option>
+                    <option value="classes">Classes</option>
+                    <option value="equipment">Equipment</option>
+                    <option value="feats">Feats</option>
+                    <option value="mechanics">Mechanics</option>
+                    <option value="spells">Spells</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -200,12 +210,12 @@
                             <label for="termCategory" class="form-label">Category *</label>
                             <select class="form-select" id="termCategory" required>
                                 <option value="">Select Category</option>
-                                <option value="spell">Spell</option>
-                                <option value="item">Item</option>
-                                <option value="creature">Creature</option>
-                                <option value="location">Location</option>
-                                <option value="rule">Rule</option>
-                                <option value="other">Other</option>
+                                <option value="general">General</option>
+                                <option value="classes">Classes</option>
+                                <option value="equipment">Equipment</option>
+                                <option value="feats">Feats</option>
+                                <option value="mechanics">Mechanics</option>
+                                <option value="spells">Spells</option>
                             </select>
                         </div>
                     </div>
@@ -527,35 +537,79 @@ async function checkBackendStatus() {
 
 async function loadDictionaryStats() {
     try {
-        // Mock data for now - replace with actual API call
-        const stats = {
-            total_terms: 1247,
-            verified_terms: 892,
-            pending_terms: 234,
-            categories: 6
-        };
+        // Call actual Dictionary Management API for dev environment
+        const response = await fetch('/api/dictionary/dev/stats');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
+        const data = await response.json();
+        const stats = data.stats;
+
+        // Update the dashboard with actual MongoDB data
         document.getElementById('total-terms').textContent = stats.total_terms.toLocaleString();
-        document.getElementById('verified-terms').textContent = stats.verified_terms.toLocaleString();
-        document.getElementById('pending-terms').textContent = stats.pending_terms.toLocaleString();
-        document.getElementById('categories').textContent = stats.categories.toLocaleString();
+        document.getElementById('verified-terms').textContent = (stats.total_terms || 0).toLocaleString(); // All terms are considered verified for now
+        document.getElementById('pending-terms').textContent = '0'; // No pending concept yet
+        document.getElementById('categories').textContent = Object.keys(stats.categories || {}).length.toLocaleString();
+
+        console.log('Dictionary stats loaded from MongoDB:', stats);
 
     } catch (error) {
         console.error('Failed to load dictionary stats:', error);
         AdminUtils.showToast('Failed to load statistics', 'danger');
+
+        // Show error state
+        document.getElementById('total-terms').textContent = 'Error';
+        document.getElementById('verified-terms').textContent = 'Error';
+        document.getElementById('pending-terms').textContent = 'Error';
+        document.getElementById('categories').textContent = 'Error';
     }
 }
 
 async function loadDictionaryTerms() {
     try {
-        // Mock data for now - replace with actual API call
-        allTerms = generateMockTerms();
+        // Call actual Dictionary Management API for dev environment
+        const response = await fetch('/api/dictionary/dev/terms?limit=1000');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const apiResponse = await response.json();
+        const apiTerms = apiResponse.terms || [];
+        console.log('Dictionary terms loaded from MongoDB:', apiResponse);
+
+        // Convert API terms to frontend format
+        allTerms = apiTerms.map((term, index) => ({
+            id: `term_${index}_${Date.now()}`,
+            mongodb_term: term.term, // Store original term name for API calls
+            name: term.term,
+            definition: term.definition,
+            category: term.category || 'unknown',
+            status: 'verified', // All MongoDB terms are considered verified
+            source: term.source || 'unknown',
+            page: term.page_reference || null,
+            page_reference: term.page_reference || null,
+            tags: Array.isArray(term.tags) ? term.tags.join(', ') : '',
+            usage_count: Math.floor(Math.random() * 50), // Mock usage count
+            is_public: true,
+            last_updated: term.updated_at * 1000, // Convert to milliseconds
+            dateAdded: term.created_at ? new Date(term.created_at * 1000).toLocaleDateString() : 'Unknown',
+            lastModified: term.updated_at ? new Date(term.updated_at * 1000).toLocaleDateString() : 'Unknown'
+        }));
+
         filteredTerms = [...allTerms];
         updateTermsDisplay();
 
+        console.log(`Loaded ${allTerms.length} terms from MongoDB`);
+
     } catch (error) {
         console.error('Failed to load dictionary terms:', error);
-        AdminUtils.showToast('Failed to load dictionary terms', 'danger');
+        AdminUtils.showToast('Failed to load dictionary terms from MongoDB', 'danger');
+
+        // Fallback to empty state instead of mock data
+        allTerms = [];
+        filteredTerms = [];
+        updateTermsDisplay();
     }
 }
 
@@ -621,7 +675,7 @@ function updateTermsDisplay() {
         const categoryClass = `category-${term.category}`;
 
         tr.innerHTML = `
-            <td><input type="checkbox" class="term-checkbox" value="${term.id}" onchange="toggleTermSelection(${term.id}, this.checked)"></td>
+            <td><input type="checkbox" class="term-checkbox" value="${term.id}" onchange="toggleTermSelection('${term.id}', this.checked)"></td>
             <td>
                 <div>
                     <strong>${term.name}</strong>
@@ -635,13 +689,13 @@ function updateTermsDisplay() {
             <td>${AdminUtils.formatTimestamp(term.last_updated / 1000)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-info btn-sm" onclick="viewTerm(${term.id})" title="View Details">
+                    <button class="btn btn-outline-info btn-sm" onclick="viewTerm('${term.id}')" title="View Details">
                         <i class="bi bi-eye"></i>
                     </button>
-                    <button class="btn btn-outline-primary btn-sm" onclick="editTerm(${term.id})" title="Edit">
+                    <button class="btn btn-outline-primary btn-sm" onclick="editTerm('${term.id}')" title="Edit">
                         <i class="bi bi-pencil"></i>
                     </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="deleteTerm(${term.id})" title="Delete">
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteTerm('${term.id}')" title="Delete">
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>
@@ -738,7 +792,7 @@ function toggleAllTerms(checked) {
     checkboxes.forEach(cb => {
         cb.checked = checked;
         if (checked) {
-            selectedTerms.add(parseInt(cb.value));
+            selectedTerms.add(cb.value); // Keep as string, don't parseInt
         }
     });
     updateBulkActions();
@@ -795,7 +849,7 @@ function editTerm(termId) {
     new bootstrap.Modal(document.getElementById('termModal')).show();
 }
 
-function saveTerm() {
+async function saveTerm() {
     const form = document.getElementById('termForm');
     if (!form.checkValidity()) {
         form.reportValidity();
@@ -803,57 +857,174 @@ function saveTerm() {
     }
 
     const termData = {
-        id: document.getElementById('termId').value,
-        name: document.getElementById('termName').value,
-        category: document.getElementById('termCategory').value,
+        term: document.getElementById('termName').value,
         definition: document.getElementById('termDefinition').value,
+        category: document.getElementById('termCategory').value,
         source: document.getElementById('termSource').value,
-        page: document.getElementById('termPage').value,
-        tags: document.getElementById('termTags').value,
+        page_reference: document.getElementById('termPage').value,
+        tags: document.getElementById('termTags').value.split(',').map(t => t.trim()).filter(t => t),
         status: document.getElementById('termStatus').value,
-        is_public: document.getElementById('termIsPublic').checked,
-        last_updated: Date.now()
+        is_public: document.getElementById('termIsPublic').checked
     };
 
-    // Mock save operation
-    const isEdit = termData.id !== '';
+    const termId = document.getElementById('termId').value;
+    const isEdit = termId !== '';
 
-    if (isEdit) {
-        const index = allTerms.findIndex(t => t.id == termData.id);
-        if (index !== -1) {
-            allTerms[index] = { ...allTerms[index], ...termData };
+    try {
+        // Show loading state
+        AdminUtils.showToast(isEdit ? 'Updating term...' : 'Creating term...', 'info');
+
+        let response;
+        if (isEdit) {
+            // Find the original term to get the MongoDB term name
+            const originalTerm = allTerms.find(t => t.id === termId);
+            if (!originalTerm) {
+                throw new Error('Original term not found');
+            }
+
+            // Update existing term
+            response = await fetch(`/api/dictionary/dev/terms/${encodeURIComponent(originalTerm.mongodb_term)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(termData)
+            });
+        } else {
+            // Create new term
+            response = await fetch('/api/dictionary/dev/terms', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(termData)
+            });
         }
-        AdminUtils.showToast('Term updated successfully', 'success');
-    } else {
-        termData.id = allTerms.length + 1;
-        termData.usage_count = 0;
-        allTerms.push(termData);
-        AdminUtils.showToast('Term added successfully', 'success');
-    }
 
-    bootstrap.Modal.getInstance(document.getElementById('termModal')).hide();
-    filterTerms(); // Refresh display
-    loadDictionaryStats(); // Update stats
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        AdminUtils.showToast(isEdit ? 'Term updated successfully' : 'Term created successfully', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('termModal')).hide();
+
+        // Refresh the entire list to get latest data from MongoDB
+        await loadDictionaryTerms();
+        loadDictionaryStats();
+
+    } catch (error) {
+        console.error('Failed to save term:', error);
+        AdminUtils.showToast(`Failed to save term: ${error.message}`, 'danger');
+    }
 }
 
 function viewTerm(termId) {
     const term = allTerms.find(t => t.id === termId);
     if (!term) return;
 
-    // This would show a detailed view modal
-    AdminUtils.showToast(`Viewing details for: ${term.name}`, 'info');
+    // Create detailed view modal content
+    const modalContent = `
+        <div class="modal fade" id="viewTermModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="bi bi-eye me-2"></i>Term Details: ${term.name}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h6>Definition</h6>
+                                <p class="border p-3 bg-light">${term.definition}</p>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>Metadata</h6>
+                                <table class="table table-sm">
+                                    <tr><td><strong>Category:</strong></td><td><span class="badge bg-primary">${term.category}</span></td></tr>
+                                    <tr><td><strong>Status:</strong></td><td><span class="badge bg-success">${term.status}</span></td></tr>
+                                    <tr><td><strong>Source:</strong></td><td>${term.source}</td></tr>
+                                    <tr><td><strong>Page:</strong></td><td>${term.page || 'N/A'}</td></tr>
+                                    <tr><td><strong>Usage Count:</strong></td><td>${term.usage_count}</td></tr>
+                                    <tr><td><strong>Public:</strong></td><td>${term.is_public ? 'Yes' : 'No'}</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <h6>Tags</h6>
+                                <p>${term.tags || 'No tags'}</p>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <small class="text-muted">Created: ${term.dateAdded}</small>
+                            </div>
+                            <div class="col-6 text-end">
+                                <small class="text-muted">Modified: ${term.lastModified}</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" onclick="editTerm('${termId}'); bootstrap.Modal.getInstance(document.getElementById('viewTermModal')).hide();">
+                            <i class="bi bi-pencil me-1"></i>Edit
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove any existing view modal
+    const existingModal = document.getElementById('viewTermModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to page and show it
+    document.body.insertAdjacentHTML('beforeend', modalContent);
+    new bootstrap.Modal(document.getElementById('viewTermModal')).show();
 }
 
-function deleteTerm(termId) {
+async function deleteTerm(termId) {
     const term = allTerms.find(t => t.id === termId);
     if (!term || !confirm(`Delete term "${term.name}"?`)) return;
 
-    const index = allTerms.findIndex(t => t.id === termId);
-    if (index !== -1) {
-        allTerms.splice(index, 1);
+    try {
+        // Show loading state
+        AdminUtils.showToast('Deleting term...', 'info');
+
+        // Make API call to delete from MongoDB
+        const response = await fetch(`/api/dictionary/dev/terms/${encodeURIComponent(term.mongodb_term)}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        // Remove from local array
+        const index = allTerms.findIndex(t => t.id === termId);
+        if (index !== -1) {
+            allTerms.splice(index, 1);
+            filteredTerms = filteredTerms.filter(t => t.id !== termId);
+        }
+
         AdminUtils.showToast('Term deleted successfully', 'success');
-        filterTerms();
+        updateTermsDisplay();
         loadDictionaryStats();
+
+    } catch (error) {
+        console.error('Failed to delete term:', error);
+        AdminUtils.showToast('Failed to delete term from MongoDB', 'danger');
     }
 }
 
@@ -868,6 +1039,57 @@ function deleteSelectedTerms() {
     AdminUtils.showToast('Selected terms deleted', 'success');
     filterTerms();
     loadDictionaryStats();
+}
+
+async function clearDictionary() {
+    // Enhanced confirmation to prevent accidental deletion
+    const confirmMessage = `⚠️ WARNING: This will permanently delete ALL dictionary terms.
+
+This action cannot be undone!
+
+Type "CLEAR DICTIONARY" to confirm:`;
+
+    const confirmation = prompt(confirmMessage);
+
+    if (confirmation !== "CLEAR DICTIONARY") {
+        AdminUtils.showToast('Dictionary clear cancelled', 'info');
+        return;
+    }
+
+    try {
+        // Show loading state
+        AdminUtils.showToast('Clearing dictionary...', 'warning');
+
+        // Make API call to clear MongoDB dictionary
+        const response = await fetch('/api/dictionary/dev/clear', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Clear local arrays
+        allTerms = [];
+        filteredTerms = [];
+        selectedTerms.clear();
+
+        AdminUtils.showToast(`Dictionary cleared successfully! Removed ${result.deleted_count || 0} terms.`, 'success');
+
+        // Refresh the display
+        updateTermsDisplay();
+        loadDictionaryStats();
+
+    } catch (error) {
+        console.error('Failed to clear dictionary:', error);
+        AdminUtils.showToast(`Failed to clear dictionary: ${error.message}`, 'danger');
+    }
 }
 
 // Import/Export functions

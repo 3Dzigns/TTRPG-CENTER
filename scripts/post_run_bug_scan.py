@@ -88,7 +88,8 @@ def normalize_message(msg: str) -> str:
     # Strip volatile tokens like job ids and elapsed times
     m = re.sub(r"adapter_job_\d+", "adapter_job", msg)
     m = re.sub(r"\b\d+\.\d+s\b", "{secs}", m)
-    m = re.sub(r"C:.*?TTRPG_Center\\", "<REPO>/", m)
+    # Normalize various path patterns to <REPO>/
+    m = re.sub(r"[C-Z]:.*?TTRPG_Center[\\\/]", "<REPO>/", m)
     return m.strip()
 
 

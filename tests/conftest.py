@@ -24,7 +24,10 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from src_common.app import app, TTRPGApp
-from src_common.logging import setup_logging
+from src_common.logging import setup_logging, get_logger
+from src_common.environment_isolation import get_environment_validator
+
+logger = get_logger(__name__)
 
 
 # Configure pytest for async tests
@@ -37,6 +40,68 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session")
+def target_environment() -> str:
+    """Get target environment for test execution."""
+    env = os.getenv("TARGET_ENV", "dev")
+    logger.info(f"Target environment: {env}")
+    return env
+
+
+@pytest.fixture(scope="session")
+def environment_validator(target_environment: str):
+    """Get environment validator instance."""
+    validator = get_environment_validator()
+    validator.current_env = target_environment
+    return validator
+
+
+@pytest.fixture(scope="session")
+def test_environment_config(target_environment: str) -> Dict[str, Any]:
+    """Get test environment configuration."""
+    env_configs = {
+        "dev": {
+            "base_port": 8000,
+            "main_app_url": "http://localhost:8000",
+            "admin_api_url": "http://localhost:8001",
+            "user_api_url": "http://localhost:8002",
+            "ingest_service_url": "http://localhost:8003",
+            "orchestrator_url": "http://localhost:8004",
+        },
+        "test": {
+            "base_port": 8181,
+            "main_app_url": "http://localhost:8181",
+            "admin_api_url": "http://localhost:8182",
+            "user_api_url": "http://localhost:8183",
+            "ingest_service_url": "http://localhost:8184",
+            "orchestrator_url": "http://localhost:8185",
+        },
+        "prod": {
+            "base_port": 8282,
+            "main_app_url": "http://localhost:8282",
+            "admin_api_url": "http://localhost:8283",
+            "user_api_url": "http://localhost:8284",
+            "ingest_service_url": "http://localhost:8285",
+            "orchestrator_url": "http://localhost:8286",
+        }
+    }
+    return env_configs.get(target_environment, env_configs["dev"])
+
+
+@pytest.fixture(scope="function")
+def external_test_mode() -> bool:
+    """Check if running in external test mode via Test Console."""
+    return os.getenv("EXTERNAL_TEST_MODE", "false").lower() == "true"
+
+
+@pytest.fixture(scope="function")
+def test_output_path(target_environment: str) -> Path:
+    """Get test output directory path."""
+    output_dir = repo_root / "env" / target_environment / "logs" / "test_output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 @pytest.fixture
@@ -316,3 +381,60 @@ def cleanup_environment():
     for var in test_env_vars:
         if var in os.environ:
             del os.environ[var]
+
+
+# External test execution hooks for Test Console integration
+def pytest_configure(config):
+    """Configure pytest for external test execution."""
+    target_env = os.getenv("TARGET_ENV", "dev")
+
+    # Configure logging for external execution
+    if os.getenv("EXTERNAL_TEST_MODE") == "true":
+        config.option.log_cli = True
+        config.option.log_cli_level = "INFO"
+
+    # Set environment-specific pytest options
+    if hasattr(config.option, 'json_report_file'):
+        env_logs = repo_root / "env" / target_env / "logs"
+        env_logs.mkdir(parents=True, exist_ok=True)
+        config.option.json_report_file = str(env_logs / "pytest_report.json")
+
+    logger.info(f"Pytest configured for {target_env} environment")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection for external execution."""
+    target_env = os.getenv("TARGET_ENV", "dev")
+
+    # Skip tests not compatible with current environment
+    skip_markers = {
+        "dev": [],  # Dev can run all tests
+        "test": ["slow"],  # Test environment skips slow tests
+        "prod": ["slow", "integration"]  # Prod skips slow and integration tests
+    }
+
+    skip_list = skip_markers.get(target_env, [])
+
+    for item in items:
+        for marker in skip_list:
+            if marker in [m.name for m in item.iter_markers()]:
+                skip_reason = f"Skipped in {target_env} environment"
+                item.add_marker(pytest.mark.skip(reason=skip_reason))
+
+
+def pytest_runtest_setup(item):
+    """Setup for individual test execution."""
+    if os.getenv("EXTERNAL_TEST_MODE") == "true":
+        logger.info(f"Starting test: {item.nodeid}")
+
+
+def pytest_runtest_teardown(item):
+    """Teardown for individual test execution."""
+    if os.getenv("EXTERNAL_TEST_MODE") == "true":
+        logger.info(f"Completed test: {item.nodeid}")
+
+
+def pytest_exception_interact(node, call, report):
+    """Handle test exceptions for external monitoring."""
+    if os.getenv("EXTERNAL_TEST_MODE") == "true" and report.failed:
+        logger.error(f"Test failed: {node.nodeid} - {call.excinfo.value}")

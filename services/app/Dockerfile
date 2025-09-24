@@ -42,6 +42,13 @@ RUN apt-get update && apt-get install -y \
     libev4 \
     # Image processing
     libmagic1 \
+    # OpenGL dependencies for unstructured.io
+    libgl1 \
+    libglib2.0-0 \
+    libxext6 \
+    libsm6 \
+    libxrender1 \
+    libfontconfig1 \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
@@ -60,9 +67,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY . .
 
 # Create necessary directories and set permissions
-RUN mkdir -p /var/log/ttrpg /data/uploads /app/artifacts \
-    && chown -R ttrpg:ttrpg /var/log/ttrpg /data/uploads /app/artifacts /app \
-    && chmod 755 /var/log/ttrpg /data/uploads /app/artifacts
+RUN mkdir -p /var/log/ttrpg /data/uploads /app/artifacts /home/ttrpg \
+    && chown -R ttrpg:ttrpg /var/log/ttrpg /data/uploads /app/artifacts /app /home/ttrpg \
+    && chmod 755 /var/log/ttrpg /data/uploads /app/artifacts /home/ttrpg
 
 # Create application entry points
 COPY services/app/entrypoint.sh /entrypoint.sh

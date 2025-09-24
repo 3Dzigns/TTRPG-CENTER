@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-22T22:25:17.723919",
+    "master_type": "configurations",
+    "checksum": "1e216518d417497ca707961f4f91d8719faa530b28dd762a0709375c1b4d010f"
+  },
+  "environment_configs": {
+    "dev_config": {
+      "debug": true,
+      "port": 8000,
+      "log_level": "DEBUG",
+      "cache_ttl": 5,
+      "database_pool_size": 5,
+      "ai_model_timeout": 30,
+      "ingestion_parallel_workers": 2
+    },
+    "test_config": {
+      "debug": false,
+      "port": 8181,
+      "log_level": "INFO",
+      "cache_ttl": 60,
+      "database_pool_size": 3,
+      "ai_model_timeout": 15,
+      "ingestion_parallel_workers": 1
+    },
+    "prod_config": {
+      "debug": false,
+      "port": 8282,
+      "log_level": "WARNING",
+      "cache_ttl": 3600,
+      "database_pool_size": 20,
+      "ai_model_timeout": 60,
+      "ingestion_parallel_workers": 4
+    }
+  },
+  "database_configs": {
+    "astradb_config": {
+      "keyspace": "ttrpg_center",
+      "region": "us-east-2",
+      "vector_dimension": 1536,
+      "similarity_metric": "cosine",
+      "connection_timeout": 30,
+      "read_timeout": 60
+    }
+  },
+  "ai_model_configs": {
+    "openai_config": {
+      "default_model": "gpt-3.5-turbo",
+      "max_tokens": 2048,
+      "temperature": 0.7,
+      "timeout": 30
+    },
+    "classification_config": {
+      "model": "gpt-3.5-turbo",
+      "max_tokens": 100,
+      "temperature": 0.1,
+      "response_format": "json"
+    }
+  }
+}

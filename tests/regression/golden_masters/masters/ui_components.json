@@ -1,0 +1,140 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-22T22:25:17.716850",
+    "master_type": "ui_components",
+    "checksum": "74f361d9cfbabfec4b46866ad9a32124fd318c4348faf26c83d8acc1feb5c4af"
+  },
+  "search_interface": {
+    "search_form_structure": {
+      "query_input": {
+        "type": "text",
+        "placeholder": "Search spells, items, creatures...",
+        "autocomplete": true,
+        "validation": "required"
+      },
+      "filter_panels": [
+        {
+          "name": "Content Type",
+          "field": "content_type",
+          "options": [
+            "spell",
+            "item",
+            "creature",
+            "rule"
+          ]
+        },
+        {
+          "name": "Source",
+          "field": "source_book",
+          "options": [
+            "Player's Handbook",
+            "Dungeon Master's Guide",
+            "Monster Manual"
+          ]
+        }
+      ],
+      "sort_options": [
+        {
+          "value": "relevance",
+          "label": "Relevance"
+        },
+        {
+          "value": "alphabetical",
+          "label": "A-Z"
+        },
+        {
+          "value": "level_asc",
+          "label": "Level (Low to High)"
+        }
+      ]
+    },
+    "search_results_structure": {
+      "result_card": {
+        "title": "string",
+        "type_badge": "string",
+        "level_indicator": "number|null",
+        "excerpt": "string",
+        "source_citation": "string",
+        "relevance_score": "number",
+        "action_buttons": [
+          "view",
+          "favorite",
+          "share"
+        ]
+      },
+      "pagination": {
+        "current_page": "number",
+        "total_pages": "number",
+        "page_size": "number",
+        "total_results": "number"
+      }
+    }
+  },
+  "admin_interface": {
+    "ingestion_dashboard": {
+      "job_queue": {
+        "pending_jobs": "array",
+        "active_jobs": "array",
+        "completed_jobs": "array",
+        "failed_jobs": "array"
+      },
+      "progress_indicators": {
+        "overall_progress": "number",
+        "phase_progress": "object",
+        "eta_remaining": "string"
+      },
+      "action_controls": [
+        "start_ingestion",
+        "pause_ingestion",
+        "cancel_ingestion",
+        "retry_failed"
+      ]
+    },
+    "system_monitoring": {
+      "health_indicators": {
+        "database_status": "string",
+        "api_status": "string",
+        "ingestion_status": "string"
+      },
+      "performance_charts": [
+        "query_response_times",
+        "ingestion_throughput",
+        "error_rates",
+        "cache_performance"
+      ]
+    }
+  },
+  "user_interface": {
+    "retro_terminal_theme": {
+      "color_scheme": {
+        "background": "#000000",
+        "foreground": "#00ff00",
+        "accent": "#ffff00",
+        "error": "#ff0000"
+      },
+      "typography": {
+        "font_family": "Courier New, monospace",
+        "font_size": "14px",
+        "line_height": "1.4"
+      },
+      "animations": {
+        "typing_effect": true,
+        "scan_lines": true,
+        "cursor_blink": true
+      }
+    },
+    "lcars_theme": {
+      "color_scheme": {
+        "background": "#000000",
+        "primary": "#ff9900",
+        "secondary": "#9999ff",
+        "accent": "#ffcc99"
+      },
+      "interface_elements": {
+        "rounded_corners": "20px",
+        "button_style": "lcars_button",
+        "panel_borders": "none"
+      }
+    }
+  }
+}

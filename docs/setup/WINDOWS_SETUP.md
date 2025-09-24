@@ -37,7 +37,8 @@ python scripts/bulk_ingest.py --verify-deps
 
 2. **Navigate to TTRPG Center directory**
    ```powershell
-   cd "C:\path\to\TTRPG_Center"
+   cd "E:\TTRPG_Center"
+   # Adjust this path to match your actual installation location
    ```
 
 3. **Run automated setup**

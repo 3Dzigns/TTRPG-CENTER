@@ -11,12 +11,10 @@ from typing import Any, Dict, Mapping, Optional, Sequence, List
 try:
     from cassandra.auth import PlainTextAuthProvider  # type: ignore
     from cassandra.cluster import Cluster  # type: ignore
-    from cassandra.io.asyncioreactor import AsyncioConnection  # type: ignore
     from cassandra.query import SimpleStatement  # type: ignore
 except Exception as cassandra_import_error:  # pragma: no cover - environment specific
     PlainTextAuthProvider = None  # type: ignore[assignment]
     Cluster = None  # type: ignore[assignment]
-    AsyncioConnection = None  # type: ignore[assignment]
     SimpleStatement = None  # type: ignore[assignment]
     _CASSANDRA_IMPORT_ERROR = cassandra_import_error
 else:
@@ -32,7 +30,7 @@ os.environ.setdefault('CASS_DRIVER_NO_EXTENSIONS', '1')
 
 
 def _ensure_dependencies() -> None:
-    if Cluster is None or AsyncioConnection is None or SimpleStatement is None or PlainTextAuthProvider is None:
+    if Cluster is None or SimpleStatement is None or PlainTextAuthProvider is None:
         if '_CASSANDRA_IMPORT_ERROR' in globals() and _CASSANDRA_IMPORT_ERROR is not None:
             raise RuntimeError("Cassandra backend unavailable: cassandra-driver failed to import.") from _CASSANDRA_IMPORT_ERROR
         raise RuntimeError("Cassandra backend unavailable: cassandra-driver is not installed.")
@@ -56,7 +54,13 @@ class CassandraVectorStore(VectorStore):
         if self.username and self.password:
             auth_provider = PlainTextAuthProvider(username=self.username, password=self.password)
 
-        self.cluster = Cluster(self.contact_points, port=self.port, auth_provider=auth_provider, connection_class=AsyncioConnection)
+        self.cluster = Cluster(
+            self.contact_points,
+            port=self.port,
+            auth_provider=auth_provider,
+            connect_timeout=30,
+            control_connection_timeout=30
+        )
         self.session = self.cluster.connect()
         self._ensure_keyspace()
         self.session.set_keyspace(self.keyspace)
@@ -93,10 +97,16 @@ class CassandraVectorStore(VectorStore):
     # Public API implementations
     # ------------------------------------------------------------------
     def insert_documents(self, documents: Sequence[Mapping[str, Any]]) -> int:
-        return self._write_documents(documents)
+        logger.debug(f"Cassandra: Inserting {len(documents)} documents to keyspace={self.keyspace} table={self.table}")
+        result = self._write_documents(documents)
+        logger.info(f"Cassandra: Successfully inserted {result} documents")
+        return result
 
     def upsert_documents(self, documents: Sequence[Mapping[str, Any]]) -> int:
-        return self._write_documents(documents)
+        logger.debug(f"Cassandra: Upserting {len(documents)} documents to keyspace={self.keyspace} table={self.table}")
+        result = self._write_documents(documents)
+        logger.info(f"Cassandra: Successfully upserted {result} documents")
+        return result
 
     def delete_all(self) -> int:
         self.session.execute(f"TRUNCATE {self.table}")
@@ -199,6 +209,14 @@ class CassandraVectorStore(VectorStore):
     # ------------------------------------------------------------------
     def _ensure_keyspace(self) -> None:
         replication = os.getenv("CASSANDRA_REPLICATION", "{'class': 'SimpleStrategy', 'replication_factor': 1}")
+
+        # Convert JSON format to CQL format if needed
+        if replication.startswith('{"'):
+            import json
+            replication_dict = json.loads(replication)
+            replication_parts = [f"'{k}': {repr(v) if isinstance(v, str) else v}" for k, v in replication_dict.items()]
+            replication = "{" + ", ".join(replication_parts) + "}"
+
         create_keyspace = (
             f"CREATE KEYSPACE IF NOT EXISTS {self.keyspace} WITH replication = {replication}"
         )
@@ -221,8 +239,14 @@ class CassandraVectorStore(VectorStore):
         written = 0
         for doc in documents:
             params = self._normalise_document(doc)
+            chunk_id = params[0]  # chunk_id is first parameter
+            stage = params[2]     # stage is third parameter
+            source_hash = params[5]  # source_hash is sixth parameter
+
+            logger.debug(f"Cassandra: Writing chunk_id={chunk_id} stage={stage} source_hash={source_hash} to {self.keyspace}.{self.table}")
             self.session.execute(self.insert_stmt, params)
             written += 1
+            logger.debug(f"Cassandra: Successfully wrote chunk {chunk_id}")
         return written
 
     def _normalise_document(self, doc: Mapping[str, Any]) -> tuple[Any, ...]:

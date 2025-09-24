@@ -1,0 +1,95 @@
+# Feature flags/canaries configuration
+# MVP v2 Coding Standards - config/flags.yaml
+
+# Core feature flags
+features:
+  # Phase 0 - Environment & Build
+  environment_isolation: true
+  build_system: true
+  fast_testing: true
+
+  # Phase 1 - Ingestion Pipeline
+  pass_a_pdf_parsing: true
+  pass_b_logical_splitting: true
+  pass_c_extraction: true
+  unstructured_io: true
+  haystack_enrichment: true
+  llamaindex_graph: true
+
+  # Phase 2 - RAG Retrieval
+  query_classification: true
+  hybrid_retrieval: true
+  model_routing: true
+  confidence_scoring: true
+
+  # Phase 3 - Graph Workflows
+  graph_workflows: false  # Not yet implemented
+  workflow_engine: false
+
+  # Phase 4 - Admin UI
+  admin_ui: true
+  admin_test_console: false  # To be implemented
+  operational_tools: true
+
+  # Phase 5 - User UI
+  user_ui: false  # Not yet implemented
+  retro_terminal_theme: false
+  lcars_theme: false
+
+  # Phase 6 - Testing & Feedback
+  external_test_execution: false  # To be implemented
+  automated_feedback: false
+  regression_testing: true
+
+# Performance flags
+performance:
+  parallel_processing: true
+  request_batching: true
+  caching_enabled: true
+  response_compression: true
+
+# Security flags
+security:
+  authentication: false  # Not yet implemented
+  authorization: false
+  input_validation: true
+  output_sanitization: true
+  audit_logging: true
+
+# Observability flags
+observability:
+  structured_logging: true
+  opentelemetry: false  # To be implemented
+  metrics_collection: true
+  health_checks: true
+
+# Development flags
+development:
+  debug_mode: false
+  hot_reload: true
+  auto_formatting: true
+  type_checking: true
+
+# Canary deployments
+canary:
+  enabled: false
+  percentage: 0
+  target_environments: []
+
+# A/B testing
+ab_testing:
+  enabled: false
+  experiments: []
+
+# Circuit breakers
+circuit_breakers:
+  enabled: true
+  failure_threshold: 5
+  timeout_seconds: 30
+  reset_timeout_seconds: 60
+
+# Rate limiting
+rate_limiting:
+  enabled: true
+  requests_per_minute: 100
+  burst_size: 20

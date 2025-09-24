@@ -60,7 +60,7 @@
                 </p>
                 <div class="mb-3">
                     <span class="badge bg-light text-dark me-2"><i class="bi bi-file-earmark-pdf me-1"></i>PDF files only</span>
-                    <span class="badge bg-light text-dark me-2"><i class="bi bi-hdd me-1"></i>Max 50MB per file</span>
+                    <span class="badge bg-light text-dark me-2"><i class="bi bi-hdd me-1"></i>Max 500MB per file</span>
                     <span class="badge bg-light text-dark"><i class="bi bi-stack me-1"></i>Multiple files supported</span>
                 </div>
                 <div class="mt-3 d-flex flex-column align-items-center gap-2">
@@ -493,6 +493,93 @@ let activeRequests = new Map();
 let observabilityWebSocket = null;
 let reconnectTimeout = null;
 
+// Enhanced Drag & Drop handlers - declared early for HTML inline event handlers
+function dragEnterHandler(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const uploadArea = document.getElementById('upload-area');
+    if (uploadArea) {
+        uploadArea.classList.add('dragover');
+
+        // Update visual feedback
+        const uploadIcon = document.getElementById('upload-icon');
+        const uploadTitle = document.getElementById('upload-title');
+        const uploadHint = document.getElementById('upload-hint');
+
+        if (uploadIcon) uploadIcon.className = 'bi bi-cloud-arrow-down display-4 text-primary mb-3';
+        if (uploadTitle) uploadTitle.innerHTML = '<strong>Drop Files Here</strong>';
+        if (uploadHint) uploadHint.textContent = 'Release to upload your PDF files';
+    }
+}
+
+function dragOverHandler(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+}
+
+function dragLeaveHandler(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Only remove dragover when actually leaving the drop zone
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX;
+    const y = event.clientY;
+
+    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+        resetUploadAreaVisuals();
+    }
+}
+
+function dropHandler(event) {
+    console.log('🎯 Drop handler triggered');
+    event.preventDefault();
+    event.stopPropagation();
+    resetUploadAreaVisuals();
+
+    const files = event.dataTransfer.files;
+    if (!files || files.length === 0) {
+        console.warn('⚠️ No files in drop event');
+        return;
+    }
+
+    // Check AdminUtils availability
+    if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
+        console.error('❌ AdminUtils not available in drop handler');
+        alert('Upload system not ready. Please refresh the page.');
+        return;
+    }
+
+    // Validate files with enhanced logging
+    console.log('🔍 Validating dropped files...');
+    const validationResult = validateFiles(files);
+
+    if (!validationResult.valid) {
+        console.warn('⚠️ File validation failed:', validationResult.message);
+        AdminUtils.showToast(validationResult.message, 'warning');
+        return;
+    }
+
+    const validFiles = validationResult.files;
+    console.log('✅ File validation passed:', validFiles.map(f => f.name));
+
+    AdminUtils.showToast(`Uploading ${validFiles.length} file(s)...`, 'info');
+    uploadFiles(validFiles);
+}
+
+function resetUploadAreaVisuals() {
+    const uploadArea = document.getElementById('upload-area');
+    const uploadIcon = document.getElementById('upload-icon');
+    const uploadTitle = document.getElementById('upload-title');
+    const uploadHint = document.getElementById('upload-hint');
+
+    if (uploadArea) uploadArea.classList.remove('dragover');
+    if (uploadIcon) uploadIcon.className = 'bi bi-cloud-arrow-up display-4 text-success mb-3';
+    if (uploadTitle) uploadTitle.innerHTML = '<strong>Drag & Drop PDF Files Here</strong>';
+    if (uploadHint) uploadHint.textContent = 'Drop one or more PDF files into this area for automatic upload';
+}
+
 // Initialize console with proper cleanup handlers
 document.addEventListener('DOMContentLoaded', function() {
     console.log('📋 Ingestion Console initializing...');
@@ -758,100 +845,10 @@ function showUploadPreview(files) {
     console.log('Selected files:', files.map(f => f.name));
 }
 
-// Enhanced Drag & Drop handlers with better validation and feedback
-function dragEnterHandler(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    const uploadArea = document.getElementById('upload-area');
-    uploadArea.classList.add('dragover');
-
-    // Update visual feedback
-    document.getElementById('upload-icon').className = 'bi bi-cloud-arrow-down display-4 text-primary mb-3';
-    document.getElementById('upload-title').innerHTML = '<strong>Drop Files Here</strong>';
-    document.getElementById('upload-hint').textContent = 'Release to upload your PDF files';
-}
-
-function dragOverHandler(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = 'copy';
-}
-
-function dragLeaveHandler(event) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    // Only remove dragover when actually leaving the drop zone
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX;
-    const y = event.clientY;
-
-    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
-        resetUploadAreaVisuals();
-    }
-}
-
-function dropHandler(event) {
-    console.log('🎯 Drop handler triggered');
-    event.preventDefault();
-    event.stopPropagation();
-    resetUploadAreaVisuals();
-
-    // Enhanced diagnostics for drop handling
-    if (!event.dataTransfer) {
-        console.error('❌ No dataTransfer object in drop event');
-        return;
-    }
-
-    if (!event.dataTransfer.files) {
-        console.error('❌ No files property in dataTransfer');
-        return;
-    }
-
-    const files = Array.from(event.dataTransfer.files);
-    console.log('📥 Files dropped:', {
-        count: files.length,
-        files: files.map(f => ({ name: f.name, size: f.size, type: f.type }))
-    });
-
-    if (files.length === 0) {
-        console.warn('⚠️ No files in drop event');
-        return;
-    }
-
-    // Check AdminUtils availability
-    if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
-        console.error('❌ AdminUtils not available in drop handler');
-        alert('Upload system not ready. Please refresh the page.');
-        return;
-    }
-
-    // Validate files with enhanced logging
-    console.log('🔍 Validating dropped files...');
-    const validationResult = validateFiles(files);
-
-    if (!validationResult.valid) {
-        console.warn('⚠️ File validation failed:', validationResult.message);
-        AdminUtils.showToast(validationResult.message, 'warning');
-        return;
-    }
-
-    const validFiles = validationResult.files;
-    console.log('✅ File validation passed:', validFiles.map(f => f.name));
-
-    AdminUtils.showToast(`Uploading ${validFiles.length} file(s)...`, 'info');
-    uploadFiles(validFiles);
-}
-
-function resetUploadAreaVisuals() {
-    document.getElementById('upload-area').classList.remove('dragover');
-    document.getElementById('upload-icon').className = 'bi bi-cloud-arrow-up display-4 text-success mb-3';
-    document.getElementById('upload-title').innerHTML = '<strong>Drag & Drop PDF Files Here</strong>';
-    document.getElementById('upload-hint').textContent = 'Drop one or more PDF files into this area for automatic upload';
-}
+// Duplicate drag handlers removed - using the ones declared earlier
 
 function validateFiles(files) {
-    const maxFileSize = 50 * 1024 * 1024; // 50MB
+    const maxFileSize = 500 * 1024 * 1024; // 500MB for large RPG rulebooks
     const maxFiles = 10; // Maximum files per upload
     const allowedTypes = ['application/pdf'];
 
@@ -1601,7 +1598,7 @@ async function runNightly(environment) {
 
 // ====================== FR-034: Real-time Observability ======================
 
-let observabilityWebSocket = null;
+// observabilityWebSocket already declared above, reusing existing variable
 let isObservabilityActive = false;
 let currentObservableJob = null;
 let processingRateChart = null;

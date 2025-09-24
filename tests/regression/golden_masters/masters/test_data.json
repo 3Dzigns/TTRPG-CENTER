@@ -1,0 +1,107 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-22T22:25:17.721401",
+    "master_type": "test_data",
+    "checksum": "3fa90992095015d112f66afd743e1bfb3505911157578e94c535835556dde547"
+  },
+  "sample_spells": [
+    {
+      "id": "test_spell_001",
+      "name": "Test Fireball",
+      "level": 3,
+      "school": "evocation",
+      "casting_time": "1 action",
+      "range": "150 feet",
+      "components": [
+        "V",
+        "S",
+        "M"
+      ],
+      "material_components": "a tiny ball of bat guano and sulfur",
+      "duration": "instantaneous",
+      "description": "A bright streak flashes from your pointing finger to a point you choose within range and then blossoms with a low roar into an explosion of flame.",
+      "damage": {
+        "dice": "8d6",
+        "type": "fire",
+        "scaling": "1d6 per slot level above 3rd"
+      },
+      "saving_throw": {
+        "ability": "dexterity",
+        "dc": "spell_save_dc",
+        "success": "half_damage"
+      },
+      "area_of_effect": {
+        "shape": "sphere",
+        "size": "20-foot radius"
+      },
+      "classes": [
+        "wizard",
+        "sorcerer"
+      ],
+      "source": "Test Data",
+      "tags": [
+        "damage",
+        "area_effect",
+        "fire"
+      ]
+    }
+  ],
+  "sample_queries": [
+    {
+      "query": "fireball spell",
+      "expected_results": 1,
+      "expected_top_result": "test_spell_001",
+      "query_type": "basic_search"
+    },
+    {
+      "query": "fire damage spells level 3",
+      "expected_results": 1,
+      "facets": {
+        "spell_level": [
+          3
+        ],
+        "damage_type": [
+          "fire"
+        ]
+      },
+      "query_type": "faceted_search"
+    },
+    {
+      "query": "area of effect evocation",
+      "expected_results": 1,
+      "filters": {
+        "school": [
+          "evocation"
+        ],
+        "has_area_effect": true
+      },
+      "query_type": "filtered_search"
+    }
+  ],
+  "performance_benchmarks": {
+    "search_queries": [
+      {
+        "query": "magic missile",
+        "max_response_time": 100,
+        "min_results": 1
+      },
+      {
+        "query": "healing spells level 1",
+        "max_response_time": 150,
+        "min_results": 0
+      }
+    ],
+    "ingestion_benchmarks": {
+      "small_pdf": {
+        "page_count": 10,
+        "max_processing_time": 300,
+        "min_chunks_created": 50
+      },
+      "medium_pdf": {
+        "page_count": 100,
+        "max_processing_time": 1800,
+        "min_chunks_created": 500
+      }
+    }
+  }
+}

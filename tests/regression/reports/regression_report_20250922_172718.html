@@ -1,0 +1,694 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTRPG Center Regression Test Demo Report</title>
+    <style>
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .report-info {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .summary-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .summary-card {
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 8px;
+            color: white;
+        }
+
+        .summary-card.total { background: #6c757d; }
+        .summary-card.passed { background: #28a745; }
+        .summary-card.failed { background: #dc3545; }
+        .summary-card.error { background: #fd7e14; }
+        .summary-card.skipped { background: #6f42c1; }
+        .summary-card.success-rate { background: #17a2b8; }
+
+        .summary-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .summary-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .phase-section, .navigation, .test-suites-section, .failure-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .phase-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .phase-card {
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 5px solid;
+        }
+
+        .phase-card.passed { border-left-color: #28a745; background: #f8fff9; }
+        .phase-card.warning { border-left-color: #ffc107; background: #fffdf7; }
+        .phase-card.failed { border-left-color: #dc3545; background: #fff8f8; }
+
+        .phase-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .phase-stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            display: block;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-buttons button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .nav-buttons button:hover {
+            background: #0056b3;
+        }
+
+        .test-suite {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .test-suite.passed { border-left: 5px solid #28a745; }
+        .test-suite.failed { border-left: 5px solid #dc3545; }
+
+        .suite-header {
+            padding: 1rem;
+            background: #f8f9fa;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .suite-header:hover {
+            background: #e9ecef;
+        }
+
+        .suite-tests {
+            padding: 1rem;
+            display: none;
+        }
+
+        .suite-tests.expanded {
+            display: block;
+        }
+
+        .test-row {
+            display: grid;
+            grid-template-columns: 30px 1fr 100px 80px;
+            gap: 1rem;
+            padding: 0.5rem;
+            border-bottom: 1px solid #f1f3f4;
+            align-items: center;
+        }
+
+        .test-row.passed { background: #f8fff9; }
+        .test-row.failed { background: #fff5f5; }
+        .test-row.error { background: #fff8e1; }
+        .test-row.skipped { background: #f3e5f5; }
+
+        .test-status {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .test-row.passed .test-status { color: #28a745; }
+        .test-row.failed .test-status { color: #dc3545; }
+        .test-row.error .test-status { color: #fd7e14; }
+        .test-row.skipped .test-status { color: #6f42c1; }
+
+        .test-name {
+            font-weight: 500;
+        }
+
+        .test-phase {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        .test-duration {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .test-details {
+            grid-column: 1 / -1;
+            margin-top: 0.5rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .test-message {
+            color: #721c24;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .test-traceback {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+
+        .failure-detail {
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            background: #fff5f5;
+        }
+
+        .failure-detail h4 {
+            color: #721c24;
+            margin-bottom: 1rem;
+        }
+
+        .failure-suite {
+            font-weight: normal;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .failure-info {
+            margin-bottom: 1rem;
+            color: #495057;
+        }
+
+        .failure-message {
+            margin-bottom: 1rem;
+        }
+
+        .failure-traceback pre {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: #6c757d;
+            border-top: 1px solid #dee2e6;
+            margin-top: 2rem;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h2 {
+            color: #495057;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 0.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .report-info {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .test-row {
+                grid-template-columns: 30px 1fr;
+                gap: 0.5rem;
+            }
+
+            .test-phase, .test-duration {
+                grid-column: 2;
+                font-size: 0.8rem;
+            }
+        }
+        
+    </style>
+    <script>
+        
+        function toggleSuite(suiteName) {
+            const element = document.getElementById('suite-' + suiteName);
+            const icon = element.previousElementSibling.querySelector('.toggle-icon');
+
+            if (element.classList.contains('expanded')) {
+                element.classList.remove('expanded');
+                icon.textContent = '▼';
+            } else {
+                element.classList.add('expanded');
+                icon.textContent = '▲';
+            }
+        }
+
+        function showSection(status) {
+            const testRows = document.querySelectorAll('.test-row');
+
+            testRows.forEach(row => {
+                if (status === 'all') {
+                    row.classList.remove('hidden');
+                } else {
+                    const rowStatus = row.getAttribute('data-status');
+                    if (status === 'failed' && (rowStatus === 'failed' || rowStatus === 'error')) {
+                        row.classList.remove('hidden');
+                    } else if (rowStatus === status) {
+                        row.classList.remove('hidden');
+                    } else {
+                        row.classList.add('hidden');
+                    }
+                }
+            });
+        }
+
+        // Expand first failed suite by default
+        document.addEventListener('DOMContentLoaded', function() {
+            const failedSuite = document.querySelector('.test-suite.failed .suite-tests');
+            if (failedSuite) {
+                failedSuite.classList.add('expanded');
+                const icon = failedSuite.previousElementSibling.querySelector('.toggle-icon');
+                if (icon) icon.textContent = '▲';
+            }
+        });
+        
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>TTRPG Center Regression Test Demo Report</h1>
+            <div class="report-info">
+                <span>Generated: 2025-09-22 17:27:18</span>
+                <span>Duration: 69.80s</span>
+            </div>
+        </header>
+
+        <div class="summary-section">
+            <h2>Test Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-card total">
+                    <div class="summary-number">10</div>
+                    <div class="summary-label">Total Tests</div>
+                </div>
+                <div class="summary-card passed">
+                    <div class="summary-number">7</div>
+                    <div class="summary-label">Passed</div>
+                </div>
+                <div class="summary-card failed">
+                    <div class="summary-number">1</div>
+                    <div class="summary-label">Failed</div>
+                </div>
+                <div class="summary-card error">
+                    <div class="summary-number">1</div>
+                    <div class="summary-label">Errors</div>
+                </div>
+                <div class="summary-card skipped">
+                    <div class="summary-number">1</div>
+                    <div class="summary-label">Skipped</div>
+                </div>
+                <div class="summary-card success-rate">
+                    <div class="summary-number">70.0%</div>
+                    <div class="summary-label">Success Rate</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="phase-section">
+            <h2>Results by Phase</h2>
+            <div class="phase-grid">
+
+                <div class="phase-card failed">
+                    <h3>Feature Requests</h3>
+                    <div class="phase-stats">
+                        <div class="phase-stat">
+                            <span class="stat-number">3</span>
+                            <span class="stat-label">Total</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">2</span>
+                            <span class="stat-label">Passed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">0</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">66.7%</span>
+                            <span class="stat-label">Success</span>
+                        </div>
+                    </div>
+                </div>
+            
+
+                <div class="phase-card warning">
+                    <h3>Phase 0</h3>
+                    <div class="phase-stats">
+                        <div class="phase-stat">
+                            <span class="stat-number">4</span>
+                            <span class="stat-label">Total</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">3</span>
+                            <span class="stat-label">Passed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">1</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">75.0%</span>
+                            <span class="stat-label">Success</span>
+                        </div>
+                    </div>
+                </div>
+            
+
+                <div class="phase-card failed">
+                    <h3>Phase 1</h3>
+                    <div class="phase-stats">
+                        <div class="phase-stat">
+                            <span class="stat-number">3</span>
+                            <span class="stat-label">Total</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">2</span>
+                            <span class="stat-label">Passed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">1</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                        <div class="phase-stat">
+                            <span class="stat-number">66.7%</span>
+                            <span class="stat-label">Success</span>
+                        </div>
+                    </div>
+                </div>
+            
+</div>
+        </div>
+
+        <div class="navigation">
+            <h2>Quick Navigation</h2>
+            <div class="nav-buttons">
+                <button onclick="showSection('all')">All Tests</button>
+                <button onclick="showSection('failed')">Failed Tests</button>
+                <button onclick="showSection('passed')">Passed Tests</button>
+                <button onclick="showSection('skipped')">Skipped Tests</button>
+            </div>
+        </div>
+
+        <div class="test-suites-section">
+            <h2>Test Suites</h2>
+            
+                <div class="test-suite failed">
+                    <h3 class="suite-header" onclick="toggleSuite('Phase 0 - Environment Tests')">
+                        <span class="suite-name">Phase 0 - Environment Tests</span>
+                        <span class="suite-stats">
+                            3/4 passed (15.20s)
+                        </span>
+                        <span class="toggle-icon">▼</span>
+                    </h3>
+                    <div class="suite-tests" id="suite-Phase 0 - Environment Tests">
+                        
+                <div class="test-row passed" data-status="passed" data-phase="Phase 0">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_dev_environment_isolation</span>
+                    <span class="test-phase">Phase 0</span>
+                    <span class="test-duration">2.100s</span>
+                    
+                </div>
+            
+
+                <div class="test-row passed" data-status="passed" data-phase="Phase 0">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_test_environment_isolation</span>
+                    <span class="test-phase">Phase 0</span>
+                    <span class="test-duration">1.800s</span>
+                    
+                </div>
+            
+
+                <div class="test-row failed" data-status="failed" data-phase="Phase 0">
+                    <span class="test-status">✗</span>
+                    <span class="test-name">test_prod_environment_isolation</span>
+                    <span class="test-phase">Phase 0</span>
+                    <span class="test-duration">3.200s</span>
+                    
+            <div class="test-details">
+                <div class="test-message">Environment not isolated</div>
+                
+            </div>
+        
+                </div>
+            
+
+                <div class="test-row passed" data-status="passed" data-phase="Phase 0">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_port_assignments</span>
+                    <span class="test-phase">Phase 0</span>
+                    <span class="test-duration">0.900s</span>
+                    
+                </div>
+            
+                    </div>
+                </div>
+            
+
+                <div class="test-suite failed">
+                    <h3 class="suite-header" onclick="toggleSuite('Phase 1 - Ingestion Pipeline Tests')">
+                        <span class="suite-name">Phase 1 - Ingestion Pipeline Tests</span>
+                        <span class="suite-stats">
+                            2/3 passed (45.70s)
+                        </span>
+                        <span class="toggle-icon">▼</span>
+                    </h3>
+                    <div class="suite-tests" id="suite-Phase 1 - Ingestion Pipeline Tests">
+                        
+                <div class="test-row passed" data-status="passed" data-phase="Phase 1">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_pass_a_pdf_parsing</span>
+                    <span class="test-phase">Phase 1</span>
+                    <span class="test-duration">12.300s</span>
+                    
+                </div>
+            
+
+                <div class="test-row passed" data-status="passed" data-phase="Phase 1">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_pass_b_content_enrichment</span>
+                    <span class="test-phase">Phase 1</span>
+                    <span class="test-duration">18.400s</span>
+                    
+                </div>
+            
+
+                <div class="test-row error" data-status="error" data-phase="Phase 1">
+                    <span class="test-status">⚠</span>
+                    <span class="test-name">test_pass_c_graph_compilation</span>
+                    <span class="test-phase">Phase 1</span>
+                    <span class="test-duration">15.000s</span>
+                    
+            <div class="test-details">
+                <div class="test-message">Graph compilation timeout</div>
+                
+            </div>
+        
+                </div>
+            
+                    </div>
+                </div>
+            
+
+                <div class="test-suite passed">
+                    <h3 class="suite-header" onclick="toggleSuite('Feature Requests - Advanced Search')">
+                        <span class="suite-name">Feature Requests - Advanced Search</span>
+                        <span class="suite-stats">
+                            2/3 passed (8.90s)
+                        </span>
+                        <span class="toggle-icon">▼</span>
+                    </h3>
+                    <div class="suite-tests" id="suite-Feature Requests - Advanced Search">
+                        
+                <div class="test-row passed" data-status="passed" data-phase="Feature Requests">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_faceted_search</span>
+                    <span class="test-phase">Feature Requests</span>
+                    <span class="test-duration">2.100s</span>
+                    
+                </div>
+            
+
+                <div class="test-row passed" data-status="passed" data-phase="Feature Requests">
+                    <span class="test-status">✓</span>
+                    <span class="test-name">test_search_performance</span>
+                    <span class="test-phase">Feature Requests</span>
+                    <span class="test-duration">1.200s</span>
+                    
+                </div>
+            
+
+                <div class="test-row skipped" data-status="skipped" data-phase="Feature Requests">
+                    <span class="test-status">○</span>
+                    <span class="test-name">test_autocomplete</span>
+                    <span class="test-phase">Feature Requests</span>
+                    <span class="test-duration">0.000s</span>
+                    
+            <div class="test-details">
+                <div class="test-message">Not implemented</div>
+                
+            </div>
+        
+                </div>
+            
+                    </div>
+                </div>
+            
+        </div>
+
+        
+            <div class="failure-section">
+                <h2>Failure Details</h2>
+        
+
+                <div class="failure-detail">
+                    <h4>test_prod_environment_isolation <span class="failure-suite">(Phase 0 - Environment Tests)</span></h4>
+                    <div class="failure-info">
+                        <strong>Status:</strong> Failed<br>
+                        <strong>Duration:</strong> 3.200s<br>
+                        <strong>Phase:</strong> Phase 0<br>
+                        <strong>Category:</strong> Environment
+                    </div>
+                    <div class="failure-message"><strong>Message:</strong><br>Environment not isolated</div>
+                    
+                </div>
+            
+
+                <div class="failure-detail">
+                    <h4>test_pass_c_graph_compilation <span class="failure-suite">(Phase 1 - Ingestion Pipeline Tests)</span></h4>
+                    <div class="failure-info">
+                        <strong>Status:</strong> Error<br>
+                        <strong>Duration:</strong> 15.000s<br>
+                        <strong>Phase:</strong> Phase 1<br>
+                        <strong>Category:</strong> Ingestion
+                    </div>
+                    <div class="failure-message"><strong>Message:</strong><br>Graph compilation timeout</div>
+                    
+                </div>
+            
+</div>
+
+        <footer class="footer">
+            <p>TTRPG Center Regression Test Report - Generated by automated testing system</p>
+        </footer>
+    </div>
+</body>
+</html>

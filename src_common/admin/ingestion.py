@@ -684,8 +684,8 @@ class AdminIngestionService:
 
     async def _resolve_source_path(self, source_file: str, environment: str) -> Path:
         """Resolve source file path with environment-aware configuration and proper validation"""
-        # Get uploads directory from environment configuration
-        uploads_dir = os.getenv('UPLOADS_DIR', f"env/{environment}/data/uploads")
+        # Get uploads directory from environment configuration (consistent with admin_routes.py)
+        uploads_dir = os.getenv('UPLOADS_DIR', "/data/uploads")
 
         # Try environment-specific path first (highest priority)
         env_specific_dirs = [
@@ -909,8 +909,24 @@ class AdminIngestionService:
 
         result = await asyncio.to_thread(_run_pass_a)
 
+        # Add detailed Pass A logging to job log
+        if result.success:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Document processed - {result.sections_parsed} ToC sections found")
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Dictionary extraction - {result.dictionary_entries_extracted} terms extracted, {result.dictionary_entries_upserted} terms upserted to database")
+
+            # Log each individual term with its upsert status
+            for term_result in result.term_results:
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Term: {term_result.term} upserted to database {term_result.status}")
+
+            if result.dictionary_entries_extracted > result.dictionary_entries_upserted:
+                duplicates_filtered = result.dictionary_entries_extracted - result.dictionary_entries_upserted
+                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Note - {duplicates_filtered} terms were duplicates or failed database upsert")
+        else:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Processing failed - {result.error_message}")
+
         return {
-            "processed_count": result.dictionary_entries,
+            "processed_count": result.dictionary_entries_extracted,
+            "upserted_count": result.dictionary_entries_upserted,
             "artifact_count": len(result.artifacts),
             "sections_parsed": result.sections_parsed,
             "duration_ms": result.processing_time_ms,
@@ -925,9 +941,16 @@ class AdminIngestionService:
         await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B: Logical splitting check")
 
         def _run_pass_b():
-            return process_pass_b(source_path, job_path, job_id, environment)
+            # Pass the job_log_file to enable enhanced observability in job logs
+            return process_pass_b(source_path, job_path, job_id, environment, job_log_file=log_file_path)
 
         result = await asyncio.to_thread(_run_pass_b)
+
+        # Add enhanced completion logging to job log
+        if result.success:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B completed: processed={result.parts_created}, artifacts={len(result.artifacts)}, duration={result.processing_time_ms / 1000:.2f}s")
+        else:
+            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B failed: {result.error_message}")
 
         return {
             "processed_count": result.parts_created,
@@ -1550,13 +1573,13 @@ class AdminIngestionService:
             if not selected_sources:
                 raise ValueError("At least one source must be selected for selective ingestion")
 
-            # Validate sources exist and are available for reingestion
+            # Validate sources exist and are available for ingestion or reingestion
             available_sources = await self.get_available_sources(environment)
-            available_source_files = {s.get('source_file', s.get('id', '')) for s in available_sources if s.get('available_for_reingestion', False)}
+            available_source_files = {s.get('source_file', s.get('id', '')) for s in available_sources if s.get('available_for_reingestion', False) or s.get('available_for_ingestion', False)}
 
             invalid_sources = [src for src in selected_sources if src not in available_source_files]
             if invalid_sources:
-                raise ValueError(f"Sources not available for reingestion: {invalid_sources}")
+                raise ValueError(f"Sources not available for ingestion: {invalid_sources}")
 
             # Prepare options with selected sources
             selective_options = options or {}

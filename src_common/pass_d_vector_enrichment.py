@@ -723,13 +723,18 @@ class PassDVectorEnricher:
         """Batch upsert vectorized chunks to the configured vector store."""
 
         if not chunks:
+            logger.debug("Pass D: No chunks to upsert to vector store")
             return 0
 
+        logger.info(f"Pass D: Preparing {len(chunks)} vectorized chunks for upsert to {self.astra_loader.backend}")
         documents: List[Dict[str, Any]] = []
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             metadata = dict(chunk.metadata or {})
             metadata.setdefault('job_id', chunk.source_id or self.job_id)
             metadata.setdefault('environment', self.env)
+
+            logger.debug(f"Pass D: Processing chunk {i+1}/{len(chunks)} - chunk_id={chunk.chunk_id} stage={chunk.stage} source_hash={metadata.get('source_hash')}")
+
             documents.append(
                 {
                     'chunk_id': chunk.chunk_id,
@@ -759,13 +764,21 @@ class PassDVectorEnricher:
             )
 
         try:
+            logger.info(f"Pass D: Upserting {len(documents)} documents to vector store backend={self.astra_loader.backend}")
             loaded_count = self.astra_loader.store.upsert_documents(documents)
-            logger.info("Upserted %s vectorized chunks via backend=%s", loaded_count, self.astra_loader.backend)
+            logger.info("Pass D: Successfully upserted %s vectorized chunks via backend=%s", loaded_count, self.astra_loader.backend)
+
+            # Log details about what was upserted
+            for doc in documents[:3]:  # Log first 3 as examples
+                logger.debug(f"Pass D: Upserted chunk example - chunk_id={doc['chunk_id']} stage={doc['stage']} source_hash={doc['source_hash']}")
+            if len(documents) > 3:
+                logger.debug(f"Pass D: ... and {len(documents)-3} more chunks")
+
             return loaded_count
         except Exception as exc:
             if ASTRA_REQUIRE_CREDS and self.astra_loader.backend == 'astra':
                 raise RuntimeError("Vector store credentials missing; cannot upsert vectors") from exc
-            logger.error("Failed to batch upsert chunks to vector store: %s", exc)
+            logger.error("Pass D: Failed to batch upsert chunks to vector store: %s", exc)
             return 0
     def _update_manifest(
         self,

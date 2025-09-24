@@ -21,57 +21,76 @@ except Exception:
     _HAVE_JSONLOGGER = False
 
 
-def jlog(level: str, msg: str, **fields) -> None:
+def jlog(level: str, msg: str, service: str = "ttrpg-center", **fields) -> None:
     """
-    Quick structured logging function for simple use cases.
-    
+    Quick structured logging function following MVP v2 schema.
+
     Args:
         level: Log level (INFO, ERROR, WARNING, DEBUG)
         msg: Log message
+        service: Service name (defaults to 'ttrpg-center')
         **fields: Additional fields to include in the log record
     """
     record = {
         "timestamp": time.time(),
         "level": level.upper(),
         "message": msg,
-        "environment": os.getenv('APP_ENV', 'dev'),
-        **fields
+        "env": os.getenv('APP_ENV', 'dev'),
+        "service": service,
+        "trace_id": fields.get('trace_id', None),
+        **{k: v for k, v in fields.items() if k != 'trace_id'}  # Avoid duplicate
     }
-    
+
     # Remove any None values
     record = {k: v for k, v in record.items() if v is not None}
-    
+
     # Write to stdout for console capture
     print(json.dumps(record), flush=True)
 
 
 if _HAVE_JSONLOGGER:
     class TTRPGJsonFormatter(jsonlogger.JsonFormatter):
-        """Custom JSON formatter that adds TTRPG-specific context."""
+        """
+        Custom JSON formatter for MVP v2 structured logging requirements.
+
+        Required schema: env, service, timestamp, level, trace_id, message
+        """
 
         def add_fields(self, log_record: Dict[str, Any], record: _logging.LogRecord, message_dict: Dict[str, Any]) -> None:
             super().add_fields(log_record, record, message_dict)
 
-            # Add standard fields
+            # MVP v2 required fields
+            log_record['env'] = os.getenv('APP_ENV', 'dev')
+            log_record['service'] = getattr(record, 'service', record.name.split('.')[0] if '.' in record.name else record.name)
             log_record['timestamp'] = time.time()
-            log_record['environment'] = os.getenv('APP_ENV', 'dev')
-            log_record['component'] = getattr(record, 'component', 'unknown')
+            log_record['level'] = record.levelname
+            log_record['trace_id'] = getattr(record, 'trace_id', None)
 
-            # Add trace information if available
-            if hasattr(record, 'trace_id'):
-                log_record['trace_id'] = record.trace_id
+            # Additional context fields
             if hasattr(record, 'user_id'):
                 log_record['user_id'] = record.user_id
             if hasattr(record, 'session_id'):
                 log_record['session_id'] = record.session_id
+            if hasattr(record, 'job_id'):
+                log_record['job_id'] = record.job_id
+            if hasattr(record, 'execution_id'):
+                log_record['execution_id'] = record.execution_id
 
-            # Add performance metrics if available
+            # Performance metrics
             if hasattr(record, 'duration_ms'):
                 log_record['duration_ms'] = record.duration_ms
             if hasattr(record, 'tokens'):
                 log_record['tokens'] = record.tokens
             if hasattr(record, 'model'):
                 log_record['model'] = record.model
+
+            # Pipeline context
+            if hasattr(record, 'pass_name'):
+                log_record['pass_name'] = record.pass_name
+            if hasattr(record, 'doc_id'):
+                log_record['doc_id'] = record.doc_id
+            if hasattr(record, 'part_id'):
+                log_record['part_id'] = record.part_id
 else:
     class TTRPGJsonFormatter(_logging.Formatter):
         """Fallback formatter when python-json-logger is unavailable."""

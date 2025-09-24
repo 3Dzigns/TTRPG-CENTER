@@ -126,7 +126,9 @@ class PreflightValidator:
         
         # Check for Tesseract
         for path in tesseract_paths:
-            if path.exists() and (path / "tesseract.exe").exists():
+            # Use platform-appropriate executable name
+            executable_name = "tesseract.exe" if os.name == "nt" else "tesseract"
+            if path.exists() and (path / executable_name).exists():
                 candidate_paths.append(path)
                 logger.info(f"Found Tesseract at: {path}")
                 # If tessdata folder exists alongside and not already configured, set it

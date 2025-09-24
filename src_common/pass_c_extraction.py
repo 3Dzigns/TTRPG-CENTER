@@ -211,22 +211,28 @@ class PassCExtractor:
     
     def _extract_from_part(self, part_info: Dict[str, Any], part_index: int) -> List[RawChunk]:
         """Extract raw chunks from a single PDF part"""
-        
+
         part_path = part_info["path"]
         page_start = part_info["page_start"]
         page_end = part_info["page_end"]
         section_titles = part_info["section_titles"]
-        
+
+        logger.debug(f"Pass C: Extracting from part {part_index}: {part_path} pages {page_start}-{page_end}")
         chunks = []
-        
+
         if UNSTRUCTURED_AVAILABLE:
             chunks = self._extract_with_unstructured(
                 part_path, page_start, page_end, section_titles, part_index
             )
+            logger.info(f"Pass C: Extracted {len(chunks)} raw chunks from part {part_index}")
         else:
             logger.error("Unstructured.io not available - cannot proceed with document extraction")
             chunks = self._handle_unstructured_unavailable(part_path)
-        
+
+        # Log each chunk created
+        for i, chunk in enumerate(chunks):
+            logger.debug(f"Pass C: Created chunk {i+1}/{len(chunks)} - chunk_id={chunk.chunk_id} length={len(chunk.content)} chars")
+
         return chunks
     
     def _extract_with_unstructured(
@@ -281,7 +287,9 @@ class PassCExtractor:
         # Configure Tesseract with absolute path for pytesseract (used by unstructured.io)
         tesseract_configured = False
         if tesseract_path and tesseract_path.strip():
-            tesseract_exe_path = Path(tesseract_path) / "tesseract.exe"
+            # Use platform-appropriate executable name
+            executable_name = "tesseract.exe" if os.name == "nt" else "tesseract"
+            tesseract_exe_path = Path(tesseract_path) / executable_name
             if tesseract_exe_path.exists() and PYTESSERACT_AVAILABLE:
                 logger.info(f"Configuring Tesseract with absolute path: {tesseract_exe_path}")
                 pytesseract.pytesseract.tesseract_cmd = str(tesseract_exe_path)

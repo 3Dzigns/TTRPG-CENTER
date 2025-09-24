@@ -12,7 +12,8 @@ from dataclasses import asdict
 
 from .dictionary_models import DictionaryTerm, DictionaryStats
 from ..mongo_dictionary_service import MongoDictionaryService, DictEntry
-from ..models.unified_dictionary import UnifiedDictionaryTerm, UnifiedDictionaryStats
+# Temporarily disabled to fix TimestampedModel import error
+# from ..models.unified_dictionary import UnifiedDictionaryTerm, UnifiedDictionaryStats
 from ..patterns.circuit_breaker import (
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
 )
@@ -66,6 +67,27 @@ class MongoDictionaryAdapter:
         self._health_check_interval = 30  # seconds
 
         logger.info(f"MongoDB Dictionary Adapter initialized for {environment} with circuit breaker")
+
+    def _convert_dict_entry_to_dictionary_term(self, entry: DictEntry) -> DictionaryTerm:
+        """Convert DictEntry to DictionaryTerm"""
+        # Extract source from sources list or default
+        source = "unknown"
+        if entry.sources and len(entry.sources) > 0:
+            # Sources is a list of dicts, get the first source name
+            source = entry.sources[0].get('system', 'unknown')
+
+        return DictionaryTerm(
+            term=entry.term,
+            definition=entry.definition,
+            category=entry.category,
+            environment=self.environment,
+            source=source,
+            page_reference=None,  # Not stored in DictEntry
+            created_at=getattr(entry, 'created_at', time.time()),
+            updated_at=getattr(entry, 'updated_at', time.time()),
+            version=1,
+            tags=getattr(entry, 'tags', [])
+        )
 
     def _fallback_empty_response(self, *args, **kwargs):
         """Default fallback that returns empty responses when MongoDB is unavailable"""
@@ -143,18 +165,14 @@ class MongoDictionaryAdapter:
                 "get_environment_stats"
             )
 
-            # Convert MongoDB stats to AdminDictionaryService format using unified model
-            unified_stats = UnifiedDictionaryStats(
+            # Convert MongoDB stats to AdminDictionaryService format directly
+            return DictionaryStats(
                 total_terms=mongo_stats.get("total_entries", 0),
                 categories=mongo_stats.get("category_distribution", {}),
                 sources=self._get_source_distribution(),
                 recent_updates=self._get_recent_updates_count(),
-                environment=self.environment,
-                backend_type="mongodb",
-                backend_health="healthy"
+                environment=self.environment
             )
-
-            return unified_stats.to_dictionary_stats()
 
         except Exception as e:
             logger.error(f"Error getting MongoDB stats for {self.environment}: {e}")
@@ -185,11 +203,8 @@ class MongoDictionaryAdapter:
                         limit=limit
                     )
                 else:
-                    # Get all entries (limited) - use empty search to get all
-                    mongo_entries = self.mongo_service.search_entries(
-                        query="",
-                        limit=limit
-                    )
+                    # Get all entries (limited) - use new get_all_terms method
+                    mongo_entries = self.mongo_service.get_all_terms(limit=limit)
             return mongo_entries
 
         try:
@@ -199,11 +214,10 @@ class MongoDictionaryAdapter:
                 "list_terms"
             )
 
-            # Convert DictEntry objects to UnifiedDictionaryTerm then to DictionaryTerm
+            # Convert DictEntry objects to DictionaryTerm
             terms = []
             for entry in mongo_entries:
-                unified_term = UnifiedDictionaryTerm.from_dict_entry(entry, self.environment)
-                dictionary_term = unified_term.to_dictionary_term()
+                dictionary_term = self._convert_dict_entry_to_dictionary_term(entry)
                 terms.append(dictionary_term)
 
             # Sort by update time (newest first)
@@ -233,9 +247,8 @@ class MongoDictionaryAdapter:
             )
 
             if mongo_entry:
-                # Convert through unified model
-                unified_term = UnifiedDictionaryTerm.from_dict_entry(mongo_entry, self.environment)
-                return unified_term.to_dictionary_term()
+                # Convert to DictionaryTerm
+                return self._convert_dict_entry_to_dictionary_term(mongo_entry)
 
             return None
 
@@ -261,40 +274,31 @@ class MongoDictionaryAdapter:
             if existing_entry:
                 raise ValueError(f"Term '{term_data['term']}' already exists in {self.environment}")
 
-            # Create unified term from input data
-            unified_term = UnifiedDictionaryTerm(
+            # Create DictEntry from input data
+            sources = [{"system": term_data['source'], "page": term_data.get('page_reference', '')}]
+            dict_entry = DictEntry(
                 term=term_data['term'],
                 definition=term_data['definition'],
                 category=term_data['category'],
-                environment=self.environment,
-                sources=[],  # Will be set by post_init from legacy fields
-                created_at=time.time(),
-                updated_at=time.time(),
-                version=1,
-                tags=term_data.get('tags', []),
-                source=term_data['source'],
-                page_reference=term_data.get('page_reference')
+                sources=sources
             )
-
-            # Convert to DictEntry for MongoDB storage
-            dict_entry = unified_term.to_dict_entry()
 
             # Insert into MongoDB
             result = self.mongo_service.upsert_entries([dict_entry])
             if result == 0:
                 raise Exception("Failed to insert term into MongoDB")
 
-            return unified_term
+            return self._convert_dict_entry_to_dictionary_term(dict_entry)
 
         try:
             # Execute through circuit breaker
-            unified_term = self._execute_with_circuit_breaker(
+            dictionary_term = self._execute_with_circuit_breaker(
                 _create_term_in_mongo,
                 "create_term"
             )
 
-            logger.info(f"Created term '{unified_term.term}' in MongoDB for {self.environment}")
-            return unified_term.to_dictionary_term()
+            logger.info(f"Created term '{dictionary_term.term}' in MongoDB for {self.environment}")
+            return dictionary_term
 
         except Exception as e:
             logger.error(f"Error creating term in MongoDB: {e}")
@@ -387,6 +391,40 @@ class MongoDictionaryAdapter:
             logger.error(f"Error deleting term '{term_name}' from MongoDB: {e}")
             return self._fallback_empty_response(method_name="delete_term")
 
+    async def clear_all_terms(self) -> int:
+        """Clear all dictionary terms from MongoDB"""
+        def _clear_all_terms_from_mongo():
+            # Perform health check
+            if not self._perform_health_check():
+                raise Exception("MongoDB unavailable for clearing all terms")
+
+            if self.mongo_service.collection is None:
+                raise Exception("MongoDB collection not available")
+
+            # Get count before deletion
+            count_before = self.mongo_service.collection.estimated_document_count()
+
+            # Delete all documents
+            result = self.mongo_service.collection.delete_many({})
+            deleted_count = result.deleted_count
+
+            logger.info(f"Cleared {deleted_count} terms from MongoDB (estimated: {count_before})")
+            return deleted_count
+
+        try:
+            # Execute through circuit breaker
+            deleted_count = self._execute_with_circuit_breaker(
+                _clear_all_terms_from_mongo,
+                "clear_all_terms"
+            )
+
+            logger.info(f"Successfully cleared {deleted_count} terms from MongoDB for {self.environment}")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error clearing all terms from MongoDB: {e}")
+            return 0
+
     async def search_terms(self, query: str, category: Optional[str] = None) -> List[DictionaryTerm]:
         """Search terms in MongoDB with full-text search"""
         def _search_terms_in_mongo():
@@ -408,11 +446,10 @@ class MongoDictionaryAdapter:
                 "search_terms"
             )
 
-            # Convert to DictionaryTerm objects using unified model
+            # Convert to DictionaryTerm objects
             terms = []
             for entry in mongo_entries:
-                unified_term = UnifiedDictionaryTerm.from_dict_entry(entry, self.environment)
-                dictionary_term = unified_term.to_dictionary_term()
+                dictionary_term = self._convert_dict_entry_to_dictionary_term(entry)
                 terms.append(dictionary_term)
 
             logger.debug(f"Found {len(terms)} terms matching '{query}' in MongoDB")

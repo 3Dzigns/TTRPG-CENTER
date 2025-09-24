@@ -17,9 +17,9 @@ Template literal END:   HTML: 427 JS:131 col:44 - dpoint}...`);
 Template literal START: HTML: 436 JS:140 col:26 - duration: `${duration}ms`,
 Template literal END:   HTML: 436 JS:140 col:40 - uration}ms`,
 Traceback (most recent call last):
-  File "C:\Users\anzak\Documents\TTRPG_Center\scripts\find_template_literal_issue.py", line 105, in <module>
+  File "E:\TTRPG_Center\scripts\find_template_literal_issue.py", line 105, in <module>
     find_template_literal_issue()
-  File "C:\Users\anzak\Documents\TTRPG_Center\scripts\find_template_literal_issue.py", line 73, in find_template_literal_issue
+  File "E:\TTRPG_Center\scripts\find_template_literal_issue.py", line 73, in find_template_literal_issue
     print(f"Template literal START: HTML:{html_line:4d} JS:{line_num:3d} col:{i:2d} - {line[max(0, i-10):i+30]}")
   File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
     return codecs.charmap_encode(input,self.errors,encoding_table)[0]

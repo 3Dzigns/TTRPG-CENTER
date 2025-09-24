@@ -1,0 +1,37 @@
+# MVP v2 Test Console API Dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir fastapi uvicorn websockets
+
+# Copy source code
+COPY src_common/ ./src_common/
+COPY services/test_console/ ./services/test_console/
+COPY pyproject.toml ./
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash ttrpg
+RUN chown -R ttrpg:ttrpg /app
+USER ttrpg
+
+# Expose test console port
+EXPOSE ${TEST_CONSOLE_PORT:-8196}
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${TEST_CONSOLE_PORT:-8196}/healthz || exit 1
+
+# Default command - test console API
+CMD python -m uvicorn services.test_console.api:app --host 0.0.0.0 --port ${TEST_CONSOLE_PORT:-8196}

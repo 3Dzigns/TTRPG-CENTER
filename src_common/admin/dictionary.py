@@ -389,7 +389,54 @@ class AdminDictionaryService:
         except Exception as e:
             logger.error(f"Error deleting term {term_name} from {environment}: {e}")
             return False
-    
+
+    async def clear_all_terms(self, environment: str) -> int:
+        """
+        Clear all dictionary terms from the specified environment
+
+        Args:
+            environment: Environment name
+
+        Returns:
+            Number of terms deleted
+        """
+        try:
+            deleted_count = 0
+
+            # Try MongoDB first
+            adapter = self._get_adapter(environment)
+            if adapter:
+                try:
+                    deleted_count = await adapter.clear_all_terms()
+                    logger.info(f"Cleared {deleted_count} terms from MongoDB for {environment}")
+                    return deleted_count
+                except Exception as e:
+                    logger.warning(f"MongoDB clear_all_terms failed for {environment}, falling back to file-based: {e}")
+
+            # Fallback to file-based storage
+            terms = await self._load_environment_terms_fallback(environment)
+            deleted_count = len(terms)
+
+            if deleted_count > 0:
+                # Clear the file by writing empty terms array
+                terms_file = Path(f"env/{environment}/data/dictionary.json")
+                export_data = {
+                    "environment": environment,
+                    "updated_at": time.time(),
+                    "terms": []
+                }
+
+                with open(terms_file, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, indent=2)
+
+                logger.info(f"Cleared {deleted_count} terms from {environment} (file-based)")
+
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error clearing all terms from {environment}: {e}")
+            raise
+
     async def bulk_import(self, environment: str, terms_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Bulk import dictionary terms

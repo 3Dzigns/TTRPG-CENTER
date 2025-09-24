@@ -95,9 +95,9 @@ logs/                   # Root-level logs (if exists)
 2. Create Basic Task
 3. Set trigger (e.g., weekly)
 4. Action: Start a program
-5. Program: `C:\path\to\TTRPG_Center\scripts\cleanup_logs.bat`
+5. Program: `E:\TTRPG_Center\scripts\cleanup_logs.bat`
 6. Arguments: `30 all` (30 days retention, all environments)
-7. Start in: `C:\path\to\TTRPG_Center`
+7. Start in: `E:\TTRPG_Center`
 
 ### Method 2: Using PowerShell
 
@@ -105,14 +105,14 @@ logs/                   # Root-level logs (if exists)
 2. Create Basic Task
 3. Action: Start a program
 4. Program: `powershell.exe`
-5. Arguments: `-NoProfile -ExecutionPolicy Bypass -File "C:\path\to\scripts\cleanup_logs_simple.ps1" -Retain 30 -Environment all`
-6. Start in: `C:\path\to\TTRPG_Center`
+5. Arguments: `-NoProfile -ExecutionPolicy Bypass -File "E:\TTRPG_Center\scripts\cleanup_logs_simple.ps1" -Retain 30 -Environment all`
+6. Start in: `E:\TTRPG_Center`
 
 ### Method 3: Direct Python (Advanced)
 
-1. Program: `C:\path\to\TTRPG_Center\.venv\Scripts\python.exe`
+1. Program: `E:\TTRPG_Center\.venv\Scripts\python.exe`
 2. Arguments: `scripts/cleanup_logs.py --retain 30 --env all`
-3. Start in: `C:\path\to\TTRPG_Center`
+3. Start in: `E:\TTRPG_Center`
 
 ## Exit Codes
 

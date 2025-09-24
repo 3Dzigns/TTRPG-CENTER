@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "generated_at": "2025-09-22T22:25:17.706308",
+    "generator_version": "1.0.0",
+    "baseline_type": "system_configuration",
+    "checksum": "fac5897c4a0ec4617867278c21ec3de00db9f6d63b7e4e4deaa3819686cc8b16"
+  },
+  "environment": {
+    "isolation_verified": true,
+    "port_assignments": {
+      "dev": 8000,
+      "test": 8181,
+      "prod": 8282
+    },
+    "directory_structure": [
+      "env/dev/code",
+      "env/dev/config",
+      "env/dev/data",
+      "env/dev/logs",
+      "env/test/code",
+      "env/test/config",
+      "env/test/data",
+      "env/test/logs",
+      "env/prod/code",
+      "env/prod/config",
+      "env/prod/data",
+      "env/prod/logs"
+    ]
+  },
+  "ingestion_pipeline": {
+    "pass_a_requirements": {
+      "input_format": "pdf",
+      "output_format": "chunked_text",
+      "tool": "unstructured.io",
+      "min_chunk_size": 100,
+      "max_chunk_size": 2000
+    },
+    "pass_b_requirements": {
+      "input_format": "chunked_text",
+      "output_format": "enriched_content",
+      "tool": "haystack",
+      "dictionary_updates": true,
+      "metadata_extraction": true
+    },
+    "pass_c_requirements": {
+      "input_format": "enriched_content",
+      "output_format": "graph_structure",
+      "tool": "llamaindex",
+      "relationship_mapping": true,
+      "vector_embeddings": true
+    }
+  },
+  "rag_system": {
+    "query_classification": {
+      "response_time_p95": 150,
+      "accuracy_threshold": 0.85
+    },
+    "retrieval_policies": [
+      "vector_similarity",
+      "metadata_filtering",
+      "graph_traversal",
+      "hybrid_ranking"
+    ],
+    "model_routing": {
+      "simple_queries": "gpt-3.5-turbo",
+      "complex_queries": "gpt-4",
+      "code_queries": "claude-3",
+      "creative_queries": "gpt-4"
+    }
+  },
+  "performance_thresholds": {
+    "search_response_time": 2000,
+    "ingestion_throughput": 10,
+    "query_classification_time": 150,
+    "ui_load_time": 3000,
+    "api_response_time": 1000
+  }
+}
