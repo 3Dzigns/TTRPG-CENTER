@@ -238,9 +238,10 @@ test-results/
 .pytest_tmp/
 .benchmarks/
 
-# Claude tasks
+# Claude tasks and settings
 .claude/tasks/active/
 .claude/tasks/completed/
+.claude/settings.local.json
 
 # Claude documentation and analysis reports
 claudedocs/
