@@ -64,8 +64,9 @@ def main():
         env_config = config_manager.get_environment_config()
 
         key_configs = [
-            "environment", "base_port", "data_path", "logs_path",
-            "artifacts_path", "main_app_url", "admin_api_url"
+            "environment", "base_port", "code_path", "data_path", "logs_path",
+            "artifacts_path", "uploads_path", "cache_path", "ssl_path",
+            "admin_api_url", "user_api_url", "ingest_service_url", "orchestrator_url", "test_runner_url"
         ]
 
         for key in key_configs:
@@ -117,7 +118,7 @@ def main():
         print("Service URL Validation:")
         print("-" * 40)
 
-        services = ["orchestrator", "admin_api", "user_api", "ingest"]
+        services = ["orchestrator", "admin_api", "user_api", "ingest", "test_runner"]
         for service in services:
             try:
                 url = config_manager.get_service_url(service)

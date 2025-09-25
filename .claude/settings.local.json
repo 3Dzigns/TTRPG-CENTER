@@ -15,7 +15,10 @@
       "Bash(chmod:*)",
       "Bash(del test_external_integration.py)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(bandit:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)"
     ]
   }
 }

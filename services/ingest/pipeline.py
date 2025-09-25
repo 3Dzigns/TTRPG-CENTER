@@ -1,24 +1,32 @@
 """
 Ingest Service Pipeline
 
-MVP v2 Pass 0→G Pipeline Implementation
-Coordinates execution of all ingestion passes with proper error handling and artifacts.
+MVP v2 Pass 0-G pipeline implementation.
+Coordinates execution of all ingestion passes with structured manifests and
+artifact bookkeeping.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from src_common.logging import get_logger
 from src_common.environment_isolation import get_environment_validator
-
-# Import all pipeline passes
-from src_common.pass_0_preflight import run_preflight_checks, create_preflight_manifest
+from src_common.ingestion.manifest_utils import (
+    create_base_manifest,
+    dataclass_to_dict,
+    compute_artifact_metadata,
+    gather_tool_versions,
+    persist_manifest,
+    utc_now,
+    isoformat,
+)
+from src_common.pass_0_preflight import run_preflight_checks
 from src_common.pass_a_toc_parser import process_pass_a
 from src_common.pass_b_logical_splitter import process_pass_b
 from src_common.pass_c_extraction import process_pass_c
@@ -32,332 +40,299 @@ logger = get_logger(__name__)
 
 class PipelineError(Exception):
     """Pipeline execution error."""
-    pass
 
 
 class IngestionPipeline:
-    """
-    MVP v2 Pass 0→G Ingestion Pipeline.
-
-    Coordinates execution of all passes with proper artifact management
-    and error recovery.
-    """
+    """MVP v2 Pass 0?G ingestion pipeline coordinator."""
 
     def __init__(self, job_id: str, source_file: Path, env_root: Path):
         self.job_id = job_id
         self.source_file = source_file
         self.env_root = env_root
+        self.env_validator = get_environment_validator()
+        self.environment = self.env_validator.current_env
         self.job_dir = env_root / "artifacts" / job_id
-        self.manifest: Dict[str, Any] = {}
-        self.current_pass = ""
+        self.manifest_path = self.job_dir / "manifest.json"
+        self.tool_versions = gather_tool_versions()
+        self.manifest = create_base_manifest(job_id, self.environment, source_file, self.tool_versions)
+        self.current_pass: str = ""
+        self._artifact_index: set[str] = set()
+        self._pipeline_clock: Optional[float] = None
 
     async def execute(self) -> Dict[str, Any]:
-        """
-        Execute complete Pass 0→G pipeline.
-
-        Returns:
-            Final manifest with all pass results
-
-        Raises:
-            PipelineError: If any pass fails critically
-        """
-        logger.info(f"Starting Pass 0→G pipeline for job {self.job_id}")
+        """Execute full Pass 0?G pipeline and return manifest."""
+        logger.info("Starting ingestion pipeline", extra={"job_id": self.job_id})
+        self.job_dir.mkdir(parents=True, exist_ok=True)
+        self._pipeline_clock = time.perf_counter()
+        self._write_manifest()
 
         try:
-            # Create job directory
-            self.job_dir.mkdir(parents=True, exist_ok=True)
-
-            # Pass 0: Preflight & De-dup
             await self._run_pass_0()
-
-            # Check if we should skip due to duplicate
-            if self.manifest.get("status") == "skipped":
-                logger.info(f"Job {self.job_id} skipped due to duplicate content")
+            if self.manifest["status"] == "skipped":
+                self._finalize_run(status="skipped")
+                self._write_manifest()
                 return self.manifest
 
-            # Pass A: TOC & Dictionary Seed
             await self._run_pass_a()
-
-            # Pass B: Fast Split (≤10 MB parts)
             await self._run_pass_b()
-
-            # Pass C: Extraction (Unstructured.io)
             await self._run_pass_c()
-
-            # Pass D: Normalize + Embeddings (Haystack)
             await self._run_pass_d()
-
-            # Pass E: Graph Compile (LlamaIndex)
             await self._run_pass_e()
-
-            # Pass F: Validation & Manifest
             await self._run_pass_f()
-
-            # Pass G: HGRN Consistency Check
             await self._run_pass_g()
 
-            # Final manifest update
-            self.manifest["status"] = "completed"
-            self.manifest["completed_at"] = datetime.utcnow().isoformat()
-            self.manifest["pipeline_version"] = "mvp_v2_pass_0_g"
-
-            # Write final manifest
-            await self._write_manifest()
-
-            logger.info(f"Pipeline completed successfully for job {self.job_id}")
+            self._finalize_run(status="completed")
+            self._write_manifest()
+            logger.info("Pipeline completed", extra={"job_id": self.job_id})
             return self.manifest
 
-        except Exception as e:
-            logger.error(f"Pipeline failed for job {self.job_id}: {str(e)}")
-            self.manifest["status"] = "failed"
-            self.manifest["error"] = str(e)
-            self.manifest["failed_at"] = datetime.utcnow().isoformat()
-            self.manifest["failed_pass"] = self.current_pass
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Pipeline failed", extra={"job_id": self.job_id, "error": str(exc)})
+            self._record_pipeline_failure(exc)
+            self._finalize_run(status="failed")
+            self._write_manifest()
+            raise PipelineError(f"Pipeline execution failed: {exc}") from exc
 
-            await self._write_manifest()
-            raise PipelineError(f"Pipeline execution failed: {str(e)}")
+    # ------------------------------------------------------------------
+    # Pass helpers
 
     async def _run_pass_0(self) -> None:
-        """Run Pass 0: Preflight & De-dup."""
         self.current_pass = "pass_0_preflight"
-        logger.info(f"Running Pass 0: Preflight & De-dup for {self.source_file}")
+        started_at = utc_now()
+        timer = time.perf_counter()
+        logger.info("Pass 0: preflight start", extra={"job_id": self.job_id})
 
-        try:
-            # Run preflight checks
-            preflight_result = run_preflight_checks(self.source_file)
+        preflight_result = run_preflight_checks(self.source_file)
+        duration_ms = int((time.perf_counter() - timer) * 1000)
 
-            if preflight_result.should_skip:
-                # Create skip manifest and exit pipeline
-                self.manifest = {
-                    "job_id": self.job_id,
-                    "status": "skipped",
-                    "reason": preflight_result.reason,
-                    "source_file": str(self.source_file),
-                    "source_file_sha": preflight_result.file_sha,
-                    "source_page_count": preflight_result.page_count,
-                    "existing_job_id": preflight_result.existing_job_id,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "pass_0_preflight": {
-                        "skipped": True,
-                        "reason": preflight_result.reason
-                    }
-                }
-                return
+        pass_details: Dict[str, Any] = {
+            "file_sha": preflight_result.file_sha,
+            "page_count": preflight_result.page_count,
+            "duplicate": preflight_result.should_skip,
+            "reason": preflight_result.reason,
+        }
 
-            # Create initial manifest with preflight results
-            self.manifest = create_preflight_manifest(
-                self.job_id, self.source_file, preflight_result, self.env_root
-            )
+        self.manifest["source"].update(
+            {
+                "file_sha": preflight_result.file_sha,
+                "page_count": preflight_result.page_count,
+            }
+        )
 
-            logger.info(f"Pass 0 completed: SHA={preflight_result.file_sha[:12]}..., pages={preflight_result.page_count}")
+        if preflight_result.should_skip:
+            entry = self._build_pass_entry("skipped", started_at, duration_ms, pass_details, [])
+            self.manifest["passes"][self.current_pass] = entry
+            self.manifest["status"] = "skipped"
+            self.manifest["skip_reason"] = preflight_result.reason or "duplicate_content"
+            self.manifest["pipeline"]["completed_at"] = isoformat(utc_now())
+            self.manifest["run_summary"]["passes_completed"] = 0
+            self._write_manifest()
+            logger.info("Preflight detected duplicate content; skipping pipeline", extra={"job_id": self.job_id})
+            return
 
-        except Exception as e:
-            logger.error(f"Pass 0 failed: {str(e)}")
-            raise PipelineError(f"Pass 0 failed: {str(e)}")
+        entry = self._build_pass_entry("completed", started_at, duration_ms, pass_details, [])
+        self.manifest["passes"][self.current_pass] = entry
+        self._write_manifest()
+        logger.info(
+            "Preflight completed",
+            extra={"job_id": self.job_id, "sha": preflight_result.file_sha, "pages": preflight_result.page_count},
+        )
 
     async def _run_pass_a(self) -> None:
-        """Run Pass A: TOC & Dictionary Seed."""
-        self.current_pass = "pass_a_toc"
-        logger.info(f"Running Pass A: TOC & Dictionary Seed")
-
-        try:
-            # Copy source file to job directory
-            job_source = self.job_dir / self.source_file.name
-            shutil.copy2(self.source_file, job_source)
-
-            # Run Pass A
-            result = process_pass_a(job_source, self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_a_toc"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "sections_extracted": len(result.get("sections", [])),
-                "dictionary_entries_seeded": result.get("dictionary_entries_seeded", 0),
-                "artifacts": ["toc_sections.json", "dictionary.seed.json"]
-            }
-
-            logger.info(f"Pass A completed: {len(result.get('sections', []))} sections extracted")
-
-        except Exception as e:
-            logger.error(f"Pass A failed: {str(e)}")
-            raise PipelineError(f"Pass A failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_a_toc",
+            executor=lambda: process_pass_a(
+                self.job_dir / self.source_file.name,
+                self.job_dir,
+                self.job_id,
+                self.environment,
+                force_dict_init=False,
+            ),
+            setup=self._prepare_job_source,
+        )
 
     async def _run_pass_b(self) -> None:
-        """Run Pass B: Fast Split (≤10 MB parts)."""
-        self.current_pass = "pass_b_split"
-        logger.info(f"Running Pass B: Fast Split")
-
-        try:
-            job_source = self.job_dir / self.source_file.name
-            result = process_pass_b(job_source, self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_b_split"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "split_required": result.get("split_required", False),
-                "parts_created": result.get("parts_created", 0),
-                "total_size_mb": result.get("total_size_mb", 0),
-                "artifacts": result.get("artifacts", [])
-            }
-
-            logger.info(f"Pass B completed: split_required={result.get('split_required')}, parts={result.get('parts_created', 0)}")
-
-        except Exception as e:
-            logger.error(f"Pass B failed: {str(e)}")
-            raise PipelineError(f"Pass B failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_b_split",
+            executor=lambda: process_pass_b(
+                self.job_dir / self.source_file.name,
+                self.job_dir,
+                self.job_id,
+                env=self.environment,
+            ),
+        )
 
     async def _run_pass_c(self) -> None:
-        """Run Pass C: Extraction (Unstructured.io)."""
-        self.current_pass = "pass_c_extraction"
-        logger.info(f"Running Pass C: Extraction")
-
-        try:
-            job_source = self.job_dir / self.source_file.name
-            result = process_pass_c(job_source, self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_c_extraction"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "chunks_extracted": result.get("chunks_extracted", 0),
-                "ocr_pages_processed": result.get("ocr_pages_processed", 0),
-                "dictionary_proposals": result.get("dictionary_proposals", 0),
-                "artifacts": ["chunks.jsonl", "dict_delta.passC.json"]
-            }
-
-            logger.info(f"Pass C completed: {result.get('chunks_extracted', 0)} chunks extracted")
-
-        except Exception as e:
-            logger.error(f"Pass C failed: {str(e)}")
-            raise PipelineError(f"Pass C failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_c_extraction",
+            executor=lambda: process_pass_c(
+                self.job_dir / self.source_file.name,
+                self.job_dir,
+                self.job_id,
+                env=self.environment,
+            ),
+        )
 
     async def _run_pass_d(self) -> None:
-        """Run Pass D: Normalize + Embeddings (Haystack)."""
-        self.current_pass = "pass_d_embeddings"
-        logger.info(f"Running Pass D: Normalize + Embeddings")
-
-        try:
-            result = process_pass_d(self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_d_embeddings"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "chunks_processed": result.get("chunks_processed", 0),
-                "vectors_upserted": result.get("vectors_upserted", 0),
-                "dictionary_proposals": result.get("dictionary_proposals", 0),
-                "artifacts": ["dict_delta.passD.json"]
-            }
-
-            logger.info(f"Pass D completed: {result.get('vectors_upserted', 0)} vectors upserted")
-
-        except Exception as e:
-            logger.error(f"Pass D failed: {str(e)}")
-            raise PipelineError(f"Pass D failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_d_embeddings",
+            executor=lambda: process_pass_d(
+                self.job_dir,
+                self.job_id,
+                env=self.environment,
+            ),
+        )
 
     async def _run_pass_e(self) -> None:
-        """Run Pass E: Graph Compile (LlamaIndex)."""
-        self.current_pass = "pass_e_graph"
-        logger.info(f"Running Pass E: Graph Compile")
-
-        try:
-            result = process_pass_e(self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_e_graph"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "nodes_created": result.get("nodes_created", 0),
-                "edges_created": result.get("edges_created", 0),
-                "dictionary_proposals": result.get("dictionary_proposals", 0),
-                "artifacts": ["graph.json", "dict_delta.passE.json"]
-            }
-
-            logger.info(f"Pass E completed: {result.get('nodes_created', 0)} nodes, {result.get('edges_created', 0)} edges")
-
-        except Exception as e:
-            logger.error(f"Pass E failed: {str(e)}")
-            raise PipelineError(f"Pass E failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_e_graph",
+            executor=lambda: process_pass_e(
+                self.job_dir,
+                self.job_id,
+                env=self.environment,
+            ),
+        )
 
     async def _run_pass_f(self) -> None:
-        """Run Pass F: Validation & Manifest."""
-        self.current_pass = "pass_f_validation"
-        logger.info(f"Running Pass F: Validation & Manifest")
-
-        try:
-            result = process_pass_f(self.job_dir, self.job_id)
-
-            # Update manifest
-            self.manifest["pass_f_validation"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "integrity_checks_passed": result.get("integrity_checks_passed", 0),
-                "dictionary_deltas_merged": result.get("dictionary_deltas_merged", False),
-                "checksums_verified": result.get("checksums_verified", True),
-                "artifacts": ["dict_delta.all.json", "manifest.json"]
-            }
-
-            logger.info(f"Pass F completed: integrity checks passed")
-
-        except Exception as e:
-            logger.error(f"Pass F failed: {str(e)}")
-            raise PipelineError(f"Pass F failed: {str(e)}")
+        self._run_sync_pass(
+            pass_name="pass_f_validation",
+            executor=lambda: process_pass_f(
+                self.job_dir,
+                self.job_id,
+                env=self.environment,
+            ),
+        )
 
     async def _run_pass_g(self) -> None:
-        """Run Pass G: HGRN Consistency Check."""
-        self.current_pass = "pass_g_hgrn"
-        logger.info(f"Running Pass G: HGRN Consistency Check")
+        self._run_sync_pass(
+            pass_name="pass_g_hgrn",
+            executor=lambda: run_hgrn_consistency_check(
+                self.job_dir,
+                env=self.environment,
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+
+    def _run_sync_pass(
+        self,
+        pass_name: str,
+        executor,
+        setup=None,
+    ) -> None:
+        """Execute a synchronous pass and record manifest metadata."""
+        self.current_pass = pass_name
+        started_at = utc_now()
+        timer = time.perf_counter()
+        logger.info("Pass start", extra={"job_id": self.job_id, "pass": pass_name})
 
         try:
-            report, delta, actions = run_hgrn_consistency_check(self.job_dir)
+            if setup:
+                setup()
+            result = executor()
+            duration_ms = int((time.perf_counter() - timer) * 1000)
+            artifacts = getattr(result, "artifacts", None) if result is not None else None
+            self.manifest["passes"][pass_name] = self._build_pass_entry(
+                status="completed",
+                started_at=started_at,
+                duration_ms=duration_ms,
+                details=dataclass_to_dict(result),
+                artifacts=artifacts,
+                pass_name=pass_name,
+            )
+            self._write_manifest()
+            logger.info("Pass completed", extra={"job_id": self.job_id, "pass": pass_name, "duration_ms": duration_ms})
+        except Exception as exc:  # noqa: BLE001
+            duration_ms = int((time.perf_counter() - timer) * 1000)
+            self.manifest["passes"][pass_name] = self._build_pass_entry(
+                status="failed",
+                started_at=started_at,
+                duration_ms=duration_ms,
+                details={"error": str(exc)},
+                artifacts=[],
+                pass_name=pass_name,
+            )
+            self.manifest["status"] = "failed"
+            self.manifest["failed_pass"] = pass_name
+            self._write_manifest()
+            logger.error("Pass failed", extra={"job_id": self.job_id, "pass": pass_name, "error": str(exc)})
+            raise
 
-            # Update manifest
-            self.manifest["pass_g_hgrn"] = {
-                "completed_at": datetime.utcnow().isoformat(),
-                "issues_found": report["hgrn_consistency_report"]["total_issues"],
-                "critical_issues": report["hgrn_consistency_report"]["severity_breakdown"]["critical"],
-                "proposed_changes": delta["pass_g_hgrn_consistency"]["change_count"],
-                "recommended_actions": actions["hgrn_actions"]["action_count"],
-                "artifacts": ["hgrn.report.json", "dict_delta.passG.json", "hgrn.actions.json"]
-            }
+    def _prepare_job_source(self) -> None:
+        """Ensure the source PDF is present in the job directory."""
+        target = self.job_dir / self.source_file.name
+        if not target.exists():
+            shutil.copy2(self.source_file, target)
 
-            logger.info(f"Pass G completed: {report['hgrn_consistency_report']['total_issues']} issues found")
+    def _build_pass_entry(
+        self,
+        status: str,
+        started_at: datetime,
+        duration_ms: int,
+        details: Dict[str, Any],
+        artifacts,
+        pass_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        completed_at = utc_now()
+        artifact_meta = compute_artifact_metadata(self.job_dir, artifacts or [], pass_name or self.current_pass)
+        self._register_artifacts(artifact_meta)
+        return {
+            "status": status,
+            "started_at": isoformat(started_at),
+            "completed_at": isoformat(completed_at),
+            "duration_ms": duration_ms,
+            "details": details,
+            "artifacts": artifact_meta,
+        }
 
-        except Exception as e:
-            logger.error(f"Pass G failed: {str(e)}")
-            raise PipelineError(f"Pass G failed: {str(e)}")
+    def _register_artifacts(self, artifacts: List[Dict[str, Any]]) -> None:
+        for artifact in artifacts:
+            key = artifact["path"]
+            if key in self._artifact_index:
+                continue
+            self._artifact_index.add(key)
+            self.manifest["artifacts"].append(artifact)
 
-    async def _write_manifest(self) -> None:
-        """Write updated manifest to disk."""
-        manifest_path = self.job_dir / "manifest.json"
-        with open(manifest_path, "w") as f:
-            json.dump(self.manifest, f, indent=2)
+    def _record_pipeline_failure(self, exc: Exception) -> None:
+        self.manifest["status"] = "failed"
+        self.manifest["error"] = str(exc)
+        if self.current_pass:
+            self.manifest["failed_pass"] = self.current_pass
+
+    def _finalize_run(self, status: str) -> None:
+        completed = utc_now()
+        if self._pipeline_clock is not None:
+            total_ms = int((time.perf_counter() - self._pipeline_clock) * 1000)
+            self.manifest["run_summary"]["total_duration_ms"] = total_ms
+        self.manifest["run_summary"]["passes_completed"] = sum(
+            1 for entry in self.manifest["passes"].values() if entry["status"] == "completed"
+        )
+        self.manifest["run_summary"]["passes_failed"] = sum(
+            1 for entry in self.manifest["passes"].values() if entry["status"] == "failed"
+        )
+        self.manifest["pipeline"]["completed_at"] = isoformat(completed)
+        self.manifest["status"] = status
+        self.manifest["completed_at"] = isoformat(completed)
+
+    def _write_manifest(self) -> None:
+        persist_manifest(self.manifest_path, self.manifest)
 
 
 async def run_ingestion_pipeline(job_id: str, source_file: Path) -> Dict[str, Any]:
-    """
-    Run complete ingestion pipeline for a document.
-
-    Args:
-        job_id: Unique job identifier
-        source_file: Path to source document
-
-    Returns:
-        Final pipeline manifest
-
-    Raises:
-        PipelineError: If pipeline execution fails
-    """
-    # Get environment root
+    """Convenience entry point for running the ingestion pipeline."""
     env_validator = get_environment_validator()
     env_root = Path(env_validator.get_environment_root())
-
-    # Create and execute pipeline
     pipeline = IngestionPipeline(job_id, source_file, env_root)
     return await pipeline.execute()
 
 
 if __name__ == "__main__":
-    # Test pipeline
     import sys
+
     if len(sys.argv) > 2:
-        test_job_id = sys.argv[1]
-        test_file = Path(sys.argv[2])
-        result = asyncio.run(run_ingestion_pipeline(test_job_id, test_file))
-        print(f"Pipeline result: {result['status']}")
+        job = sys.argv[1]
+        file_path = Path(sys.argv[2])
+        asyncio.run(run_ingestion_pipeline(job, file_path))
+
+

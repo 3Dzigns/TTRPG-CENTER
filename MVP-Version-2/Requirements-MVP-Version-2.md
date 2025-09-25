@@ -7,7 +7,7 @@ This document defines the phased requirements for the MVP build of the TTRPG Cen
 ## Phase 0 — Environment Isolation & Foundations
 **Goal:** Establish clean, isolated DEV/TEST/PROD environments with Docker and CI.
 
-- **ENV-001:** Each environment runs in its own Docker Compose stack with distinct ports (8000/8181/8282) and isolated volumes under `/env/{env}/{code,config,data,artifacts,logs}`.
+- **ENV-001:** Each environment runs in its own Docker Compose stack with distinct ports (8000/8181/8282) and isolated volumes under `/env/{env}/{code,config,data,logs,artifacts,cache,uploads,ssl}`.
 - **ENV-002:** Immutable builds; promotion = retag/compose update; rollback = previous tag.
 - **ENV-003:** Structured JSON logs; baseline `/healthz` endpoint.
 - **ENV-004:** CI runs Unit + Functional tests per PR; nightly Regression on `main`.

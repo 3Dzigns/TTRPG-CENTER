@@ -101,7 +101,8 @@ class ConfigManager:
             "admin_api": env_config["admin_api_url"],
             "user_api": env_config["user_api_url"],
             "ingest": env_config["ingest_service_url"],
-            "main_app": env_config["main_app_url"],
+            "main_app": env_config.get("admin_api_url"),
+            "test_runner": env_config.get("test_runner_url"),
         }
 
         if service not in service_url_map:

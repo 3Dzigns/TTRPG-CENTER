@@ -1,0 +1,727 @@
+openapi: 3.0.3
+info:
+  title: TTRPG Center - Orchestrator Service API
+  description: |
+    Query classification, hybrid retrieval, and answer orchestration service.
+
+    ## Features
+    - Query Intent Classification (QIC) with sub-150ms p95 response time
+    - Hybrid retrieval combining vector similarity and graph traversal
+    - LLM-powered answer composition with citations
+    - Policy-driven retrieval strategies with hot-reload support
+    - Idempotency support for state-mutating operations
+    - Comprehensive error handling with trace correlation
+
+    ## API Versioning
+    - `/v2/*` endpoints use the latest structured models with full feature support
+    - Legacy endpoints without version prefix are maintained for backward compatibility
+    - All new development should use v2 endpoints
+  version: 2.0.0
+  contact:
+    name: TTRPG Center Development Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8004
+    description: Development environment
+  - url: http://localhost:8185
+    description: Test environment
+  - url: http://localhost:8286
+    description: Production environment
+
+paths:
+  /healthz:
+    get:
+      summary: Health check endpoint
+      description: Returns detailed service status and configuration information
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /classify:
+    post:
+      summary: Classify query intent (Legacy)
+      description: Legacy classification endpoint. Use v2 endpoints for new development.
+      operationId: classifyQueryLegacy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Classification completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassificationResponse'
+        '500':
+          description: Classification failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /v2/retrieve:
+    post:
+      summary: Execute hybrid retrieval
+      description: |
+        Execute hybrid retrieval strategy combining vector similarity search and graph traversal.
+        Strategy selection is based on query classification and configured policies.
+      operationId: retrieveContextV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalRequestPayload'
+      responses:
+        '200':
+          description: Retrieval completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalResponseModel'
+        '500':
+          description: Retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /v2/answer:
+    post:
+      summary: Generate answer with LLM composition
+      description: |
+        Generate comprehensive answer using LLM composition with retrieved context.
+        Supports idempotency via Idempotency-Key header.
+      operationId: generateAnswerV2
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: Optional idempotency key to prevent duplicate processing
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequestPayload'
+      responses:
+        '200':
+          description: Answer generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerResponseModel'
+        '500':
+          description: Answer generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /v2/orchestrate:
+    post:
+      summary: Complete orchestration pipeline
+      description: |
+        Execute complete orchestration: classify → retrieve → answer in one call.
+        This is the recommended endpoint for most use cases.
+      operationId: orchestrateFullPipeline
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: Optional idempotency key to prevent duplicate processing
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryPayload'
+      responses:
+        '200':
+          description: Orchestration completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerResponseModel'
+        '500':
+          description: Orchestration failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /policies:
+    get:
+      summary: Get current policies and registry status
+      description: |
+        Returns current retrieval policies, prompt registry metadata, and configuration status.
+        Useful for debugging and monitoring policy updates.
+      operationId: getPolicies
+      responses:
+        '200':
+          description: Policies retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicySnapshot'
+        '500':
+          description: Policy retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /diagnostics:
+    get:
+      summary: Get detailed diagnostic information
+      description: Service diagnostics including uptime, feature status, and cache metrics
+      operationId: getDiagnostics
+      responses:
+        '200':
+          description: Diagnostics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticInfo'
+
+  /admin/reload:
+    post:
+      summary: Reload configuration (Admin)
+      description: |
+        Force reload of policies and prompt registry. Requires admin privileges.
+        Use this endpoint when configuration files have been updated.
+      operationId: reloadConfiguration
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Configuration reloaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "reloaded"
+                  policy_version:
+                    type: string
+                  prompt_version:
+                    type: string
+                  timestamp:
+                    type: number
+        '401':
+          description: Authentication required
+        '403':
+          description: Insufficient privileges
+        '500':
+          description: Reload failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorDetail:
+      type: object
+      required:
+        - code
+        - message
+        - trace_id
+      properties:
+        code:
+          type: string
+          description: Stable application error code
+          example: "CLASSIFICATION_FAILED"
+        message:
+          type: string
+          description: Human-readable description of the error
+          example: "Classification failed: invalid query format"
+        trace_id:
+          type: string
+          description: Trace identifier for correlation
+          example: "abc123def456"
+
+    ErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - environment
+        - uptime_seconds
+        - hot_reload_enabled
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          example: "healthy"
+        service:
+          type: string
+          example: "orchestrator"
+        version:
+          type: string
+          example: "2.0.0"
+        environment:
+          type: string
+          enum: [dev, test, prod]
+          example: "dev"
+        uptime_seconds:
+          type: number
+          example: 3600.5
+        hot_reload_enabled:
+          type: boolean
+          example: true
+        timestamp:
+          type: string
+          format: date-time
+
+    QueryRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: User query text
+          example: "What is armor class in D&D?"
+        context:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional contextual information
+        user_id:
+          type: string
+          description: User identifier
+          example: "user123"
+        session_id:
+          type: string
+          description: Session identifier
+          example: "sess456"
+
+    QueryPayload:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User query text
+          example: "How do I calculate spell save DC?"
+        context:
+          type: object
+          additionalProperties: true
+          description: Optional contextual information
+        userId:
+          type: string
+          description: User identifier
+        sessionId:
+          type: string
+          description: Session identifier
+        lane:
+          type: string
+          enum: [A, B, C, ALL]
+          description: Content lane filter
+          example: "A"
+
+    ClassificationModel:
+      type: object
+      required:
+        - intent
+        - domain
+        - complexity
+        - needsTools
+        - confidence
+      properties:
+        intent:
+          type: string
+          enum: [fact_lookup, procedural_howto, creative_write, code_help, summarize, multi_hop_reasoning]
+          example: "fact_lookup"
+        domain:
+          type: string
+          enum: [ttrpg_rules, ttrpg_lore, admin, system, unknown]
+          example: "ttrpg_rules"
+        complexity:
+          type: string
+          enum: [low, medium, high]
+          example: "medium"
+        needsTools:
+          type: boolean
+          example: true
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          example: 0.85
+
+    ClassificationResponse:
+      type: object
+      required:
+        - classification
+        - processing_time_ms
+        - timestamp
+      properties:
+        classification:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            intent: "fact_lookup"
+            domain: "ttrpg_rules"
+            complexity: "medium"
+        processing_time_ms:
+          type: number
+          example: 45.2
+        timestamp:
+          type: string
+          format: date-time
+
+    RetrievalRequestPayload:
+      allOf:
+        - $ref: '#/components/schemas/QueryPayload'
+        - type: object
+          properties:
+            classification:
+              $ref: '#/components/schemas/ClassificationModel'
+            topK:
+              type: integer
+              minimum: 1
+              maximum: 50
+              default: 8
+              description: Maximum number of chunks to retrieve
+            similarityThreshold:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              default: 0.65
+              description: Minimum similarity threshold for chunk inclusion
+
+    RetrievedChunk:
+      type: object
+      required:
+        - chunkId
+        - content
+        - score
+        - metadata
+        - source
+        - rank
+      properties:
+        chunkId:
+          type: string
+          description: Unique chunk identifier
+          example: "chunk_001"
+        content:
+          type: string
+          description: Chunk content text
+          example: "Armor Class (AC) represents how difficult it is to land an effective blow..."
+        score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Retrieval relevance score
+          example: 0.92
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Chunk metadata
+          example:
+            source: "PHB"
+            page: "14"
+            section: "Combat"
+        source:
+          type: string
+          description: Human-readable source reference
+          example: "Player's Handbook p.14"
+        rank:
+          type: integer
+          minimum: 1
+          description: Rank in retrieval results
+          example: 1
+
+    RetrievalResponseModel:
+      type: object
+      required:
+        - query
+        - classification
+        - strategyUsed
+        - chunks
+        - totalChunks
+        - processingTimeMs
+        - traceId
+      properties:
+        query:
+          type: string
+          description: Original query
+        classification:
+          $ref: '#/components/schemas/ClassificationModel'
+        strategyUsed:
+          type: object
+          additionalProperties: true
+          description: Retrieval strategy configuration used
+          example:
+            strategy: "hybrid"
+            vector_weight: 0.6
+            graph_weight: 0.4
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievedChunk'
+        totalChunks:
+          type: integer
+          minimum: 0
+          description: Total number of chunks returned
+          example: 5
+        processingTimeMs:
+          type: number
+          description: Processing time in milliseconds
+          example: 127.3
+        traceId:
+          type: string
+          description: Trace identifier for request correlation
+          example: "trace_abc123"
+
+    AnswerRequestPayload:
+      allOf:
+        - $ref: '#/components/schemas/RetrievalRequestPayload'
+        - type: object
+          properties:
+            model:
+              type: string
+              description: Preferred LLM model
+              example: "gpt-4"
+            citations:
+              type: boolean
+              default: true
+              description: Whether to include formatted citations
+
+    Citation:
+      type: object
+      required:
+        - source
+        - label
+      properties:
+        source:
+          type: string
+          description: Source reference
+          example: "Player's Handbook p.189"
+        label:
+          type: string
+          description: Citation label
+          example: "[1]"
+        passage:
+          type: string
+          description: Relevant passage excerpt
+
+    AnswerMetadata:
+      type: object
+      required:
+        - modelUsed
+        - confidence
+        - latencyMs
+        - traceId
+      properties:
+        modelUsed:
+          type: string
+          description: LLM model used for generation
+          example: "gpt-4"
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Answer confidence score
+          example: 0.87
+        latencyMs:
+          type: number
+          description: Total processing latency
+          example: 1250.5
+        provider:
+          type: string
+          description: LLM provider
+          example: "openai"
+        idempotencyKey:
+          type: string
+          description: Idempotency key if provided
+        traceId:
+          type: string
+          description: Request trace identifier
+
+    AnswerResponseModel:
+      type: object
+      required:
+        - answer
+        - citations
+        - retrievedChunks
+        - metadata
+      properties:
+        answer:
+          type: string
+          description: Generated answer text
+          example: "Armor Class (AC) represents how difficult it is to land an effective blow on a target..."
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          description: Source citations
+        retrievedChunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievedChunk'
+          description: Context chunks used for answer generation
+        metadata:
+          $ref: '#/components/schemas/AnswerMetadata'
+
+    PolicySnapshot:
+      type: object
+      required:
+        - retrieval_policies
+        - policy_metadata
+        - prompt_registry_metadata
+      properties:
+        retrieval_policies:
+          type: object
+          additionalProperties: true
+          description: Current retrieval policy configuration
+        policy_metadata:
+          type: object
+          properties:
+            version:
+              type: string
+              description: Policy version hash
+            last_loaded:
+              type: string
+              format: date-time
+              description: Last policy load timestamp
+            hot_reload_enabled:
+              type: boolean
+              description: Whether hot reload is enabled
+        prompt_registry_metadata:
+          type: object
+          properties:
+            version:
+              type: string
+              description: Prompt registry version hash
+            last_loaded:
+              type: string
+              format: date-time
+              description: Last registry load timestamp
+            hot_reload_enabled:
+              type: boolean
+              description: Whether hot reload is enabled
+
+    DiagnosticInfo:
+      type: object
+      required:
+        - service
+        - version
+        - environment
+        - uptime_seconds
+        - timestamp
+        - policy_manager
+        - prompt_registry
+        - idempotency_cache_size
+        - features_enabled
+      properties:
+        service:
+          type: string
+          example: "orchestrator"
+        version:
+          type: string
+          example: "2.0.0"
+        environment:
+          type: string
+          example: "dev"
+        uptime_seconds:
+          type: number
+          example: 3600.5
+        timestamp:
+          type: string
+          format: date-time
+        policy_manager:
+          type: object
+          properties:
+            version:
+              type: string
+            last_loaded:
+              type: string
+              format: date-time
+            hot_reload:
+              type: boolean
+        prompt_registry:
+          type: object
+          properties:
+            version:
+              type: string
+            last_loaded:
+              type: string
+              format: date-time
+            hot_reload:
+              type: boolean
+        idempotency_cache_size:
+          type: integer
+          minimum: 0
+          description: Number of cached idempotency entries
+        features_enabled:
+          type: object
+          properties:
+            hybrid_retrieval:
+              type: boolean
+            answer_composition:
+              type: boolean
+            prompt_registry:
+              type: boolean
+            policy_management:
+              type: boolean
+            idempotency_support:
+              type: boolean
+            error_envelopes:
+              type: boolean
+
+tags:
+  - name: Classification
+    description: Query intent classification endpoints
+  - name: Retrieval
+    description: Hybrid retrieval endpoints
+  - name: Answer Generation
+    description: LLM-powered answer composition
+  - name: Orchestration
+    description: Complete pipeline orchestration
+  - name: Configuration
+    description: Policy and prompt registry management
+  - name: Diagnostics
+    description: Service health and diagnostic endpoints
+  - name: Admin
+    description: Administrative operations

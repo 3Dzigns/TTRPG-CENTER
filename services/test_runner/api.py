@@ -16,18 +16,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status
+from fastapi import Depends, FastAPI, HTTPException, Request, BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src_common.logging import get_logger
 from src_common.config import get_environment_config
+from src_common.security import bootstrap_app_security, record_audit_event, require_roles
 
 logger = get_logger(__name__)
 
 # Test execution models
 class TestRequest(BaseModel):
-    """Test execution request."""
+    """Test execution test_request."""
     test_suite: str = Field(..., description="Test suite to execute (unit|functional|regression|security)")
     test_filter: Optional[str] = Field(None, description="Optional test filter pattern")
     environment: str = Field("test", description="Target environment (dev|test|prod)")
@@ -38,6 +39,8 @@ class TestRequest(BaseModel):
 class TestResult(BaseModel):
     """Test execution result."""
     test_id: str
+    test_suite: str = Field(..., description="Executed test suite identifier")
+    environment: str = Field(..., description="Target environment for execution")
     status: str = Field(..., description="Test status: queued|running|completed|failed|timeout")
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -65,6 +68,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+bootstrap_app_security(app, service_name="test_runner")
 
 # Global test storage (in production, this would be a database)
 _test_storage: Dict[str, TestResult] = {}
@@ -105,21 +110,22 @@ async def health_check():
         }
     )
 
-@app.post("/tests/execute", response_model=TestResult)
+@app.post("/tests/execute", response_model=TestResult, dependencies=[Depends(require_roles("admin"))])
 async def execute_tests(
-    request: TestRequest,
-    background_tasks: BackgroundTasks
+    test_request: TestRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request,
 ):
     """Execute test suite in external test runner."""
 
     try:
         # Generate unique test ID
         test_id = str(uuid.uuid4())
-        logger.info(f"Starting test execution {test_id} for suite: {request.test_suite}")
+        logger.info(f"Starting test execution {test_id} for suite: {test_request.test_suite}")
 
         # Validate test suite
         valid_suites = ["unit", "functional", "regression", "security", "integration", "e2e"]
-        if request.test_suite not in valid_suites:
+        if test_request.test_suite not in valid_suites:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid test suite. Must be one of: {', '.join(valid_suites)}"
@@ -128,6 +134,8 @@ async def execute_tests(
         # Create test result
         test_result = TestResult(
             test_id=test_id,
+            test_suite=test_request.test_suite,
+            environment=test_request.environment,
             status="queued",
             started_at=datetime.utcnow().isoformat()
         )
@@ -138,10 +146,21 @@ async def execute_tests(
         background_tasks.add_task(
             run_test_suite_async,
             test_id,
-            request
+            test_request
         )
 
         logger.info(f"Test execution {test_id} queued successfully")
+
+        await record_audit_event(
+            http_request,
+            {
+                "event": "runner.execute",
+                "test_id": test_id,
+                "suite": test_request.test_suite,
+                "environment": test_request.environment,
+            },
+        )
+
         return test_result
 
     except Exception as e:
@@ -151,7 +170,7 @@ async def execute_tests(
             detail=f"Failed to start test execution: {str(e)}"
         )
 
-@app.get("/tests/{test_id}", response_model=TestResult)
+@app.get("/tests/{test_id}", response_model=TestResult, dependencies=[Depends(require_roles("admin"))])
 async def get_test_result(test_id: str):
     """Get test execution result."""
 
@@ -163,7 +182,7 @@ async def get_test_result(test_id: str):
 
     return _test_storage[test_id]
 
-@app.get("/tests/{test_id}/status", response_model=TestStatus)
+@app.get("/tests/{test_id}/status", response_model=TestStatus, dependencies=[Depends(require_roles("admin"))])
 async def get_test_status(test_id: str):
     """Get test execution status."""
 
@@ -192,7 +211,7 @@ async def get_test_status(test_id: str):
         logs_available=bool(result.stdout or result.stderr)
     )
 
-@app.get("/tests/{test_id}/logs")
+@app.get("/tests/{test_id}/logs", dependencies=[Depends(require_roles("admin"))])
 async def get_test_logs(test_id: str):
     """Get test execution logs."""
 
@@ -212,13 +231,16 @@ async def get_test_logs(test_id: str):
         "updated_at": datetime.utcnow().isoformat()
     }
 
-@app.get("/tests", response_model=List[TestResult])
+@app.get("/tests", response_model=List[TestResult], dependencies=[Depends(require_roles("admin"))])
 async def list_tests():
     """List all test executions."""
     return list(_test_storage.values())
 
-@app.delete("/tests/{test_id}")
-async def cancel_test(test_id: str):
+@app.delete("/tests/{test_id}", dependencies=[Depends(require_roles("admin"))])
+async def cancel_test(
+    test_id: str,
+    http_request: Request,
+):
     """Cancel running test execution."""
 
     if test_id not in _test_storage:
@@ -245,9 +267,17 @@ async def cancel_test(test_id: str):
         _test_storage[test_id].completed_at = datetime.utcnow().isoformat()
 
     logger.info(f"Test execution {test_id} cancelled")
+
+    await record_audit_event(
+        http_request,
+        {
+            "event": "runner.cancel",
+            "test_id": test_id,
+        },
+    )
     return {"message": f"Test {test_id} cancelled successfully"}
 
-async def run_test_suite_async(test_id: str, request: TestRequest):
+async def run_test_suite_async(test_id: str, test_request: TestRequest):
     """Run test suite asynchronously."""
 
     try:
@@ -271,15 +301,15 @@ async def run_test_suite_async(test_id: str, request: TestRequest):
             "e2e": "tests/e2e"
         }
 
-        test_path = test_paths.get(request.test_suite, f"tests/{request.test_suite}")
+        test_path = test_paths.get(test_request.test_suite, f"tests/{test_request.test_suite}")
         cmd.append(test_path)
 
         # Add test filter if specified
-        if request.test_filter:
-            cmd.extend(["-k", request.test_filter])
+        if test_request.test_filter:
+            cmd.extend(["-k", test_request.test_filter])
 
         # Add parallel execution
-        if request.parallel:
+        if test_request.parallel:
             cmd.extend(["-n", "auto"])  # pytest-xdist for parallel execution
 
         # Add output options
@@ -306,7 +336,7 @@ async def run_test_suite_async(test_id: str, request: TestRequest):
 
         # Wait for completion with timeout
         try:
-            stdout, stderr = process.communicate(timeout=request.timeout_seconds)
+            stdout, stderr = process.communicate(timeout=test_request.timeout_seconds)
             exit_code = process.returncode
         except subprocess.TimeoutExpired:
             process.kill()

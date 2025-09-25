@@ -73,10 +73,14 @@ class TestEnvironmentValidator:
 
         assert config["environment"] == "dev"
         assert config["base_port"] == 8000
-        assert config["data_path"] == "env/dev/data"
-        assert config["logs_path"] == "env/dev/logs"
-        assert config["artifacts_path"] == "env/dev/artifacts"
-        assert config["main_app_url"] == "http://localhost:8000"
+        assert Path(config["data_path"]) == Path("env/dev/data")
+        assert Path(config["logs_path"]) == Path("env/dev/logs")
+        assert Path(config["artifacts_path"]) == Path("env/dev/artifacts")
+        assert Path(config["code_path"]) == Path("env/dev/code")
+        assert Path(config["uploads_path"]) == Path("env/dev/uploads")
+        assert Path(config["cache_path"]) == Path("env/dev/cache")
+        assert config["test_runner_url"] == "http://localhost:8095"
+        assert config["main_app_url"] == "http://localhost:8001"
         assert config["admin_api_url"] == "http://localhost:8001"
 
     @patch.dict(os.environ, {"TARGET_ENV": "test"})
@@ -87,7 +91,14 @@ class TestEnvironmentValidator:
 
         assert config["environment"] == "test"
         assert config["base_port"] == 8181
-        assert config["main_app_url"] == "http://localhost:8181"
+        assert Path(config["code_path"]) == Path("env/test/code")
+        assert Path(config["data_path"]) == Path("env/test/data")
+        assert Path(config["logs_path"]) == Path("env/test/logs")
+        assert Path(config["artifacts_path"]) == Path("env/test/artifacts")
+        assert Path(config["uploads_path"]) == Path("env/test/uploads")
+        assert Path(config["cache_path"]) == Path("env/test/cache")
+        assert config["test_runner_url"] == "http://localhost:8195"
+        assert config["main_app_url"] == "http://localhost:8182"
         assert config["admin_api_url"] == "http://localhost:8182"
 
 
@@ -222,6 +233,12 @@ class TestConfigManager:
         admin_api_url = config_manager.get_service_url("admin_api")
         assert admin_api_url == "http://localhost:8001"
 
+        test_runner_url = config_manager.get_service_url("test_runner")
+        assert test_runner_url == "http://localhost:8095"
+
+        main_app_alias = config_manager.get_service_url("main_app")
+        assert main_app_alias == admin_api_url
+
     @patch.dict(os.environ, {"TARGET_ENV": "dev"})
     def test_get_service_url_invalid(self):
         """Test getting invalid service URL raises error."""
@@ -244,7 +261,7 @@ class TestConfigManager:
         config_manager = ConfigManager()
 
         resolved_path = config_manager.validate_path("./data/test.txt")
-        assert "env/dev/data/test.txt" in resolved_path
+        assert Path(resolved_path) == Path("env/dev/data/test.txt")
 
 
 class TestDatabaseConfigValidation:
@@ -261,7 +278,8 @@ class TestDatabaseConfigValidation:
         config_manager = ConfigManager()
         db_config = config_manager.get_database_config()
 
-        assert "dev" in db_config.get("cassandra_keyspace", "")
+        keyspace = db_config.get("cassandra_keyspace") or db_config.get("astradb_keyspace", "")
+        assert "dev" in keyspace
         assert "dev" in db_config.get("mongo_uri", "")
         assert "dev" in db_config.get("redis_url", "")
 
@@ -276,7 +294,8 @@ class TestDatabaseConfigValidation:
         config_manager = ConfigManager()
         db_config = config_manager.get_database_config()
 
-        assert "test" in db_config.get("cassandra_keyspace", "")
+        keyspace = db_config.get("cassandra_keyspace") or db_config.get("astradb_keyspace", "")
+        assert "test" in keyspace
         assert "test" in db_config.get("mongo_uri", "")
         assert "test" in db_config.get("redis_url", "")
 

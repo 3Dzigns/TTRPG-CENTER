@@ -8,18 +8,21 @@ MVP v2 Microservices Architecture
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import uuid
 from typing import Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, status
+import redis.asyncio as redis
+from fastapi import FastAPI, HTTPException, Request, status, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from src_common.logging import get_logger
 from src_common.config import get_environment_config
+from src_common.security import bootstrap_app_security, record_audit_event
 
 
 logger = get_logger(__name__)
@@ -115,42 +118,86 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Global storage (in production, this would be Redis/database)
-_sessions: Dict[str, SessionInfo] = {}
-_plans: Dict[str, PlanResponse] = {}
-_runs: Dict[str, RunStatus] = {}
+bootstrap_app_security(app, service_name="user_api")
+
+# Redis client for session storage
+_redis: Optional[redis.Redis] = None
+
+# Local fallback storage for development
+_local_sessions: Dict[str, SessionInfo] = {}
+_local_plans: Dict[str, PlanResponse] = {}
+_local_runs: Dict[str, RunStatus] = {}
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize service on startup."""
+    global _redis
+
     logger.info("Starting User API Service v2.0.0")
 
     # Load environment configuration
     config = get_environment_config()
     logger.info(f"Loaded configuration for environment: {config.get('environment', 'unknown')}")
 
+    # Initialize Redis connection
+    redis_host = os.getenv("REDIS_HOST", "localhost")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    redis_db = int(os.getenv("REDIS_DB", "0"))
+
+    try:
+        _redis = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+        await _redis.ping()
+        logger.info(f"Redis connection established: {redis_host}:{redis_port}/{redis_db}")
+    except Exception as e:
+        logger.warning(f"Redis connection failed, using local storage: {e}")
+        _redis = None
+
     # Verify orchestrator service connectivity
     await _verify_orchestrator_connection()
+
+    # Add environment-specific cache middleware
+    _setup_cache_headers(config)
 
 
 @app.get("/healthz")
 async def health_check():
     """Health check endpoint."""
-    return JSONResponse(
+    # Count active sessions from Redis or local storage
+    session_count = 0
+    try:
+        if _redis:
+            session_keys = await _redis.keys("session:*")
+            session_count = len(session_keys)
+        else:
+            session_count = len(_local_sessions)
+    except Exception as e:
+        logger.warning(f"Failed to count sessions: {e}")
+
+    health_data = {
+        "status": "healthy",
+        "service": "user_api",
+        "version": "2.0.0",
+        "environment": os.getenv("TARGET_ENV", "dev"),
+        "active_sessions": session_count,
+        "redis_connected": _redis is not None
+    }
+
+    response = JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={
-            "status": "healthy",
-            "service": "user_api",
-            "version": "2.0.0",
-            "environment": os.getenv("TARGET_ENV", "dev"),
-            "active_sessions": len(_sessions)
-        }
+        content=health_data
     )
+
+    # Apply cache headers based on environment
+    _apply_cache_headers(response)
+    return response
 
 
 @app.post("/ask", response_model=AskResponse)
-async def ask_query(request: AskRequest):
+async def ask_query(
+    ask_request: AskRequest,
+    http_request: Request,
+):
     """
     Process user query and return answer.
 
@@ -160,10 +207,10 @@ async def ask_query(request: AskRequest):
     start_time = time.perf_counter()
 
     try:
-        logger.info(f"Processing ask query: {request.query[:50]}...")
+        logger.info(f"Processing ask query: {ask_request.query[:50]}...")
 
         # Get or create session
-        session_id = request.session_id or str(uuid.uuid4())
+        session_id = ask_request.session_id or str(uuid.uuid4())
         session = await _get_or_create_session(session_id)
 
         # Update session activity
@@ -171,8 +218,12 @@ async def ask_query(request: AskRequest):
         session.last_activity_at = datetime.datetime.utcnow().isoformat()
         session.query_count += 1
 
-        # Call orchestrator service for classification and processing
-        orchestrator_response = await _call_orchestrator(request.query, session_id)
+        # Call orchestrator v2 service for complete pipeline
+        orchestrator_response = await _call_orchestrator_v2(
+            ask_request.query,
+            session_id,
+            ask_request.context or {},
+        )
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
@@ -186,6 +237,16 @@ async def ask_query(request: AskRequest):
         )
 
         logger.info(f"Ask query completed in {processing_time_ms:.1f}ms")
+
+        await record_audit_event(
+            http_request,
+            {
+                "event": "user.ask",
+                "session_id": session_id,
+                "latency_ms": round(processing_time_ms, 2),
+                "source_count": len(response.sources),
+            },
+        )
 
         return response
 
@@ -254,8 +315,12 @@ async def ask_query_stream(request: AskRequest):
         )
 
 
-@app.post("/plan", response_model=PlanResponse)
-async def create_plan(request: PlanRequest):
+@app.get("/plan", response_model=PlanResponse)
+async def create_plan(
+    request: str,
+    session_id: Optional[str] = None,
+    complexity_limit: Optional[str] = "medium"
+):
     """
     Generate execution plan for complex request.
 
@@ -263,17 +328,17 @@ async def create_plan(request: PlanRequest):
     """
 
     try:
-        logger.info(f"Creating plan for: {request.request[:50]}...")
+        logger.info(f"Creating plan for: {request[:50]}...")
 
         # Get or create session
-        session_id = request.session_id or str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
         session = await _get_or_create_session(session_id)
 
         # Generate plan ID
         plan_id = str(uuid.uuid4())
 
         # Mock plan generation (would integrate with orchestrator for real planning)
-        steps = _generate_mock_plan_steps(request.request, request.complexity_limit)
+        steps = _generate_mock_plan_steps(request, complexity_limit)
 
         total_duration = sum(step.estimated_duration_seconds for step in steps)
 
@@ -282,11 +347,12 @@ async def create_plan(request: PlanRequest):
             session_id=session_id,
             steps=steps,
             total_estimated_duration_seconds=total_duration,
-            complexity=request.complexity_limit or "medium",
+            complexity=complexity_limit or "medium",
             validated=True
         )
 
-        _plans[plan_id] = plan_response
+        # Store plan in Redis or local storage
+        await _store_plan(plan_response)
 
         logger.info(f"Created plan {plan_id} with {len(steps)} steps ({total_duration}s)")
 
@@ -301,7 +367,10 @@ async def create_plan(request: PlanRequest):
 
 
 @app.post("/run", response_model=RunStatus)
-async def execute_plan(request: RunRequest):
+async def execute_plan(
+    run_request: RunRequest,
+    http_request: Request,
+):
     """
     Execute a validated plan.
 
@@ -309,19 +378,18 @@ async def execute_plan(request: RunRequest):
     """
 
     try:
-        logger.info(f"Starting plan execution: {request.plan_id}")
+        logger.info(f"Starting plan execution: {run_request.plan_id}")
 
         # Validate plan exists
-        if request.plan_id not in _plans:
+        plan = await _get_plan(run_request.plan_id)
+        if not plan:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Plan {request.plan_id} not found"
+                detail=f"Plan {run_request.plan_id} not found"
             )
 
-        plan = _plans[request.plan_id]
-
         # Validate session
-        if request.session_id != plan.session_id:
+        if run_request.session_id != plan.session_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Session mismatch for plan execution"
@@ -333,18 +401,29 @@ async def execute_plan(request: RunRequest):
 
         run_status = RunStatus(
             run_id=run_id,
-            plan_id=request.plan_id,
-            session_id=request.session_id,
+            plan_id=run_request.plan_id,
+            session_id=run_request.session_id,
             status="queued",
             progress=0.0,
             started_at=datetime.datetime.utcnow().isoformat()
         )
 
-        _runs[run_id] = run_status
+        # Store run status
+        await _store_run(run_status)
 
         # Start execution asynchronously
-        if request.execute_all:
+        if run_request.execute_all:
             asyncio.create_task(_execute_plan_steps(run_id, plan))
+
+        await record_audit_event(
+            http_request,
+            {
+                "event": "user.run",
+                "plan_id": run_request.plan_id,
+                "run_id": run_id,
+                "execute_all": run_request.execute_all,
+            },
+        )
 
         return run_status
 
@@ -391,40 +470,64 @@ async def clear_session(session_id: str):
 async def get_run_status(run_id: str):
     """Get execution run status."""
 
-    if run_id not in _runs:
+    run_status = await _get_run(run_id)
+    if not run_status:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Run {run_id} not found"
         )
 
-    return _runs[run_id]
+    return run_status
 
 
 async def _get_or_create_session(session_id: str) -> SessionInfo:
-    """Get existing session or create new one."""
+    """Get existing session or create new one from Redis or local storage."""
 
-    if session_id in _sessions:
-        return _sessions[session_id]
+    try:
+        if _redis:
+            # Try to get from Redis
+            session_data = await _redis.get(f"session:{session_id}")
+            if session_data:
+                session_dict = json.loads(session_data)
+                return SessionInfo(**session_dict)
+        else:
+            # Use local storage
+            if session_id in _local_sessions:
+                return _local_sessions[session_id]
 
-    import datetime
-    now = datetime.datetime.utcnow().isoformat()
+        # Create new session
+        import datetime
+        now = datetime.datetime.utcnow().isoformat()
 
-    session = SessionInfo(
-        session_id=session_id,
-        created_at=now,
-        last_activity_at=now,
-        query_count=0,
-        context={}
-    )
+        session = SessionInfo(
+            session_id=session_id,
+            created_at=now,
+            last_activity_at=now,
+            query_count=0,
+            context={}
+        )
 
-    _sessions[session_id] = session
-    logger.info(f"Created new session: {session_id}")
+        # Store in Redis or local storage
+        await _store_session(session)
+        logger.info(f"Created new session: {session_id}")
 
-    return session
+        return session
+
+    except Exception as e:
+        logger.error(f"Error managing session {session_id}: {e}")
+        # Fallback to in-memory session
+        import datetime
+        return SessionInfo(
+            session_id=session_id,
+            created_at=datetime.datetime.utcnow().isoformat(),
+            last_activity_at=datetime.datetime.utcnow().isoformat(),
+            query_count=0,
+            context={}
+        )
 
 
-async def _call_orchestrator(query: str, session_id: str) -> Dict:
-    """Call orchestrator service for query processing."""
+async def _call_orchestrator_v2(query: str, session_id: str, context: Optional[Dict] = None) -> Dict:
+    """Call orchestrator v2 service for complete pipeline processing."""
 
     try:
         # Get orchestrator service URL
@@ -433,66 +536,60 @@ async def _call_orchestrator(query: str, session_id: str) -> Dict:
 
         port_map = {"dev": 8004, "test": 8185, "prod": 8286}
         orchestrator_port = port_map.get(env_name, 8004)
-
         orchestrator_url = f"http://localhost:{orchestrator_port}"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # First, classify the query
-            classify_response = await client.post(
-                f"{orchestrator_url}/classify",
-                json={"query": query, "session_id": session_id}
-            )
+            # Use the v2 orchestrate endpoint for complete pipeline
+            orchestrate_payload = {
+                "query": query,
+                "userId": session_id,
+                "sessionId": session_id,
+                "context": context or {},
+                "lane": "A"  # Default to Lane A content
+            }
 
-            if classify_response.status_code != 200:
-                raise Exception(f"Classification failed: {classify_response.text}")
-
-            classification_data = classify_response.json()
-            classification = classification_data["classification"]
-
-            # Then retrieve context
-            retrieve_response = await client.post(
-                f"{orchestrator_url}/retrieve",
-                json={
-                    "query": query,
-                    "classification": classification,
-                    "top_k": 8
+            response = await client.post(
+                f"{orchestrator_url}/v2/orchestrate",
+                json=orchestrate_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": str(uuid.uuid4())  # For safe retries
                 }
             )
 
-            if retrieve_response.status_code != 200:
-                raise Exception(f"Retrieval failed: {retrieve_response.text}")
+            if response.status_code != 200:
+                raise Exception(f"Orchestration failed: {response.status_code} - {response.text}")
 
-            retrieval_data = retrieve_response.json()
+            orchestration_data = response.json()
 
-            # Finally, generate answer
-            answer_response = await client.post(
-                f"{orchestrator_url}/answer",
-                json={
-                    "query": query,
-                    "context_chunks": retrieval_data["chunks"],
-                    "classification": classification
-                }
-            )
+            # Extract sources from retrieved chunks
+            sources = []
+            if "retrievedChunks" in orchestration_data:
+                sources = [chunk.get("source", "Unknown") for chunk in orchestration_data["retrievedChunks"]]
 
-            if answer_response.status_code != 200:
-                raise Exception(f"Answer generation failed: {answer_response.text}")
-
-            answer_data = answer_response.json()
+            # Extract confidence from metadata
+            confidence = 0.8  # Default confidence
+            if "metadata" in orchestration_data:
+                confidence = orchestration_data["metadata"].get("confidence", 0.8)
 
             return {
-                "answer": answer_data["answer"],
-                "confidence": answer_data["confidence"],
-                "sources": answer_data["sources_used"],
-                "classification": classification
+                "answer": orchestration_data.get("answer", "I'm not sure how to answer that."),
+                "confidence": confidence,
+                "sources": list(set(sources))[:5],  # Deduplicate and limit to 5 sources
+                "citations": orchestration_data.get("citations", []),
+                "metadata": orchestration_data.get("metadata", {}),
+                "classification": None  # Could extract from metadata if needed
             }
 
     except Exception as e:
-        logger.error(f"Orchestrator call failed: {str(e)}")
+        logger.error(f"Orchestrator v2 call failed: {str(e)}")
         # Return fallback response
         return {
-            "answer": f"I apologize, but I'm having trouble processing your query right now. Error: {str(e)}",
+            "answer": f"I apologize, but I'm having trouble processing your query right now. Please try again later.",
             "confidence": 0.1,
             "sources": [],
+            "citations": [],
+            "metadata": {"error": str(e)},
             "classification": None
         }
 
@@ -554,14 +651,20 @@ async def _execute_plan_steps(run_id: str, plan: PlanResponse):
     """Execute plan steps asynchronously."""
 
     try:
-        run_status = _runs[run_id]
+        run_status = await _get_run(run_id)
+        if not run_status:
+            logger.error(f"Run {run_id} not found for execution")
+            return
+
         run_status.status = "running"
+        await _store_run(run_status)
 
         total_steps = len(plan.steps)
 
         for i, step in enumerate(plan.steps):
             run_status.current_step = step.step_id
             run_status.progress = i / total_steps
+            await _store_run(run_status)  # Update progress in storage
 
             logger.info(f"Executing step {step.step_id}: {step.description}")
 
@@ -581,12 +684,85 @@ async def _execute_plan_steps(run_id: str, plan: PlanResponse):
         run_status.current_step = None
         run_status.completed_at = datetime.datetime.utcnow().isoformat()
 
+        await _store_run(run_status)  # Final update
         logger.info(f"Plan execution {run_id} completed successfully")
 
     except Exception as e:
         logger.error(f"Plan execution {run_id} failed: {str(e)}")
-        run_status.status = "failed"
-        run_status.results["error"] = str(e)
+
+        # Try to update status with error
+        try:
+            run_status = await _get_run(run_id)
+            if run_status:
+                run_status.status = "failed"
+                run_status.results["error"] = str(e)
+                await _store_run(run_status)
+        except:
+            pass  # Don't fail if we can't update error status
+
+
+async def _store_session(session: SessionInfo):
+    """Store session in Redis or local storage."""
+    try:
+        if _redis:
+            # Store in Redis with TTL based on environment
+            config = get_environment_config()
+            env_name = config.get("environment", "dev")
+
+            # Environment-specific TTL settings
+            ttl_map = {"dev": 3600, "test": 300, "prod": 86400}  # 1hr, 5min, 24hr
+            ttl = ttl_map.get(env_name, 3600)
+
+            await _redis.setex(
+                f"session:{session.session_id}",
+                ttl,
+                json.dumps(session.dict())
+            )
+        else:
+            # Store locally
+            _local_sessions[session.session_id] = session
+
+    except Exception as e:
+        logger.error(f"Failed to store session {session.session_id}: {e}")
+
+
+def _setup_cache_headers(config: Dict):
+    """Setup environment-specific cache middleware."""
+    env_name = config.get("environment", "dev")
+
+    @app.middleware("http")
+    async def add_cache_headers(request, call_next):
+        response = await call_next(request)
+
+        # Apply environment-specific cache headers
+        if env_name == "dev":
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        elif env_name == "test":
+            response.headers["Cache-Control"] = "public, max-age=5"
+        elif env_name == "prod":
+            # Allow longer caching in production for static content
+            if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+                response.headers["Cache-Control"] = "public, max-age=3600"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=60"
+
+        return response
+
+
+def _apply_cache_headers(response: Response):
+    """Apply cache headers based on current environment."""
+    config = get_environment_config()
+    env_name = config.get("environment", "dev")
+
+    if env_name == "dev":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    elif env_name == "test":
+        response.headers["Cache-Control"] = "public, max-age=5"
+    else:  # prod
+        response.headers["Cache-Control"] = "public, max-age=60"
 
 
 async def _verify_orchestrator_connection():
@@ -610,6 +786,64 @@ async def _verify_orchestrator_connection():
 
     except Exception as e:
         logger.warning(f"Could not connect to orchestrator service: {str(e)}")
+
+
+async def _store_plan(plan: PlanResponse):
+    """Store plan in Redis or local storage."""
+    try:
+        if _redis:
+            await _redis.setex(
+                f"plan:{plan.plan_id}",
+                3600,  # 1 hour TTL
+                json.dumps(plan.dict())
+            )
+        else:
+            _local_plans[plan.plan_id] = plan
+    except Exception as e:
+        logger.error(f"Failed to store plan {plan.plan_id}: {e}")
+
+
+async def _store_run(run_status: RunStatus):
+    """Store run status in Redis or local storage."""
+    try:
+        if _redis:
+            await _redis.setex(
+                f"run:{run_status.run_id}",
+                7200,  # 2 hour TTL
+                json.dumps(run_status.dict())
+            )
+        else:
+            _local_runs[run_status.run_id] = run_status
+    except Exception as e:
+        logger.error(f"Failed to store run {run_status.run_id}: {e}")
+
+
+async def _get_plan(plan_id: str) -> Optional[PlanResponse]:
+    """Get plan from Redis or local storage."""
+    try:
+        if _redis:
+            plan_data = await _redis.get(f"plan:{plan_id}")
+            if plan_data:
+                return PlanResponse(**json.loads(plan_data))
+        else:
+            return _local_plans.get(plan_id)
+    except Exception as e:
+        logger.error(f"Failed to get plan {plan_id}: {e}")
+    return None
+
+
+async def _get_run(run_id: str) -> Optional[RunStatus]:
+    """Get run status from Redis or local storage."""
+    try:
+        if _redis:
+            run_data = await _redis.get(f"run:{run_id}")
+            if run_data:
+                return RunStatus(**json.loads(run_data))
+        else:
+            return _local_runs.get(run_id)
+    except Exception as e:
+        logger.error(f"Failed to get run {run_id}: {e}")
+    return None
 
 
 if __name__ == "__main__":

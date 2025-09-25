@@ -13,12 +13,14 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src_common.logging import get_logger
 from src_common.config import get_environment_config
+from src_common.auth_models import UserContext
+from src_common.security import bootstrap_app_security, record_audit_event, require_roles
 from .pipeline import run_ingestion_pipeline, PipelineError
 
 
@@ -65,6 +67,8 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+bootstrap_app_security(app, service_name="ingest")
+
 # Global job storage (in production, this would be a database)
 _job_storage: Dict[str, JobStatus] = {}
 
@@ -102,10 +106,11 @@ async def health_check():
     )
 
 
-@app.post("/ingest/upload", response_model=IngestResponse)
+@app.post("/ingest/upload", response_model=IngestResponse, dependencies=[Depends(require_roles("admin"))])
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
-    metadata: Optional[str] = None
+    metadata: Optional[str] = None,
 ):
     """Upload document for processing through the ingestion pipeline."""
 
@@ -164,6 +169,16 @@ async def upload_document(
         # Estimate duration based on file size
         estimated_duration = max(60, int(file_size_mb * 30))  # ~30 seconds per MB
 
+        await record_audit_event(
+            request,
+            {
+                "event": "ingest.upload",
+                "job_id": job_id,
+                "filename": file.filename,
+                "size_mb": round(file_size_mb, 2),
+            },
+        )
+
         return IngestResponse(
             job_id=job_id,
             status="queued",
@@ -179,7 +194,7 @@ async def upload_document(
         )
 
 
-@app.get("/ingest/jobs/{job_id}", response_model=JobStatus)
+@app.get("/ingest/jobs/{job_id}", response_model=JobStatus, dependencies=[Depends(require_roles("admin"))])
 async def get_job_status(job_id: str):
     """Get job status and progress."""
 
@@ -192,7 +207,7 @@ async def get_job_status(job_id: str):
     return _job_storage[job_id]
 
 
-@app.get("/ingest/jobs", response_model=List[JobStatus])
+@app.get("/ingest/jobs", response_model=List[JobStatus], dependencies=[Depends(require_roles("admin"))])
 async def list_jobs():
     """List all ingestion jobs."""
     return list(_job_storage.values())

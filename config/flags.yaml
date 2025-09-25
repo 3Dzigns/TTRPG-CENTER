@@ -50,8 +50,8 @@ performance:
 
 # Security flags
 security:
-  authentication: false  # Not yet implemented
-  authorization: false
+  authentication: true
+  authorization: true
   input_validation: true
   output_sanitization: true
   audit_logging: true
@@ -59,7 +59,7 @@ security:
 # Observability flags
 observability:
   structured_logging: true
-  opentelemetry: false  # To be implemented
+  opentelemetry: true
   metrics_collection: true
   health_checks: true
 

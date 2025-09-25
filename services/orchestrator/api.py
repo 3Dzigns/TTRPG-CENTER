@@ -2,29 +2,45 @@
 Orchestrator Service API
 
 FastAPI service for query classification, retrieval, and orchestration.
-MVP v2 Microservices Architecture
+MVP v2 Microservices Architecture - Task 03 Implementation
 """
 
 from __future__ import annotations
 
 import os
 import time
+import uuid
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src_common.logging import get_logger
 from src_common.config import get_environment_config
-from .classifier import Classification, QueryClassifier
+from src_common.security import bootstrap_app_security, record_audit_event, require_roles
+from src_common.auth_models import UserContext
+from .classifier import Classification
+from .engine import OrchestratorEngine
+from .types import (
+    QueryPayload,
+    RetrievalRequestPayload,
+    AnswerRequestPayload,
+    ClassificationModel,
+    RetrievalResponseModel,
+    AnswerResponseModel,
+    ErrorEnvelope,
+    build_error,
+    HealthStatus,
+)
 
 
 logger = get_logger(__name__)
 
 
+# Legacy compatibility models - kept for backward compatibility
 class QueryRequest(BaseModel):
-    """Query processing request."""
+    """Legacy query processing request."""
 
     query: str = Field(..., min_length=1, max_length=1000)
     context: Optional[Dict[str, str]] = None
@@ -33,113 +49,74 @@ class QueryRequest(BaseModel):
 
 
 class ClassificationResponse(BaseModel):
-    """Query classification response."""
+    """Legacy query classification response."""
 
-    classification: Classification
+    classification: Dict[str, str]
     processing_time_ms: float
     timestamp: str
-
-
-class RetrievalRequest(BaseModel):
-    """Retrieval request with classification."""
-
-    query: str
-    classification: Classification
-    top_k: Optional[int] = Field(8, ge=1, le=50)
-    similarity_threshold: Optional[float] = Field(0.7, ge=0.0, le=1.0)
-
-
-class RetrievalChunk(BaseModel):
-    """Individual retrieved content chunk."""
-
-    chunk_id: str
-    content: str
-    score: float
-    metadata: Dict[str, str]
-    source: str
-
-
-class RetrievalResponse(BaseModel):
-    """Retrieval results response."""
-
-    chunks: List[RetrievalChunk]
-    total_chunks: int
-    strategy_used: str
-    processing_time_ms: float
-
-
-class AnswerRequest(BaseModel):
-    """Answer generation request."""
-
-    query: str
-    context_chunks: List[RetrievalChunk]
-    classification: Classification
-    model: Optional[str] = None
-
-
-class AnswerResponse(BaseModel):
-    """Generated answer response."""
-
-    answer: str
-    confidence: float
-    sources_used: List[str]
-    model_used: str
-    processing_time_ms: float
 
 
 # Initialize FastAPI app
 app = FastAPI(
     title="TTRPG Center - Orchestrator Service",
-    description="Query classification, retrieval, and orchestration",
+    description="Query classification, retrieval, and orchestration with hybrid retrieval pipeline",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Initialize classifier
-classifier = QueryClassifier()
+bootstrap_app_security(app, service_name="orchestrator")
+
+# Initialize orchestrator engine with full hybrid retrieval
+engine = OrchestratorEngine()
+
+# Idempotency key tracking for state-mutating operations
+_idempotency_cache: Dict[str, Dict] = {}
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize service on startup."""
-    logger.info("Starting Orchestrator Service v2.0.0")
+    logger.info("Starting Orchestrator Service v2.0.0 with hybrid retrieval")
 
     # Load environment configuration
     config = get_environment_config()
     logger.info(f"Loaded configuration for environment: {config.get('environment', 'unknown')}")
 
-    # Load policies and prompt templates
-    # TODO: Implement policy and prompt loading from config files
+    # Policies and prompt templates are loaded by OrchestratorEngine
+    logger.info("Policy and prompt registry loaded successfully")
+    logger.info(f"Policy version: {engine.policy_manager.version}")
+    logger.info(f"Prompt registry version: {engine.prompt_registry.version}")
 
 
-@app.get("/healthz")
+@app.get("/healthz", response_model=HealthStatus)
 async def health_check():
-    """Health check endpoint."""
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "status": "healthy",
-            "service": "orchestrator",
-            "version": "2.0.0",
-            "environment": os.getenv("TARGET_ENV", "dev"),
-            "classifier_ready": True
-        }
+    """Health check endpoint with detailed status."""
+    import datetime
+
+    uptime_seconds = time.perf_counter() - engine._started_at
+
+    return HealthStatus(
+        status="healthy",
+        service="orchestrator",
+        version="2.0.0",
+        environment=engine.environment,
+        uptime_seconds=uptime_seconds,
+        hot_reload_enabled=engine.policy_manager.hot_reload,
+        timestamp=datetime.datetime.utcnow()
     )
 
 
 @app.post("/classify", response_model=ClassificationResponse)
 async def classify_query(request: QueryRequest):
     """Classify query intent, domain, and complexity."""
-
     start_time = time.perf_counter()
 
     try:
         logger.info(f"Classifying query: {request.query[:50]}...")
 
-        # Perform classification
-        classification = classifier.classify_query(request.query)
-
+        # Use engine's classifier
+        classification = engine.classifier.classify_query(request.query)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
         import datetime
@@ -159,239 +136,283 @@ async def classify_query(request: QueryRequest):
 
     except Exception as e:
         logger.error(f"Classification error: {str(e)}")
+        error_envelope = build_error("CLASSIFICATION_FAILED", f"Classification failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Classification failed: {str(e)}"
+            detail=error_envelope.model_dump()
         )
 
 
-@app.post("/retrieve", response_model=RetrievalResponse)
-async def retrieve_context(request: RetrievalRequest):
-    """Execute retrieval strategy based on classification."""
-
+@app.post("/v2/retrieve", response_model=RetrievalResponseModel)
+async def retrieve_context_v2(request: RetrievalRequestPayload):
+    """Execute hybrid retrieval strategy based on classification."""
     start_time = time.perf_counter()
 
     try:
         logger.info(f"Retrieving context for: {request.query[:50]}...")
 
-        # Select retrieval strategy based on classification
-        strategy = _select_retrieval_strategy(request.classification)
-        logger.info(f"Using retrieval strategy: {strategy}")
-
-        # Mock retrieval for now (would integrate with vector store, graph, etc.)
-        chunks = _mock_retrieve_chunks(
-            request.query,
-            request.classification,
-            request.top_k,
-            request.similarity_threshold
+        # Execute hybrid retrieval using the engine
+        result = engine.retrieve(
+            query=request.query,
+            classification=request.classification,
+            top_k=request.top_k,
+            lane=request.lane
         )
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
-        response = RetrievalResponse(
-            chunks=chunks,
-            total_chunks=len(chunks),
-            strategy_used=strategy,
-            processing_time_ms=processing_time_ms
-        )
+        logger.info(f"Retrieved {result.total_chunks} chunks using hybrid strategy ({processing_time_ms:.1f}ms)")
 
-        logger.info(f"Retrieved {len(chunks)} chunks using {strategy} ({processing_time_ms:.1f}ms)")
-
-        return response
+        return result
 
     except Exception as e:
         logger.error(f"Retrieval error: {str(e)}")
+        error_envelope = build_error("RETRIEVAL_FAILED", f"Retrieval failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Retrieval failed: {str(e)}"
+            detail=error_envelope.model_dump()
         )
 
 
-@app.post("/answer", response_model=AnswerResponse)
-async def generate_answer(request: AnswerRequest):
-    """Generate answer using context and classification."""
+@app.post("/retrieve")
+async def retrieve_context_legacy(request: QueryRequest):
+    """Legacy retrieval endpoint - redirects to v2."""
+    # Convert legacy request to new format
+    new_request = RetrievalRequestPayload(
+        query=request.query,
+        context=request.context,
+        user_id=request.user_id,
+        session_id=request.session_id
+    )
+    return await retrieve_context_v2(new_request)
 
+
+@app.post("/v2/answer", response_model=AnswerResponseModel)
+async def generate_answer_v2(
+    request: AnswerRequestPayload,
+    http_request: Request,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")
+):
+    """Generate answer using hybrid retrieval and LLM composition."""
     start_time = time.perf_counter()
+    trace_id = str(uuid.uuid4())
 
     try:
-        logger.info(f"Generating answer for: {request.query[:50]}...")
+        logger.info(f"Generating answer for: {request.query[:50]}...", extra={"trace_id": trace_id})
 
-        # Select model based on classification
-        model = _select_model(request.classification, request.model)
-        logger.info(f"Using model: {model}")
+        # Check idempotency cache for duplicate requests
+        if idempotency_key and idempotency_key in _idempotency_cache:
+            cached_response = _idempotency_cache[idempotency_key]
+            logger.info(f"Returning cached answer for idempotency key: {idempotency_key}")
+            return AnswerResponseModel(**cached_response)
 
-        # Mock answer generation (would integrate with OpenAI/Claude APIs)
-        answer = _mock_generate_answer(
-            request.query,
-            request.context_chunks,
-            request.classification,
-            model
+        # Use engine for complete orchestration
+        result = engine.answer(
+            query=request.query,
+            classification=request.classification,
+            model=request.model,
+            include_citations=request.citations,
+            top_k=request.top_k,
+            lane=request.lane
         )
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
-        response = AnswerResponse(
-            answer=answer,
-            confidence=0.85,  # Mock confidence
-            sources_used=[chunk.source for chunk in request.context_chunks[:3]],
-            model_used=model,
-            processing_time_ms=processing_time_ms
+        # Update metadata with trace ID
+        result.metadata.trace_id = trace_id
+        result.metadata.latency_ms = processing_time_ms
+
+        logger.info(f"Generated answer using {result.metadata.model_used} ({processing_time_ms:.1f}ms)")
+
+        await record_audit_event(
+            http_request,
+            {
+                "event": "answer.generated",
+                "query_preview": request.query[:120],
+                "model": result.metadata.model_used,
+                "citation_count": len(result.citations),
+            },
         )
 
-        logger.info(f"Generated answer using {model} ({processing_time_ms:.1f}ms)")
+        # Cache response if idempotency key provided
+        if idempotency_key:
+            _idempotency_cache[idempotency_key] = result.model_dump()
+            # Simple cache cleanup - keep only last 100 entries
+            if len(_idempotency_cache) > 100:
+                oldest_key = next(iter(_idempotency_cache))
+                del _idempotency_cache[oldest_key]
 
-        return response
+        return result
 
     except Exception as e:
-        logger.error(f"Answer generation error: {str(e)}")
+        logger.error(f"Answer generation error: {str(e)}", extra={"trace_id": trace_id})
+        error_envelope = build_error("ANSWER_GENERATION_FAILED", f"Answer generation failed: {str(e)}", trace_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Answer generation failed: {str(e)}"
+            detail=error_envelope.model_dump()
         )
 
 
 @app.get("/policies")
 async def get_policies():
     """Get current retrieval and workflow policies."""
-
     try:
-        # Load policies from config files
-        # TODO: Implement policy loading from YAML files
+        policy_settings = engine.policy_manager.get_policy_settings()
 
-        policies = {
-            "retrieval_policies": {
-                "fact_lookup": {
-                    "strategy": "vector_similarity",
-                    "top_k": 5,
-                    "similarity_threshold": 0.8
-                },
-                "procedural_howto": {
-                    "strategy": "hybrid",
-                    "top_k": 8,
-                    "vector_weight": 0.6,
-                    "metadata_weight": 0.4
-                }
+        return {
+            "retrieval_policies": policy_settings,
+            "policy_metadata": {
+                "version": engine.policy_manager.version,
+                "last_loaded": engine.policy_manager.last_loaded.isoformat(),
+                "hot_reload_enabled": engine.policy_manager.hot_reload
             },
-            "workflow_policies": {
-                "passes": {
-                    "pass_b": {
-                        "split_threshold_mb": 10
-                    }
-                }
-            },
-            "model_policies": {
-                "classification": "gpt-4",
-                "simple_queries": "gpt-3.5-turbo",
-                "complex_queries": "gpt-4"
+            "prompt_registry_metadata": {
+                "version": engine.prompt_registry.version,
+                "last_loaded": engine.prompt_registry.last_loaded.isoformat(),
+                "hot_reload_enabled": engine.prompt_registry.hot_reload
             }
         }
 
-        return policies
-
     except Exception as e:
         logger.error(f"Policy retrieval error: {str(e)}")
+        error_envelope = build_error("POLICY_RETRIEVAL_FAILED", f"Policy retrieval failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Policy retrieval failed: {str(e)}"
+            detail=error_envelope.model_dump()
         )
 
 
-def _select_retrieval_strategy(classification: Classification) -> str:
-    """Select retrieval strategy based on classification."""
+@app.post("/v2/orchestrate", response_model=AnswerResponseModel)
+async def orchestrate_full_pipeline(
+    request: QueryPayload,
+    http_request: Request,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")
+):
+    """Complete orchestration: classify → retrieve → answer in one call."""
+    start_time = time.perf_counter()
+    trace_id = str(uuid.uuid4())
 
-    strategy_map = {
-        'fact_lookup': 'vector_similarity',
-        'procedural_howto': 'hybrid',
-        'creative_write': 'diverse_sampling',
-        'code_help': 'semantic_search',
-        'summarize': 'comprehensive',
-        'multi_hop_reasoning': 'graph_traversal'
+    try:
+        logger.info(f"Full orchestration for: {request.query[:50]}...", extra={"trace_id": trace_id})
+
+        # Check idempotency cache
+        if idempotency_key and idempotency_key in _idempotency_cache:
+            cached_response = _idempotency_cache[idempotency_key]
+            logger.info(f"Returning cached orchestration for idempotency key: {idempotency_key}")
+            return AnswerResponseModel(**cached_response)
+
+        # Full pipeline orchestration
+        result = engine.orchestrate(
+            query=request.query,
+            context=request.context,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            lane=request.lane,
+            idempotency_key=idempotency_key,
+        )
+
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+        # Update metadata
+        result.metadata.trace_id = trace_id
+        result.metadata.latency_ms = processing_time_ms
+
+        logger.info(f"Full orchestration completed ({processing_time_ms:.1f}ms)")
+
+        await record_audit_event(
+            http_request,
+            {
+                "event": "orchestrator.pipeline",
+                "query_preview": request.query[:120],
+                "classification_present": bool(request.context),
+            },
+        )
+
+        # Cache if needed
+        if idempotency_key:
+            _idempotency_cache[idempotency_key] = result.model_dump()
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Orchestration error: {str(e)}", extra={"trace_id": trace_id})
+        error_envelope = build_error("ORCHESTRATION_FAILED", f"Orchestration failed: {str(e)}", trace_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_envelope.model_dump()
+        )
+
+
+# Legacy API support - kept for backward compatibility
+@app.post("/answer")
+async def generate_answer_legacy(request: QueryRequest):
+    """Legacy answer endpoint - redirects to v2 orchestrate."""
+    new_request = QueryPayload(
+        query=request.query,
+        context=request.context,
+        user_id=request.user_id,
+        session_id=request.session_id
+    )
+    return await orchestrate_full_pipeline(new_request)
+
+
+# Diagnostic and management endpoints
+@app.get("/diagnostics")
+async def get_diagnostics():
+    """Get detailed diagnostic information."""
+    import datetime
+
+    uptime_seconds = time.perf_counter() - engine._started_at
+
+    return {
+        "service": "orchestrator",
+        "version": "2.0.0",
+        "environment": engine.environment,
+        "uptime_seconds": uptime_seconds,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "policy_manager": {
+            "version": engine.policy_manager.version,
+            "last_loaded": engine.policy_manager.last_loaded.isoformat(),
+            "hot_reload": engine.policy_manager.hot_reload
+        },
+        "prompt_registry": {
+            "version": engine.prompt_registry.version,
+            "last_loaded": engine.prompt_registry.last_loaded.isoformat(),
+            "hot_reload": engine.prompt_registry.hot_reload
+        },
+        "idempotency_cache_size": len(_idempotency_cache),
+        "features_enabled": {
+            "hybrid_retrieval": True,
+            "answer_composition": True,
+            "prompt_registry": True,
+            "policy_management": True,
+            "idempotency_support": True,
+            "error_envelopes": True
+        }
     }
 
-    return strategy_map.get(classification['intent'], 'hybrid')
 
+@app.post("/admin/reload")
+async def reload_configuration(_: UserContext = Depends(require_roles("admin"))):
+    """Reload policies and prompt registry (admin endpoint)."""
+    try:
+        # Force reload of policies and prompts
+        engine.policy_manager._load()
+        engine.prompt_registry._load()
 
-def _select_model(classification: Classification, requested_model: Optional[str]) -> str:
-    """Select model based on classification and request."""
-
-    if requested_model:
-        return requested_model
-
-    # Model selection based on complexity and intent
-    if classification['complexity'] == 'high' or classification['intent'] == 'multi_hop_reasoning':
-        return 'gpt-4'
-    elif classification['intent'] == 'code_help':
-        return 'gpt-4'
-    else:
-        return 'gpt-3.5-turbo'
-
-
-def _mock_retrieve_chunks(
-    query: str,
-    classification: Classification,
-    top_k: int,
-    similarity_threshold: float
-) -> List[RetrievalChunk]:
-    """Mock chunk retrieval (placeholder for real implementation)."""
-
-    # Generate mock chunks based on classification
-    chunks = []
-
-    if classification['domain'] == 'ttrpg_rules':
-        chunks = [
-            RetrievalChunk(
-                chunk_id="chunk_001",
-                content="Combat mechanics: Initiative is rolled using 1d20 + Dexterity modifier...",
-                score=0.92,
-                metadata={"source": "PHB", "page": "189", "section": "Combat"},
-                source="Player's Handbook p.189"
-            ),
-            RetrievalChunk(
-                chunk_id="chunk_002",
-                content="Armor Class (AC) represents how difficult it is to land an effective blow...",
-                score=0.88,
-                metadata={"source": "PHB", "page": "14", "section": "Armor Class"},
-                source="Player's Handbook p.14"
-            )
-        ]
-    elif classification['domain'] == 'ttrpg_lore':
-        chunks = [
-            RetrievalChunk(
-                chunk_id="chunk_lore_001",
-                content="The ancient kingdom of Eldoria was founded by the dragon riders...",
-                score=0.85,
-                metadata={"source": "Campaign Guide", "chapter": "History", "region": "Eldoria"},
-                source="Campaign Guide - Eldoria History"
-            )
-        ]
-
-    return chunks[:top_k]
-
-
-def _mock_generate_answer(
-    query: str,
-    context_chunks: List[RetrievalChunk],
-    classification: Classification,
-    model: str
-) -> str:
-    """Mock answer generation (placeholder for real implementation)."""
-
-    # Generate mock answer based on classification and context
-    if classification['intent'] == 'fact_lookup':
-        return f"Based on the game rules, {query.lower()} refers to a specific game mechanic. " \
-               f"According to the sources, this involves rolling dice and applying modifiers as specified."
-
-    elif classification['intent'] == 'procedural_howto':
-        return f"Here's how to {query.lower()}: \n" \
-               f"1. First, determine the relevant ability score\n" \
-               f"2. Roll 1d20 and add your modifier\n" \
-               f"3. Compare the result to the target number\n" \
-               f"This process is detailed in the referenced rulebooks."
-
-    else:
-        return f"Regarding {query}, the available information suggests that this topic is covered " \
-               f"in the retrieved sources. The specific details depend on your campaign setting and " \
-               f"the rules system you're using."
+        return {
+            "status": "reloaded",
+            "policy_version": engine.policy_manager.version,
+            "prompt_version": engine.prompt_registry.version,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Configuration reload failed: {str(e)}")
+        error_envelope = build_error("RELOAD_FAILED", f"Configuration reload failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_envelope.model_dump()
+        )
 
 
 if __name__ == "__main__":

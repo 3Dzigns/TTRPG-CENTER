@@ -1,0 +1,19 @@
+{
+    "required_passes":  [
+                            "pass_0_preflight",
+                            "pass_a_toc",
+                            "pass_b_split",
+                            "pass_c_extraction",
+                            "pass_d_embeddings",
+                            "pass_e_graph",
+                            "pass_f_validation",
+                            "pass_g_hgrn"
+                        ],
+    "required_artifact_prefixes":  [
+                                       "pass_c/",
+                                       "pass_d/",
+                                       "pass_e/",
+                                       "pass_f/",
+                                       "pass_g/"
+                                   ]
+}

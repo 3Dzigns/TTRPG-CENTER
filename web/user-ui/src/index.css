@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+  html, body, #root {
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background-color: #0c0c0c;
+    color: #00ff41;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(0, 255, 65, 0.1);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #00ff41;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #00cc33;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Terminal theme components */
+  .terminal-container {
+    @apply bg-terminal-bg text-terminal-text font-mono h-full relative overflow-hidden;
+  }
+
+  .terminal-header {
+    @apply flex items-center justify-between p-4 bg-black/50 border-b border-terminal-text/20;
+  }
+
+  .terminal-prompt {
+    @apply flex items-center gap-2 text-terminal-text;
+  }
+
+  .terminal-input {
+    @apply bg-transparent border-none outline-none text-terminal-text font-mono flex-1 caret-terminal-text;
+  }
+
+  .terminal-output {
+    @apply font-mono text-sm space-y-1 p-4 h-full overflow-y-auto;
+  }
+
+  .terminal-line {
+    @apply whitespace-pre-wrap;
+  }
+
+  .terminal-cursor {
+    @apply inline-block w-2 h-4 bg-terminal-text animate-terminal-blink ml-1;
+  }
+
+  /* LCARS theme components */
+  .lcars-container {
+    @apply bg-lcars-bg text-white font-lcars h-full relative;
+  }
+
+  .lcars-header {
+    @apply flex items-center justify-between p-4 bg-gradient-to-r from-lcars-orange to-lcars-blue;
+  }
+
+  .lcars-panel {
+    @apply bg-gradient-to-b from-lcars-orange to-lcars-orange/80 p-4 rounded-lcars;
+  }
+
+  .lcars-button {
+    @apply bg-lcars-orange hover:bg-lcars-orange/80 text-black font-bold py-2 px-6 rounded-lcars-pill transition-all duration-200 active:scale-95;
+  }
+
+  .lcars-input {
+    @apply bg-lcars-panel border-2 border-lcars-orange rounded-lg p-3 text-white placeholder-white/50 font-lcars;
+  }
+
+  .lcars-status {
+    @apply flex items-center gap-2 text-lcars-yellow;
+  }
+
+  /* Shared utility classes */
+  .retro-glow {
+    @apply shadow-lg;
+    box-shadow: 0 0 20px currentColor;
+  }
+
+  .typing-effect {
+    overflow: hidden;
+    white-space: nowrap;
+    animation: typing 0.5s steps(30, end);
+  }
+
+  .scan-lines {
+    position: relative;
+  }
+
+  .scan-lines::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 255, 65, 0.03) 2px,
+      rgba(0, 255, 65, 0.03) 4px
+    );
+  }
+
+  .response-card {
+    @apply border border-current/20 rounded-lg p-4 mb-4 bg-black/20;
+  }
+
+  .citation-badge {
+    @apply inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-current/10 text-current border border-current/20;
+  }
+
+  .confidence-bar {
+    @apply w-full bg-current/10 rounded-full h-2;
+  }
+
+  .confidence-fill {
+    @apply bg-current h-full rounded-full transition-all duration-300;
+  }
+}
+
+/* Animation keyframes (already defined in tailwind config, but keeping for fallback) */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes typing {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100vh); }
+  100% { transform: translateY(100vh); }
+}

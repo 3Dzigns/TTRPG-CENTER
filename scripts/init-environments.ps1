@@ -1,13 +1,13 @@
 # scripts/init-environments.ps1
 param(
     [ValidateSet('dev','test','prod')]
-    [string]$EnvName='dev'
+    [string]$EnvName = 'dev'
 )
 
 $root = Join-Path $PSScriptRoot '..'
 $envRoot = Join-Path $root "env/$EnvName"
 
-$requiredDirs = 'code','config','data','logs'
+$requiredDirs = @('code','config','data','logs','artifacts','cache','uploads','ssl')
 foreach ($dir in $requiredDirs) {
     $target = Join-Path $envRoot $dir
     if (-not (Test-Path $target)) {
@@ -15,14 +15,32 @@ foreach ($dir in $requiredDirs) {
     }
 }
 
-$ports = @{ dev = 8000; test = 8181; prod = 8282 }
-$portValue = $ports[$EnvName]
+$basePorts = @{ dev = 8000; test = 8181; prod = 8282 }
+$portValue = $basePorts[$EnvName]
+$servicePorts = [ordered]@{
+    main_app_port = $portValue
+    admin_api_port = $portValue + 1
+    user_api_port = $portValue + 2
+    ingest_service_port = $portValue + 3
+    orchestrator_service_port = $portValue + 4
+}
+$testRunnerPort = switch ($EnvName) {
+    'dev' { 8095 }
+    'test' { 8195 }
+    'prod' { 8295 }
+}
 
-$portsJson = @{
-    http_port = $portValue
+$portsJson = [ordered]@{
     name = $EnvName
+    base_http_port = $portValue
     websocket_port = $portValue + 1000
-} | ConvertTo-Json -Depth 10
+    main_app_port = $servicePorts.main_app_port
+    admin_api_port = $servicePorts.admin_api_port
+    user_api_port = $servicePorts.user_api_port
+    ingest_service_port = $servicePorts.ingest_service_port
+    orchestrator_service_port = $servicePorts.orchestrator_service_port
+    test_runner_port = $testRunnerPort
+} | ConvertTo-Json -Depth 4
 $portsJson | Set-Content (Join-Path $envRoot 'config/ports.json') -Encoding UTF8
 
 $cacheTtl = switch ($EnvName) {
@@ -33,16 +51,29 @@ $cacheTtl = switch ($EnvName) {
 
 $envTemplate = @"
 # Environment: $EnvName
+TARGET_ENV=$EnvName
 APP_ENV=$EnvName
 PORT=$portValue
+MAIN_APP_PORT=$($servicePorts.main_app_port)
+ADMIN_API_PORT=$($servicePorts.admin_api_port)
+USER_API_PORT=$($servicePorts.user_api_port)
+INGEST_SERVICE_PORT=$($servicePorts.ingest_service_port)
+ORCHESTRATOR_SERVICE_PORT=$($servicePorts.orchestrator_service_port)
+TEST_RUNNER_PORT=$testRunnerPort
 LOG_LEVEL=INFO
-ARTIFACTS_PATH=./artifacts/$EnvName
+CODE_ROOT=./code
+DATA_PATH=./data
+LOGS_PATH=./logs
+ARTIFACTS_PATH=./artifacts
+UPLOADS_PATH=./uploads
+CACHE_PATH=./cache
+SSL_PATH=./ssl
 
 # Vector store configuration (DEV defaults to Cassandra)
 VECTOR_STORE_BACKEND=cassandra
-CASSANDRA_CONTACT_POINTS=cassandra-dev
+CASSANDRA_CONTACT_POINTS=cassandra-$EnvName
 CASSANDRA_PORT=9042
-CASSANDRA_KEYSPACE=ttrpg
+CASSANDRA_KEYSPACE=ttrpg_$EnvName
 CASSANDRA_TABLE=chunks
 CASSANDRA_USERNAME=
 CASSANDRA_PASSWORD=
@@ -61,15 +92,21 @@ ANTHROPIC_API_KEY=
 # Security
 SECRET_KEY=
 JWT_SECRET=
+JWT_SECRET_KEY=
+ALLOWED_SOURCES=
+
+# Observability
+OTLP_ENDPOINT=
 
 # Cache settings
 CACHE_TTL_SECONDS=$cacheTtl
 "@
-$envTemplate | Set-Content (Join-Path $envRoot 'config/.env.template') -Encoding UTF8
+$envTemplatePath = Join-Path $envRoot 'config/.env.template'
+$envTemplate | Set-Content $envTemplatePath -Encoding UTF8
 
 $envFilePath = Join-Path $envRoot 'config/.env'
 if (-not (Test-Path $envFilePath)) {
-    $envTemplate | Set-Content $envFilePath -Encoding UTF8
+    Copy-Item $envTemplatePath $envFilePath
 }
 
 $loggingConfig = @{
@@ -103,7 +140,6 @@ $loggingConfig = @{
 $loggingConfig | Set-Content (Join-Path $envRoot 'config/logging.json') -Encoding UTF8
 
 Write-Host "Initialized $EnvName environment at $envRoot" -ForegroundColor Green
-Write-Host "Created directories: $($requiredDirs -join ', ')" -ForegroundColor Cyan
-Write-Host "Ports JSON written with HTTP port $portValue" -ForegroundColor Cyan
+Write-Host "Ensured directories: $($requiredDirs -join ', ')" -ForegroundColor Cyan
+Write-Host "Ports JSON written with base port $portValue" -ForegroundColor Cyan
 Write-Host "Generated config/.env.template (and config/.env if missing)" -ForegroundColor Yellow
-

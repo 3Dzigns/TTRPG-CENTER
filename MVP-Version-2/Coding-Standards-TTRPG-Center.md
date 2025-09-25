@@ -12,9 +12,9 @@
 ```
 / (repo root)
   env/
-    dev/{code,config,data,logs,artifacts}
-    test/{code,config,data,logs,artifacts}
-    prod/{code,config,data,logs,artifacts}
+    dev/{code,config,data,logs,artifacts,cache,uploads,ssl}
+    test/{code,config,data,logs,artifacts,cache,uploads,ssl}
+    prod/{code,config,data,logs,artifacts,cache,uploads,ssl}
   src_common/                   # Shared Python libs (no env‑specific state)
   services/
     ingest/                     # Pass 0→G pipeline, tools adapters
@@ -40,7 +40,7 @@
 ```
 
 **Ports:** dev 8000, test 8181, prod 8282 (configure in `env/*/config/ports.json`).  
-**Rule:** All environment-specific data and secrets reside under `env/<name>`. No cross-env reads/writes.
+**Rule:** All environment-specific code, data, and secrets reside under `env/<name>` (including `code`, `config`, `data`, `logs`, `artifacts`, `cache`, `uploads`, and `ssl`). No cross-env reads/writes.
 
 ---
 
@@ -241,6 +241,10 @@ env/*/config/.env
 env/*/data/
 env/*/logs/
 env/*/artifacts/
+env/*/cache/
+env/*/uploads/
+env/*/code/
+env/*/ssl/
 
 # Python
 __pycache__/
@@ -342,3 +346,13 @@ If you must deviate (e.g., long function for performance, unusual directory) you
 ---
 
 **This standard is living**: propose updates via PR with an ADR. Keep it boring, typed, tested, and secure.
+
+
+
+## Security & Observability
+
+- All FastAPI services MUST call `src_common.security.bootstrap_app_security` immediately after app construction to enable JWT validation, security headers, rate limiting, and OpenTelemetry toggles.
+- Use `record_audit_event` for any endpoint that mutates state (ingest uploads, dictionary/HGRN operations, test runner commands) so audit logs land in `env/<env>/logs/audit/`.
+- Use `require_roles()` dependencies to guard admin-only endpoints. Admin API, ingest, test runner, and orchestrator admin routes are required to enforce `require_roles("admin")`.
+- Retrieval code MUST respect `ALLOWED_SOURCES` configuration. Add new sources via environment `.env` (`ALLOWED_SOURCES` comma list) or per-env defaults; never bypass source gating in production.
+- When OpenTelemetry is enabled (flag `observability.opentelemetry`), services should export traces to the OTLP endpoint declared in `.env`. Do not disable tracing in prod without SRE approval.

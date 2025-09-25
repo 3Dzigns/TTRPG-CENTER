@@ -1,5 +1,8 @@
 """
-External Test Runner Service
+Test Runner Service Module
 
-MVP v2 External Test Execution Architecture
+External test execution service with environment awareness and streaming capabilities.
+MVP v2 Microservices Architecture - Task 04 Implementation
 """
+
+__version__ = "2.0.0"

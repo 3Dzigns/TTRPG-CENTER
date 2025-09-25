@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+*/__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -255,4 +257,9 @@ test_upload_2.txt
 env/*/artifacts/
 
 # Other temporary files
+env/*/uploads/
+env/*/ssl/
+env/*/code/
+env/*/cache/
 nul
+
