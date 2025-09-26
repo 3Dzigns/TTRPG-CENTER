@@ -27,7 +27,10 @@ COPY pyproject.toml ./
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash ttrpg
-RUN chown -R ttrpg:ttrpg /app
+
+# Create required directories with proper permissions
+RUN mkdir -p /app/env/dev/logs/audit /app/env/dev/data /app/env/dev/artifacts /app/env/dev/uploads /app/env/dev/cache && \
+    chown -R ttrpg:ttrpg /app
 USER ttrpg
 
 # Health check

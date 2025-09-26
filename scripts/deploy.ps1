@@ -36,6 +36,21 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Pa
 $ComposeFile = "docker-compose.$Env.yml"
 $EnvFile = "env/$Env/config/.env"
 
+$ComposeOverrides = @()
+$EnvOverrideFile = "docker-compose.$Env.override.yml"
+if (Test-Path $EnvOverrideFile) {
+    $ComposeOverrides += $EnvOverrideFile
+}
+if ($Env -eq "prod" -and (Test-Path "docker-compose.release.override.yml")) {
+    $ComposeOverrides += "docker-compose.release.override.yml"
+}
+
+$BasePorts = @{ dev = 8000; test = 8181; prod = 8282 }
+if (-not $BasePorts.ContainsKey($Env)) {
+    throw "Unsupported environment: $Env"
+}
+$EnvPort = $BasePorts[$Env]
+
 # Functions
 function Write-Status {
     param([string]$Message, [string]$Level = "Info")
@@ -46,6 +61,16 @@ function Write-Status {
         "Error" { Write-Host "[$timestamp] ERROR: $Message" -ForegroundColor Red }
         "Success" { Write-Host "[$timestamp] SUCCESS: $Message" -ForegroundColor Cyan }
     }
+}
+
+function Get-ComposeFiles {
+    $files = @($ComposeFile)
+    foreach ($override in $ComposeOverrides) {
+        if (Test-Path $override) {
+            $files += $override
+        }
+    }
+    return $files
 }
 
 function Test-Prerequisites {
@@ -70,6 +95,12 @@ function Test-Prerequisites {
         throw "Compose file not found: $ComposeFile"
     }
     
+    foreach ($override in $ComposeOverrides) {
+        if (-not (Test-Path $override)) {
+            Write-Status "Optional override not found: $override" -Level "Warning"
+        }
+    }
+    
     # Check environment file
     if (-not (Test-Path $EnvFile)) {
         Write-Status "Environment file not found: $EnvFile" -Level "Warning"
@@ -80,13 +111,18 @@ function Test-Prerequisites {
 function Get-ComposeCommand {
     param([array]$ExtraArgs = @())
     
-    $cmd = @("docker", "compose", "-f", $ComposeFile)
-    
+    $files = Get-ComposeFiles
+    $cmd = @("docker", "compose")
+    foreach ($file in $files) {
+        $cmd += "-f"
+        $cmd += $file
+    }
+
     if (Test-Path $EnvFile) {
         $cmd += "--env-file"
         $cmd += $EnvFile
     }
-    
+
     $cmd += $ExtraArgs
     return $cmd
 }
@@ -259,7 +295,7 @@ function Test-HealthEndpoint {
     
     $maxAttempts = 30
     $attempt = 0
-    $healthUrl = "http://localhost:8000/healthz"
+    $healthUrl = "http://localhost:$EnvPort/healthz"
     
     while ($attempt -lt $maxAttempts) {
         try {
@@ -295,6 +331,8 @@ function Show-ComposeInfo {
     Write-Status "Docker Compose Configuration:"
     Write-Status "  Compose File: $ComposeFile"
     Write-Status "  Environment File: $EnvFile"
+    $files = Get-ComposeFiles
+    Write-Status "  Compose Files: $($files -join ', ')"
     Write-Status "  Environment: $Env"
     Write-Status "  Project Root: $ProjectRoot"
     
@@ -326,8 +364,8 @@ try {
         "up" {
             Start-Stack
             Write-Status "Stack deployment completed successfully!" -Level "Success"
-            Write-Status "Application available at: http://localhost:8000" -Level "Success"
-            Write-Status "Health endpoint: http://localhost:8000/healthz" -Level "Success"
+            Write-Status "Application available at: http://localhost:$EnvPort" -Level "Success"
+            Write-Status "Health endpoint: http://localhost:$EnvPort/healthz" -Level "Success"
         }
         "down" {
             Stop-Stack

@@ -18,7 +18,12 @@
       "Bash(grep:*)",
       "Bash(bandit:*)",
       "Bash(mkdir:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(git restore:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(pytest:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }

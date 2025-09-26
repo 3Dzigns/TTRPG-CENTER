@@ -1,0 +1,7 @@
+services:
+  mongo:
+    volumes:
+      - ttrpg-mongo-dev-data:/data/db
+volumes:
+  ttrpg-mongo-dev-data:
+

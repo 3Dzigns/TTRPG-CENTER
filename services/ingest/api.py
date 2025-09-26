@@ -306,8 +306,6 @@ async def process_document_mvp_v2(job_id: str, file_path: Path):
 async def process_document(job_id: str, file_path: str):
     """Legacy process function - delegates to MVP v2 implementation."""
     return await process_document_mvp_v2(job_id, Path(file_path))
-        job_status.error_message = str(e)
-        job_status.updated_at = datetime.datetime.utcnow().isoformat()
 
 
 async def create_job_manifest(job_id: str, file_path: str):

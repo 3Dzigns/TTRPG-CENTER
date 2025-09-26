@@ -179,6 +179,9 @@ class ConfigManager:
         """
         return {
             "pass_b_split_threshold_mb": int(self.get_config("PASS_B_SPLIT_THRESHOLD_MB", 10)),
+            "pass_b_min_pages_per_part": int(self.get_config("PASS_B_MIN_PAGES_PER_PART", 20)),
+            "pass_b_max_pages_per_part": int(self.get_config("PASS_B_MAX_PAGES_PER_PART", 30)),
+            "pass_b_target_pages_per_part": int(self.get_config("PASS_B_TARGET_PAGES_PER_PART", 25)),
             "max_file_size_mb": int(self.get_config("MAX_FILE_SIZE_MB", 100)),
             "max_concurrent_jobs": int(self.get_config("MAX_CONCURRENT_JOBS", 3)),
             "processing_timeout_seconds": int(self.get_config("PROCESSING_TIMEOUT_SECONDS", 1800)),

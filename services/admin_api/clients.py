@@ -100,19 +100,14 @@ class TestRunnerClient:
         if stdout:
             for line in stdout.splitlines():
                 payload = {"line": line, "stream": "stdout", "status": state, "progress": progress}
-                yield f"data: {json.dumps(payload)}
-
-"
+                yield f"data: {json.dumps(payload)}\n\n"
         if stderr:
             for line in stderr.splitlines():
                 payload = {"line": line, "stream": "stderr", "status": state, "progress": progress}
-                yield f"data: {json.dumps(payload)}
+                yield f"data: {json.dumps(payload)}\n\n"
 
-"
         terminal = {"status": state, "progress": progress, "complete": True}
-        yield f"data: {json.dumps(terminal)}
-
-"
+        yield f"data: {json.dumps(terminal)}\n\n"
 
 
 class OrchestratorClient:

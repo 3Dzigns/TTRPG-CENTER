@@ -62,12 +62,17 @@ class PassAResult:
     artifacts: List[str]
     manifest_path: str
     success: bool
+    mode: str = "standard"
+    lightweight: bool = False
     term_results: List[TermUpsertResult] = None  # Individual term upsert results
+    toc_sections: List[Dict[str, Any]] = None
     error_message: Optional[str] = None
 
     def __post_init__(self):
         if self.term_results is None:
             self.term_results = []
+        if self.toc_sections is None:
+            self.toc_sections = []
 
     @property
     def dictionary_entries(self) -> int:
@@ -78,9 +83,10 @@ class PassAResult:
 class PassATocParser:
     """Pass A: Initial ToC Parse and Dictionary Seeding"""
 
-    def __init__(self, job_id: str, env: str = "dev"):
+    def __init__(self, job_id: str, env: str = "dev", lightweight: bool = False):
         self.job_id = job_id
         self.env = env
+        self.lightweight = lightweight
         self.toc_parser = TocParser()
         self.dict_loader = DictionaryLoader(env)
         self._document_metadata = None  # Cache for document metadata
@@ -170,7 +176,7 @@ class PassATocParser:
 
         return filename_clean or pdf_path.name
 
-    def process_pdf(self, pdf_path: Path, output_dir: Path, force_dict_init: bool = False) -> PassAResult:
+    def process_pdf(self, pdf_path: Path, output_dir: Path, force_dict_init: bool = False, lightweight: Optional[bool] = None) -> PassAResult:
         """
         Process PDF for Pass A: ToC parsing and dictionary seeding
         
@@ -183,16 +189,28 @@ class PassATocParser:
             PassAResult with processing statistics
         """
         start_time = time.time()
-        logger.info(f"Pass A starting: ToC parse for {pdf_path.name}")
+        lightweight = self.lightweight if lightweight is None else lightweight
+        self.lightweight = lightweight
+        mode = "lightweight" if lightweight else "standard"
+        logger.info(f"Pass A starting ({mode} mode): ToC parse for {pdf_path.name}")
+        term_upsert_results: List[TermUpsertResult] = []
         
         try:
             # Ensure output directory exists
             output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Parse document structure and ToC
-            logger.info("Parsing document structure and ToC...")
+
+            # Parse document structure and ToC with BUG-035 timeout protection
+            logger.info(f"BUG-035 Fix: Starting Pass A with timeout protection for {pdf_path.name}")
+            start_parse_time = time.time()
+
             outline = self.toc_parser.parse_document_structure(pdf_path)
             sections_count = len(outline.entries)
+
+            parse_duration = time.time() - start_parse_time
+            if parse_duration > 30:  # Log if parsing took longer than 30 seconds
+                logger.warning(f"BUG-035: Document structure parsing took {parse_duration:.1f}s - may indicate slow PDF")
+            else:
+                logger.info(f"BUG-035: Document structure parsed in {parse_duration:.1f}s")
 
             # Log detailed ToC processing results
             logger.info(f"Pass A: Document analysis complete - {outline.total_pages} total pages")
@@ -206,42 +224,40 @@ class PassATocParser:
             # Extract dictionary entries from ToC structure (if any)
             dict_entries: List[DictEntry] = []
             upserted_count = 0
+            term_results: List[Dict[str, Any]] = []
+
             if sections_count == 0:
                 logger.info(f"No ToC entries found in {pdf_path.name}; proceeding without dictionary seeding")
             else:
                 dict_entries = self._extract_dictionary_from_toc(outline, pdf_path)
                 logger.info(f"Pass A: Extracted {len(dict_entries)} dictionary entries from {sections_count} ToC sections")
 
-                # Debug logging: show sample of extracted terms
-                if dict_entries:
-                    sample_terms = [entry.term for entry in dict_entries[:5]]
-                    categories = list(set(entry.category for entry in dict_entries))
-                    logger.debug(f"Pass A: Sample dictionary terms extracted: {sample_terms}")
-                    logger.debug(f"Pass A: Categories found: {categories}")
+            if dict_entries:
+                sample_terms = [entry.term for entry in dict_entries[:5]]
+                categories = list(set(entry.category for entry in dict_entries))
+                logger.debug(f"Pass A: Sample dictionary terms extracted: {sample_terms}")
+                logger.debug(f"Pass A: Categories found: {categories}")
 
-                # Try to upsert dictionary entries to database; do not fail Pass A if this step fails
-                term_results = []
-                if dict_entries:
-                    try:
-                        logger.debug(f"Pass A: Attempting to upsert {len(dict_entries)} dictionary entries to {self.dict_loader.backend} backend")
-                        upserted_count, term_results = self.dict_loader.upsert_entries(dict_entries)
-                        logger.info(f"Pass A: Successfully upserted {upserted_count}/{len(dict_entries)} dictionary entries to {self.dict_loader.backend} database")
-                        if upserted_count != len(dict_entries):
-                            logger.warning(f"Pass A: Only {upserted_count} of {len(dict_entries)} entries were upserted - possible duplicates or errors")
-                    except Exception as e:
-                        logger.error(f"Pass A: Dictionary upsert failed (non-fatal for Pass A): {e}")
-                        logger.debug(f"Pass A: Backend configuration - {self.dict_loader.backend}, connection status: {hasattr(self.dict_loader, 'mongo_client') and self.dict_loader.mongo_client is not None}")
+                try:
+                    logger.debug(f"Pass A: Attempting to upsert {len(dict_entries)} dictionary entries to {self.dict_loader.backend} backend")
+                    upserted_count, term_results = self.dict_loader.upsert_entries(dict_entries)
+                    logger.info(f"Pass A: Successfully upserted {upserted_count}/{len(dict_entries)} dictionary entries to {self.dict_loader.backend} database")
+                    if upserted_count != len(dict_entries):
+                        logger.warning(f"Pass A: Only {upserted_count} of {len(dict_entries)} entries were upserted - possible duplicates or errors")
+                except Exception as e:
+                    logger.error(f"Pass A: Dictionary upsert failed (non-fatal for Pass A): {e}")
+                    logger.debug(f"Pass A: Backend configuration - {self.dict_loader.backend}, connection status: {hasattr(self.dict_loader, 'mongo_client') and self.dict_loader.mongo_client is not None}")
 
-                # Convert term results to TermUpsertResult objects
-                term_upsert_results = []
-                for result in term_results:
-                    term_upsert_results.append(TermUpsertResult(
-                        term=result["term"],
-                        category=result["category"],
-                        status=result["status"],
-                        error_message=result["error_message"]
-                    ))
-            
+            # Convert term results to TermUpsertResult objects
+            term_upsert_results = []
+            for result in term_results:
+                term_upsert_results.append(TermUpsertResult(
+                    term=result.get('term', ''),
+                    category=result.get('category'),
+                    status=result.get('status', 'unknown'),
+                    error_message=result.get('error_message')
+                ))
+
             # Write Pass A artifact
             dict_artifact_path = output_dir / f"{self.job_id}_pass_a_dict.json"
             dict_data = {
@@ -249,9 +265,19 @@ class PassATocParser:
                 "job_id": self.job_id,
                 "pass": "A",
                 "stage": "toc_dictionary_seed",
+                "mode": mode,
+                "lightweight": lightweight,
                 "entries_count": len(dict_entries),
                 "upserted_count": upserted_count,
                 "sections_parsed": sections_count,
+                "toc_sections": [
+                    {
+                        "title": entry.title,
+                        "page": entry.page,
+                        "level": entry.level,
+                    }
+                    for entry in outline.entries
+                ],
                 "dictionary_entries": [
                     {
                         "term": entry.term,
@@ -269,11 +295,12 @@ class PassATocParser:
             
             # Generate manifest
             manifest_path = self._generate_manifest(
-                output_dir, 
-                pdf_path, 
+                output_dir,
+                pdf_path,
                 [dict_artifact_path],
                 dict_entries,
-                sections_count
+                sections_count,
+                outline
             )
             
             end_time = time.time()
@@ -291,14 +318,45 @@ class PassATocParser:
                 artifacts=[str(dict_artifact_path)],
                 manifest_path=str(manifest_path),
                 success=True,
-                term_results=term_upsert_results
+                mode=mode,
+                lightweight=lightweight,
+                term_results=term_upsert_results,
+                toc_sections=[
+                    {
+                        "title": entry.title,
+                        "page": entry.page,
+                        "level": entry.level,
+                        "section_id": entry.section_id,
+                        "parent_id": entry.parent_id,
+                    }
+                    for entry in outline.entries
+                ]
             )
 
         except Exception as e:
             end_time = time.time()
             processing_time_ms = int((end_time - start_time) * 1000)
-            logger.error(f"Pass A failed for {pdf_path.name}: {e}")
-            
+
+            # Enhanced error logging for BUG-035 diagnostics
+            error_type = type(e).__name__
+            if "timeout" in str(e).lower() or "TimeoutError" in error_type:
+                logger.error(f"BUG-035: Pass A timeout failure for {pdf_path.name} after {processing_time_ms}ms: {e}")
+                error_message = f"PDF processing timeout: {str(e)[:200]}"
+            else:
+                logger.error(f"BUG-035: Pass A general failure for {pdf_path.name} after {processing_time_ms}ms: {e}")
+                error_message = f"PDF processing error ({error_type}): {str(e)[:200]}"
+
+            # Log circuit breaker stats if available
+            try:
+                if hasattr(self.toc_parser, 'pdf_circuit'):
+                    circuit_stats = self.toc_parser.pdf_circuit.get_stats()
+                    logger.warning(f"BUG-035: Circuit breaker stats - calls: {circuit_stats['total_calls']}, "
+                                 f"failures: {circuit_stats['total_failures']}, "
+                                 f"timeouts: {circuit_stats['total_timeouts']}, "
+                                 f"state: {circuit_stats['state']}")
+            except Exception as circuit_error:
+                logger.debug(f"BUG-035: Could not retrieve circuit breaker stats: {circuit_error}")
+
             return PassAResult(
                 source_file=pdf_path.name,
                 job_id=self.job_id,
@@ -309,7 +367,11 @@ class PassATocParser:
                 artifacts=[],
                 manifest_path="",
                 success=False,
-                error_message=str(e)
+                mode=mode,
+                lightweight=lightweight,
+                term_results=[],
+                toc_sections=[],
+                error_message=error_message
             )
     
     def _sanitize_title(self, title: str) -> str:
@@ -429,12 +491,13 @@ class PassATocParser:
         return entries
     
     def _generate_manifest(
-        self, 
-        output_dir: Path, 
-        pdf_path: Path, 
+        self,
+        output_dir: Path,
+        pdf_path: Path,
         artifacts: List[Path],
         dict_entries: List[DictEntry],
-        sections_count: int
+        sections_count: int,
+        outline
     ) -> Path:
         """Generate manifest.json with checksums and metadata"""
         
@@ -447,6 +510,8 @@ class PassATocParser:
             "completed_passes": ["A"],
             "environment": self.env,
             "created_at": time.time(),
+            "mode": "lightweight" if self.lightweight else "standard",
+            "lightweight": self.lightweight,
             "chunks": [],  # BUG-016: Always include chunks key for schema validation
             "source_info": {
                 "file_size": pdf_path.stat().st_size if pdf_path.exists() else 0,
@@ -458,6 +523,17 @@ class PassATocParser:
                 "sections_parsed": sections_count,
                 "categories": list(set(entry.category for entry in dict_entries))
             },
+            "has_toc": bool(getattr(outline, "entries", [])),
+            "toc": [
+                {
+                    "title": entry.title,
+                    "page": entry.page,
+                    "level": entry.level,
+                    "section_id": entry.section_id,
+                    "parent_id": entry.parent_id,
+                }
+                for entry in getattr(outline, "entries", [])
+            ],
             "artifacts": []
         }
         
@@ -473,7 +549,7 @@ class PassATocParser:
                 })
         
         # Write manifest
-        manifest_path = output_dir / "manifest.json"
+        manifest_path = output_dir / f"{self.job_id}_pass_a_manifest.json"
         write_json_atomically(manifest_data, manifest_path)
         
         return manifest_path
@@ -491,7 +567,14 @@ class PassATocParser:
             return ""
 
 
-def process_pass_a(pdf_path: Path, output_dir: Path, job_id: str, env: str = "dev", force_dict_init: bool = False) -> PassAResult:
+def process_pass_a(
+    pdf_path: Path,
+    output_dir: Path,
+    job_id: str,
+    env: str = "dev",
+    force_dict_init: bool = False,
+    lightweight: bool = False,
+) -> PassAResult:
     """
     Convenience function for Pass A processing
     
@@ -505,8 +588,13 @@ def process_pass_a(pdf_path: Path, output_dir: Path, job_id: str, env: str = "de
     Returns:
         PassAResult with processing statistics
     """
-    parser = PassATocParser(job_id, env)
-    return parser.process_pdf(pdf_path, output_dir, force_dict_init=force_dict_init)
+    parser = PassATocParser(job_id, env, lightweight=lightweight)
+    return parser.process_pdf(
+        pdf_path,
+        output_dir,
+        force_dict_init=force_dict_init,
+        lightweight=lightweight,
+    )
 
 
 if __name__ == "__main__":

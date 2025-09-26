@@ -19,7 +19,9 @@ services:
     volumes:
       - ./env/test/data/cassandra:/var/lib/cassandra
     networks:
-      - ttrpg-test
+      ttrpg-test:
+        aliases:
+          - cassandra-test
     healthcheck:
       test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
       interval: 20s
@@ -37,7 +39,9 @@ services:
     volumes:
       - ./env/test/data/redis:/data
     networks:
-      - ttrpg-test
+      ttrpg-test:
+        aliases:
+          - redis-test
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -53,7 +57,9 @@ services:
     volumes:
       - ./env/test/data/mongo:/data/db
     networks:
-      - ttrpg-test
+      ttrpg-test:
+        aliases:
+          - mongo-test
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -184,6 +190,36 @@ services:
         condition: service_started
     ports:
       - "8183:8183"
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: services/app/Dockerfile
+    container_name: ttrpg-app-test
+    working_dir: /app
+    env_file:
+      - ./env/test/config/.env
+    environment:
+      TARGET_ENV: test
+      SERVICE_NAME: app
+      PORT: "8181"
+    volumes:
+      - ./:/app
+      - ./env/test/logs:/app/env/test/logs
+      - ./env/test/cache:/app/env/test/cache
+      - ./env/test/uploads:/app/env/test/uploads
+    networks:
+      - ttrpg-test
+    depends_on:
+      admin-api:
+        condition: service_started
+      user-api:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+    ports:
+      - "8181:8181"
     restart: unless-stopped
 
   test-runner:

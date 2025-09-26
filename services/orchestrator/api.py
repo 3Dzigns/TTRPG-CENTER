@@ -101,8 +101,8 @@ async def health_check():
         service="orchestrator",
         version="2.0.0",
         environment=engine.environment,
-        uptime_seconds=uptime_seconds,
-        hot_reload_enabled=engine.policy_manager.hot_reload,
+        uptimeSeconds=uptime_seconds,
+        hotReloadEnabled=engine.policy_manager.hot_reload,
         timestamp=datetime.datetime.utcnow()
     )
 

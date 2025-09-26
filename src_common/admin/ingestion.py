@@ -12,13 +12,17 @@ import hashlib
 from pathlib import Path
 from typing import Dict, List, Any, Optional, AsyncGenerator, Callable
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..ttrpg_logging import get_logger
 from .logs import AdminLogService
 
 
 logger = get_logger(__name__)
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat()
 
 
 @dataclass
@@ -385,7 +389,7 @@ class AdminIngestionService:
             if not validation_results["all_valid"]:
                 # Update job status to failed and log errors
                 await self._append_log(log_file_path,
-                    f"[{datetime.now().isoformat()}] Pre-flight validation failed: {validation_results['summary']}")
+                    f"[{_timestamp()}] Pre-flight validation failed: {validation_results['summary']}")
 
                 # Update manifest with failure
                 job_manifest["status"] = "failed"
@@ -495,7 +499,7 @@ class AdminIngestionService:
             manifest["current_phase"] = None
             manifest["completed_phases"] = 0
             await self._write_manifest(manifest_file, manifest)
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} started lane={lane}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Job {job_id} started lane={lane}")
 
             job_path = manifest_file.parent
 
@@ -512,7 +516,7 @@ class AdminIngestionService:
             manifest["status"] = "completed"
             manifest["completed_at"] = time.time()
             await self._write_manifest(manifest_file, manifest)
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} completed successfully")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Job {job_id} completed successfully")
 
         except Exception as exc:
             manifest["status"] = "failed"
@@ -520,7 +524,7 @@ class AdminIngestionService:
             manifest["error_message"] = str(exc)
             manifest["completed_at"] = time.time()
             await self._write_manifest(manifest_file, manifest)
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Job {job_id} failed: {exc}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Job {job_id} failed: {exc}")
             logger.exception("Ingestion pipeline failed for %s", job_id)
 
     async def _write_manifest(self, manifest_file: Path, manifest: Dict[str, Any]) -> None:
@@ -562,18 +566,18 @@ class AdminIngestionService:
             selected_sources = manifest.get("selected_sources", [])
 
             logger.info(f"Starting Lane A pipeline (Passes A-G) for {job_type} job {job_id}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Starting Lane A pipeline (Passes A-G)")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Starting Lane A pipeline (Passes A-G)")
 
             # Determine sources to process
             if job_type == "selective" and selected_sources:
                 sources_to_process = selected_sources
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Processing {len(sources_to_process)} selected sources")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Processing {len(sources_to_process)} selected sources")
             else:
                 source_file = manifest.get("source_file", "unknown.pdf")
                 if not source_file or source_file == "unknown.pdf":
                     raise ValueError("No valid source file specified for ingestion")
                 sources_to_process = [source_file]
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Processing single source: {sources_to_process[0]}")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Processing single source: {sources_to_process[0]}")
 
             # Initialize job progress tracking
             if job_id not in self._job_progress:
@@ -589,10 +593,10 @@ class AdminIngestionService:
                 # Gate 0: SHA-based bypass check
                 should_bypass = await self._check_gate_0_bypass(source_path, job_path, log_file_path)
                 if should_bypass:
-                    await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Bypassing {source_file} - already up to date")
+                    await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: Bypassing {source_file} - already up to date")
                     continue
 
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Processing {source_file} - changes detected")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: Processing {source_file} - changes detected")
 
                 # Execute Passes A-G in sequence
                 manifest_file = job_path / "manifest.json"
@@ -669,17 +673,17 @@ class AdminIngestionService:
                     ))
 
                     await self._append_log(log_file_path,
-                        f"[{datetime.now().isoformat()}] Pass {pass_name} completed: "
+                        f"[{_timestamp()}] Pass {pass_name} completed: "
                         f"processed={pass_result.get('processed_count', 0)}, "
                         f"artifacts={pass_result.get('artifact_count', 0)}, "
                         f"duration={phase_progress.duration_seconds:.2f}s")
 
             logger.info(f"Lane A pipeline (Passes A-G) completed for job {job_id}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Lane A pipeline completed successfully")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Lane A pipeline completed successfully")
 
         except Exception as e:
             logger.error(f"Error in Lane A pipeline for job {job_id}: {e}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pipeline failed: {str(e)}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pipeline failed: {str(e)}")
             raise
 
     async def _resolve_source_path(self, source_file: str, environment: str) -> Path:
@@ -745,7 +749,7 @@ class AdminIngestionService:
         }
 
         try:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Starting pre-flight validation")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Starting pre-flight validation")
 
             # Determine which source files to validate
             files_to_validate = []
@@ -803,23 +807,23 @@ class AdminIngestionService:
 
             if validation_results["all_valid"]:
                 validation_results["summary"] = f"All {valid_count} source file(s) validated successfully"
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✓ Pre-flight validation passed")
+                await self._append_log(log_file_path, f"[{_timestamp()}] ✓ Pre-flight validation passed")
             else:
                 invalid_names = [f["name"] for f in validation_results["invalid_files"]]
                 validation_results["summary"] = f"{invalid_count} file(s) failed validation: {invalid_names}"
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✗ Pre-flight validation failed")
+                await self._append_log(log_file_path, f"[{_timestamp()}] ✗ Pre-flight validation failed")
 
             validation_results["details"] = {
                 "total_files": len(files_to_validate),
                 "valid_count": valid_count,
                 "invalid_count": invalid_count,
-                "validation_timestamp": datetime.now().isoformat()
+                "validation_timestamp": _timestamp()
             }
 
         except Exception as e:
             validation_results["all_valid"] = False
             validation_results["summary"] = f"Validation process error: {str(e)}"
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] ✗ Validation process failed: {str(e)}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] ✗ Validation process failed: {str(e)}")
 
         return validation_results
 
@@ -836,7 +840,7 @@ class AdminIngestionService:
             # Check cache file
             cache_file = job_path / "source_cache.json"
             if not cache_file.exists():
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: No cache found, proceeding with ingestion")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: No cache found, proceeding with ingestion")
                 return False
 
             # Load cache data
@@ -845,14 +849,14 @@ class AdminIngestionService:
             cached_chunk_count = cache_data.get("chunk_count", 0)
 
             if current_sha == cached_sha and cached_chunk_count > 0:
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: SHA match ({current_sha[:8]}) with {cached_chunk_count} chunks - bypassing")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: SHA match ({current_sha[:8]}) with {cached_chunk_count} chunks - bypassing")
                 return True
 
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: SHA mismatch or no chunks - proceeding with ingestion")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: SHA mismatch or no chunks - proceeding with ingestion")
             return False
 
         except Exception as e:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Gate 0: Cache check failed - {e}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Gate 0: Cache check failed - {e}")
             return False
 
     async def _calculate_file_sha(self, file_path: Path) -> str:
@@ -895,14 +899,14 @@ class AdminIngestionService:
                 raise ValueError(f"Unknown pass: {pass_name}")
 
         except Exception as e:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass {pass_name} failed: {str(e)}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pass {pass_name} failed: {str(e)}")
             raise
 
     async def _execute_pass_a(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
         """Execute Pass A: TOC → Metadata via OpenAI"""
         from ..pass_a_toc_parser import process_pass_a
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: TOC parsing and metadata extraction")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: TOC parsing and metadata extraction")
 
         def _run_pass_a():
             return process_pass_a(source_path, job_path, job_id, environment)
@@ -911,18 +915,18 @@ class AdminIngestionService:
 
         # Add detailed Pass A logging to job log
         if result.success:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Document processed - {result.sections_parsed} ToC sections found")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Dictionary extraction - {result.dictionary_entries_extracted} terms extracted, {result.dictionary_entries_upserted} terms upserted to database")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: Document processed - {result.sections_parsed} ToC sections found")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: Dictionary extraction - {result.dictionary_entries_extracted} terms extracted, {result.dictionary_entries_upserted} terms upserted to database")
 
             # Log each individual term with its upsert status
             for term_result in result.term_results:
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Term: {term_result.term} upserted to database {term_result.status}")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: Term: {term_result.term} upserted to database {term_result.status}")
 
             if result.dictionary_entries_extracted > result.dictionary_entries_upserted:
                 duplicates_filtered = result.dictionary_entries_extracted - result.dictionary_entries_upserted
-                await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Note - {duplicates_filtered} terms were duplicates or failed database upsert")
+                await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: Note - {duplicates_filtered} terms were duplicates or failed database upsert")
         else:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass A: Processing failed - {result.error_message}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pass A: Processing failed - {result.error_message}")
 
         return {
             "processed_count": result.dictionary_entries_extracted,
@@ -938,7 +942,10 @@ class AdminIngestionService:
         """Execute Pass B: Size-based Split (>25 MB)"""
         from ..pass_b_logical_splitter import process_pass_b
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B: Logical splitting check")
+        await self._append_log(
+            log_file_path,
+            f"[{_timestamp()}] Pass B: Logical splitting check (mode=standard)",
+        )
 
         def _run_pass_b():
             # Pass the job_log_file to enable enhanced observability in job logs
@@ -946,11 +953,26 @@ class AdminIngestionService:
 
         result = await asyncio.to_thread(_run_pass_b)
 
-        # Add enhanced completion logging to job log
+        result_mode = getattr(result, 'mode', 'standard')
+        result_lightweight = getattr(result, 'lightweight', False)
+
         if result.success:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B completed: processed={result.parts_created}, artifacts={len(result.artifacts)}, duration={result.processing_time_ms / 1000:.2f}s")
+            await self._append_log(
+                log_file_path,
+                (
+                    f"[{_timestamp()}] Pass B completed "
+                    f"(mode={result_mode}, parts={result.parts_created}, lightweight={result_lightweight}) "
+                    f"artifacts={len(result.artifacts)}, duration={result.processing_time_ms / 1000:.2f}s"
+                ),
+            )
         else:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass B failed: {result.error_message}")
+            await self._append_log(
+                log_file_path,
+                (
+                    f"[{_timestamp()}] Pass B failed (mode={result_mode}, lightweight={result_lightweight}): "
+                    f"{result.error_message}"
+                ),
+            )
 
         return {
             "processed_count": result.parts_created,
@@ -959,14 +981,17 @@ class AdminIngestionService:
             "total_pages": result.total_pages,
             "duration_ms": result.processing_time_ms,
             "success": result.success,
-            "error_message": result.error_message
+            "error_message": result.error_message,
+            "mode": result_mode,
+            "lightweight": result_lightweight,
+            "split_plan_path": getattr(result, 'split_plan_path', None),
         }
 
     async def _execute_pass_c(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
         """Execute Pass C: Unstructured.io → Chunking"""
         from ..pass_c_extraction import process_pass_c
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass C: Unstructured.io extraction")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass C: Unstructured.io extraction")
 
         def _run_pass_c():
             return process_pass_c(source_path, job_path, job_id, environment)
@@ -987,7 +1012,7 @@ class AdminIngestionService:
         """Execute Pass D: Haystack Enrichment"""
         from ..pass_d_vector_enrichment import process_pass_d
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass D: Haystack enrichment and vectorization")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass D: Haystack enrichment and vectorization")
 
         def _run_pass_d():
             return process_pass_d(job_path, job_id, environment)
@@ -1006,7 +1031,7 @@ class AdminIngestionService:
         """Execute Pass E: LlamaIndex Graph"""
         from ..pass_e_graph_builder import process_pass_e
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass E: LlamaIndex graph building")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass E: LlamaIndex graph building")
 
         def _run_pass_e():
             return process_pass_e(job_path, job_id, environment)
@@ -1027,7 +1052,7 @@ class AdminIngestionService:
         """Execute Pass F: Cleanup"""
         from ..pass_f_finalizer import process_pass_f
 
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass F: Cleanup artifacts and temp files")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass F: Cleanup artifacts and temp files")
 
         def _run_pass_f():
             return process_pass_f(job_path, job_id, environment)
@@ -1067,7 +1092,7 @@ class AdminIngestionService:
 
     async def _execute_pass_g(self, source_path: Path, job_path: Path, job_id: str, environment: str, log_file_path: Path) -> Dict[str, Any]:
         """Execute Pass G: HGRN Sanity Check"""
-        await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass G: HGRN sanity checks")
+        await self._append_log(log_file_path, f"[{_timestamp()}] Pass G: HGRN sanity checks")
 
         try:
             # Run HGRN validation if available
@@ -1093,7 +1118,7 @@ class AdminIngestionService:
             }
 
         except Exception as e:
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Pass G: HGRN failed - {str(e)}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Pass G: HGRN failed - {str(e)}")
             return {
                 "processed_count": 0,
                 "artifact_count": 0,
@@ -1162,7 +1187,7 @@ class AdminIngestionService:
                 total_artifacts += source_result.get("artifact_count", 0)
 
                 await self._append_log(log_file_path,
-                    f"[{datetime.now().isoformat()}] {phase} processed source '{source}': "
+                    f"[{_timestamp()}] {phase} processed source '{source}': "
                     f"chunks={source_result.get('chunk_count', 0)}, "
                     f"artifacts={source_result.get('artifact_count', 0)}")
 
@@ -1194,7 +1219,7 @@ class AdminIngestionService:
 
         except Exception as e:
             logger.error(f"Error executing unified phase {phase} for job {job_id}: {e}")
-            await self._append_log(log_file_path, f"[{datetime.now().isoformat()}] Phase {phase} failed: {str(e)}")
+            await self._append_log(log_file_path, f"[{_timestamp()}] Phase {phase} failed: {str(e)}")
             raise
 
     async def _execute_phase_for_source(
@@ -1215,7 +1240,7 @@ class AdminIngestionService:
                 chunks_data = {
                     "source_file": source,
                     "job_id": job_id,
-                    "processed_at": datetime.now().isoformat(),
+                    "processed_at": _timestamp(),
                     "chunk_count": chunk_count,
                     "chunks": [
                         {
@@ -1244,7 +1269,7 @@ class AdminIngestionService:
                 enriched_data = {
                     "source_file": source,
                     "job_id": job_id,
-                    "enriched_at": datetime.now().isoformat(),
+                    "enriched_at": _timestamp(),
                     "enrichment_results": {
                         "entities_extracted": entities_count,
                         "keywords_identified": entities_count // 2,
@@ -1272,7 +1297,7 @@ class AdminIngestionService:
                 graph_data = {
                     "source_file": source,
                     "job_id": job_id,
-                    "compiled_at": datetime.now().isoformat(),
+                    "compiled_at": _timestamp(),
                     "graph_structure": {
                         "nodes": nodes_count,
                         "edges": int(nodes_count * 1.2),
@@ -2341,7 +2366,7 @@ class AdminIngestionService:
 
                     # Update manifest to reflect killed status
                     manifest["status"] = "killed"
-                    manifest["killed_at"] = datetime.now().isoformat()
+                    manifest["killed_at"] = _timestamp()
                     manifest["error_message"] = "Job manually killed by administrator"
 
                     with open(manifest_file, 'w') as f:

@@ -120,6 +120,30 @@ app = FastAPI(
 
 bootstrap_app_security(app, service_name="user_api")
 
+# Setup cache headers middleware based on environment
+config = get_environment_config()
+env_name = config.get("environment", "dev")
+
+@app.middleware("http")
+async def add_cache_headers(request, call_next):
+    response = await call_next(request)
+
+    # Apply environment-specific cache headers
+    if env_name == "dev":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    elif env_name == "test":
+        response.headers["Cache-Control"] = "public, max-age=5"
+    elif env_name == "prod":
+        # Allow longer caching in production for static content
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=60"
+
+    return response
+
 # Redis client for session storage
 _redis: Optional[redis.Redis] = None
 
@@ -155,9 +179,6 @@ async def startup_event():
 
     # Verify orchestrator service connectivity
     await _verify_orchestrator_connection()
-
-    # Add environment-specific cache middleware
-    _setup_cache_headers(config)
 
 
 @app.get("/healthz")
@@ -726,29 +747,6 @@ async def _store_session(session: SessionInfo):
         logger.error(f"Failed to store session {session.session_id}: {e}")
 
 
-def _setup_cache_headers(config: Dict):
-    """Setup environment-specific cache middleware."""
-    env_name = config.get("environment", "dev")
-
-    @app.middleware("http")
-    async def add_cache_headers(request, call_next):
-        response = await call_next(request)
-
-        # Apply environment-specific cache headers
-        if env_name == "dev":
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-        elif env_name == "test":
-            response.headers["Cache-Control"] = "public, max-age=5"
-        elif env_name == "prod":
-            # Allow longer caching in production for static content
-            if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
-                response.headers["Cache-Control"] = "public, max-age=3600"
-            else:
-                response.headers["Cache-Control"] = "public, max-age=60"
-
-        return response
 
 
 def _apply_cache_headers(response: Response):

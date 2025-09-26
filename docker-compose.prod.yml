@@ -1,27 +1,27 @@
 version: '3.8'
 
 networks:
-  ttrpg-dev:
+  ttrpg-prod:
     driver: bridge
-    name: ttrpg-dev-network
+    name: ttrpg-prod-network
 
 services:
   cassandra:
     image: cassandra:5
-    container_name: ttrpg-cassandra-dev
+    container_name: ttrpg-cassandra-prod
     environment:
-      CASSANDRA_CLUSTER_NAME: ttrpg-dev
+      CASSANDRA_CLUSTER_NAME: ttrpg-prod
       CASSANDRA_DC: dc1
       MAX_HEAP_SIZE: 1024M
       HEAP_NEWSIZE: 256M
     ports:
-      - "9042:9042"
+      - "9044:9042"
     volumes:
-      - ./env/dev/data/cassandra:/var/lib/cassandra
+      - ./env/prod/data/cassandra:/var/lib/cassandra
     networks:
-      ttrpg-dev:
+      ttrpg-prod:
         aliases:
-          - cassandra-dev
+          - cassandra-prod
     healthcheck:
       test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
       interval: 20s
@@ -32,16 +32,16 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: ttrpg-redis-dev
+    container_name: ttrpg-redis-prod
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "6381:6379"
     volumes:
-      - ./env/dev/data/redis:/data
+      - ./env/prod/data/redis:/data
     networks:
-      ttrpg-dev:
+      ttrpg-prod:
         aliases:
-          - redis-dev
+          - redis-prod
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -51,15 +51,15 @@ services:
 
   mongo:
     image: mongo:7
-    container_name: ttrpg-mongo-dev
+    container_name: ttrpg-mongo-prod
     ports:
-      - "27017:27017"
+      - "27019:27017"
     volumes:
-      - ./env/dev/data/mongo:/data/db
+      - ./env/prod/data/mongo:/data/db
     networks:
-      ttrpg-dev:
+      ttrpg-prod:
         aliases:
-          - mongo-dev
+          - mongo-prod
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -74,24 +74,24 @@ services:
       dockerfile: Dockerfile.microservice
       args:
         SERVICE_NAME: ingest
-    container_name: ttrpg-ingest-dev
+    container_name: ttrpg-ingest-prod
     working_dir: /app
     env_file:
-      - ./env/dev/config/.env
+      - ./env/prod/config/.env
     environment:
-      TARGET_ENV: dev
+      TARGET_ENV: prod
       SERVICE_NAME: ingest
-      PORT: "8003"
+      PORT: "8285"
     volumes:
       - ./:/app
-      - ./env/dev/data:/app/env/dev/data
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/artifacts:/app/env/dev/artifacts
-      - ./env/dev/cache:/app/env/dev/cache
-      - ./env/dev/uploads:/app/env/dev/uploads
-      - ./env/dev/ssl:/app/env/dev/ssl
+      - ./env/prod/data:/app/env/prod/data
+      - ./env/prod/logs:/app/env/prod/logs
+      - ./env/prod/artifacts:/app/env/prod/artifacts
+      - ./env/prod/cache:/app/env/prod/cache
+      - ./env/prod/uploads:/app/env/prod/uploads
+      - ./env/prod/ssl:/app/env/prod/ssl
     networks:
-      - ttrpg-dev
+      - ttrpg-prod
     depends_on:
       cassandra:
         condition: service_healthy
@@ -100,7 +100,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8003:8003"
+      - "8285:8285"
     restart: unless-stopped
 
   orchestrator:
@@ -109,25 +109,25 @@ services:
       dockerfile: Dockerfile.microservice
       args:
         SERVICE_NAME: orchestrator
-    container_name: ttrpg-orchestrator-dev
+    container_name: ttrpg-orchestrator-prod
     working_dir: /app
     env_file:
-      - ./env/dev/config/.env
+      - ./env/prod/config/.env
     environment:
-      TARGET_ENV: dev
+      TARGET_ENV: prod
       SERVICE_NAME: orchestrator
-      PORT: "8004"
+      PORT: "8286"
     volumes:
       - ./:/app
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/cache:/app/env/dev/cache
+      - ./env/prod/logs:/app/env/prod/logs
+      - ./env/prod/cache:/app/env/prod/cache
     networks:
-      - ttrpg-dev
+      - ttrpg-prod
     depends_on:
       ingest:
         condition: service_started
     ports:
-      - "8004:8004"
+      - "8286:8286"
     restart: unless-stopped
 
   admin-api:
@@ -136,22 +136,22 @@ services:
       dockerfile: Dockerfile.microservice
       args:
         SERVICE_NAME: admin_api
-    container_name: ttrpg-admin-api-dev
+    container_name: ttrpg-admin-api-prod
     working_dir: /app
     env_file:
-      - ./env/dev/config/.env
+      - ./env/prod/config/.env
     environment:
-      TARGET_ENV: dev
+      TARGET_ENV: prod
       SERVICE_NAME: admin_api
-      PORT: "8001"
+      PORT: "8283"
     volumes:
       - ./:/app
-      - ./env/dev/data:/app/env/dev/data
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/artifacts:/app/env/dev/artifacts
-      - ./env/dev/uploads:/app/env/dev/uploads
+      - ./env/prod/data:/app/env/prod/data
+      - ./env/prod/logs:/app/env/prod/logs
+      - ./env/prod/artifacts:/app/env/prod/artifacts
+      - ./env/prod/uploads:/app/env/prod/uploads
     networks:
-      - ttrpg-dev
+      - ttrpg-prod
     depends_on:
       cassandra:
         condition: service_healthy
@@ -162,7 +162,7 @@ services:
       ingest:
         condition: service_started
     ports:
-      - "8001:8001"
+      - "8283:8283"
     restart: unless-stopped
 
   user-api:
@@ -171,46 +171,46 @@ services:
       dockerfile: Dockerfile.microservice
       args:
         SERVICE_NAME: user_api
-    container_name: ttrpg-user-api-dev
+    container_name: ttrpg-user-api-prod
     working_dir: /app
     env_file:
-      - ./env/dev/config/.env
+      - ./env/prod/config/.env
     environment:
-      TARGET_ENV: dev
+      TARGET_ENV: prod
       SERVICE_NAME: user_api
-      PORT: "8002"
+      PORT: "8284"
     volumes:
       - ./:/app
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/cache:/app/env/dev/cache
+      - ./env/prod/logs:/app/env/prod/logs
+      - ./env/prod/cache:/app/env/prod/cache
     networks:
-      - ttrpg-dev
+      - ttrpg-prod
     depends_on:
       orchestrator:
         condition: service_started
     ports:
-      - "8002:8002"
+      - "8284:8284"
     restart: unless-stopped
 
   app:
     build:
       context: .
       dockerfile: services/app/Dockerfile
-    container_name: ttrpg-app-dev
+    container_name: ttrpg-app-prod
     working_dir: /app
     env_file:
-      - ./env/dev/config/.env
+      - ./env/prod/config/.env
     environment:
-      TARGET_ENV: dev
+      TARGET_ENV: prod
       SERVICE_NAME: app
-      PORT: "8000"
+      PORT: "8282"
     volumes:
       - ./:/app
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/cache:/app/env/dev/cache
-      - ./env/dev/uploads:/app/env/dev/uploads
+      - ./env/prod/logs:/app/env/prod/logs
+      - ./env/prod/cache:/app/env/prod/cache
+      - ./env/prod/uploads:/app/env/prod/uploads
     networks:
-      - ttrpg-dev
+      - ttrpg-prod
     depends_on:
       admin-api:
         condition: service_started
@@ -219,34 +219,5 @@ services:
       orchestrator:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "8282:8282"
     restart: unless-stopped
-
-  test-runner:
-    build:
-      context: .
-      dockerfile: Dockerfile.test-runner
-    container_name: ttrpg-test-runner-dev
-    working_dir: /app
-    env_file:
-      - ./env/dev/config/.env
-    environment:
-      TARGET_ENV: dev
-      TEST_RUNNER_PORT: "8095"
-    volumes:
-      - ./:/app
-      - ./env/dev/logs:/app/env/dev/logs
-      - ./env/dev/artifacts:/app/env/dev/artifacts
-      - ./env/dev/cache:/app/env/dev/cache
-    networks:
-      - ttrpg-dev
-    depends_on:
-      admin-api:
-        condition: service_started
-      user-api:
-        condition: service_started
-    ports:
-      - "8095:8095"
-    restart: unless-stopped
-    profiles:
-      - testing

@@ -5,11 +5,29 @@ Intelligently detects document structure from ToC and heading patterns
 """
 
 import re
+import io
+import concurrent.futures
+import threading
+try:
+    import pytesseract  # type: ignore
+    from PIL import Image  # type: ignore
+    HAS_TESSERACT = True
+except ImportError:
+    HAS_TESSERACT = False
+
+try:
+    import fitz  # type: ignore
+    HAS_PYMUPDF = True
+except ImportError:
+    fitz = None  # type: ignore
+    HAS_PYMUPDF = False
+
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import pypdf
 from .ttrpg_logging import get_logger
+from .patterns.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
 
 logger = get_logger(__name__)
 
@@ -49,6 +67,15 @@ class TocParser:
             r'chapter\s+list',
             r'section\s+overview'
         ]
+
+        # Configure circuit breaker for PDF text extraction
+        pdf_circuit_config = CircuitBreakerConfig(
+            failure_threshold=3,      # Open after 3 failures
+            recovery_timeout=60,      # Try recovery after 60 seconds
+            timeout=10.0,            # 10 second operation timeout
+            max_retry_attempts=2      # 2 retry attempts in half-open
+        )
+        self.pdf_circuit = get_circuit_breaker("pdf_text_extraction", pdf_circuit_config)
         
         # Heading patterns for different levels
         self.heading_patterns = [
@@ -69,52 +96,175 @@ class TocParser:
         # Page number patterns in ToC
         self.page_patterns = [
             r'\.+\s*(\d+)$',  # Dotted leaders: "Chapter 1 .... 15"
-            r'\s+(\d+)$',     # Simple space: "Chapter 1 15"  
+            r'\s+(\d+)$',     # Simple space: "Chapter 1 15"
             r'\t+(\d+)$',     # Tab separated: "Chapter 1\t15"
             r'-+\s*(\d+)$',   # Dashed leaders: "Chapter 1 --- 15"
         ]
+        # Allow scanning additional pages when ToC is offset by long front-matter
+        self.max_toc_search_pages = 20
+
+        self._current_pdf_path: Optional[Path] = None
+        self._fitz_doc = None
+        self._ocr_enabled = HAS_TESSERACT and HAS_PYMUPDF
+
+
+    def _extract_text_safely(self, page: pypdf.PageObject, page_index: int, timeout_seconds: float = 10.0) -> str:
+        """
+        Extract text from PDF page with timeout protection and circuit breaker.
+
+        Args:
+            page: PDF page object to extract text from
+            timeout_seconds: Maximum time to wait for extraction
+
+        Returns:
+            Extracted text or empty string on timeout/failure
+        """
+        def _extract_text():
+            """Internal text extraction function for timeout wrapper"""
+            return page.extract_text()
+
+        try:
+            # Use circuit breaker to protect against repeated failures
+            text = self.pdf_circuit.call(_extract_text_with_timeout, _extract_text, timeout_seconds)
+        except Exception as e:
+            logger.warning(f"Text extraction failed with circuit breaker: {e}")
+            text = ""
+
+        if text:
+            return text
+
+        if self._ocr_enabled:
+            ocr_text = self._extract_text_via_ocr(page_index)
+            if ocr_text:
+                logger.debug(f"TocParser: OCR fallback used for page {page_index + 1}")
+            return ocr_text
+
+        return ""
+
+    def _open_pdf_for_ocr(self, pdf_path: Path) -> None:
+        """Open PDF with PyMuPDF for OCR fallback when available."""
+        if not self._ocr_enabled:
+            return
+
+        if self._current_pdf_path == pdf_path and self._fitz_doc is not None:
+            return
+
+        self._close_ocr_resources()
+
+        try:
+            self._fitz_doc = fitz.open(pdf_path)  # type: ignore[arg-type]
+            self._current_pdf_path = pdf_path
+            logger.debug("TocParser: Initialized OCR fallback session")
+        except Exception as exc:
+            logger.debug(f"TocParser: Unable to open PDF for OCR fallback: {exc}")
+            self._fitz_doc = None
+            self._current_pdf_path = None
+
+    def _close_ocr_resources(self) -> None:
+        """Release OCR resources if they were opened."""
+        if self._fitz_doc is not None:
+            try:
+                self._fitz_doc.close()
+            except Exception:
+                pass
+        self._fitz_doc = None
+        self._current_pdf_path = None
+
+    def _extract_text_via_ocr(self, page_index: int) -> str:
+        """Extract text from a page using OCR fallback."""
+        if not self._ocr_enabled or self._fitz_doc is None:
+            return ""
+
+        try:
+            page = self._fitz_doc.load_page(page_index)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) if HAS_PYMUPDF else None
+            if pix is None:
+                return ""
+
+            image = Image.open(io.BytesIO(pix.tobytes("png")))
+            try:
+                text = pytesseract.image_to_string(image)
+            finally:
+                image.close()
+
+            return text
+        except Exception as exc:
+            logger.warning(f"TocParser: OCR fallback failed for page {page_index + 1}: {exc}")
+            return ""
+
+    def _extract_text_with_timeout(extract_func, timeout_seconds: float) -> str:
+        """
+        Execute text extraction with timeout protection using ThreadPoolExecutor.
+
+        Args:
+            extract_func: Function to execute text extraction
+            timeout_seconds: Maximum execution time
+
+        Returns:
+            Extracted text or empty string on timeout
+
+        Raises:
+            concurrent.futures.TimeoutError: If extraction exceeds timeout
+        """
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pdf_extract") as executor:
+            future = executor.submit(extract_func)
+            try:
+                result = future.result(timeout=timeout_seconds)
+                logger.debug(f"Text extraction completed within {timeout_seconds}s")
+                return result
+
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"Text extraction timed out after {timeout_seconds}s - returning empty text")
+                # Cancel the future to clean up resources
+                future.cancel()
+                raise
+
+            except Exception as e:
+                logger.error(f"Text extraction failed: {e}")
+                raise
     
     def parse_document_structure(self, pdf_path: Path) -> DocumentOutline:
         """
         Parse document structure from ToC and headings
-        
+
         Args:
             pdf_path: Path to PDF file
-            
+
         Returns:
             DocumentOutline with hierarchical structure
         """
         logger.info(f"Parsing document structure from {pdf_path}")
-        
+
         try:
+            self._open_pdf_for_ocr(pdf_path)
             with open(pdf_path, 'rb') as file:
                 pdf_reader = pypdf.PdfReader(file)
                 total_pages = len(pdf_reader.pages)
-                
+
                 # First, try to find and parse Table of Contents
                 toc_entries, toc_pages, has_toc = self._find_and_parse_toc(pdf_reader)
-                
+
                 # If no ToC found or incomplete, extract headings from content
                 if not has_toc or len(toc_entries) < 3:
                     logger.info("No comprehensive ToC found, extracting headings from content")
                     content_headings = self._extract_headings_from_content(pdf_reader)
-                    
+
                     # Merge or replace ToC entries with content headings
                     if len(content_headings) > len(toc_entries):
                         toc_entries = content_headings
-                
+
                 # Build hierarchical structure
                 hierarchical_entries = self._build_hierarchy(toc_entries)
-                
+
                 logger.info(f"Document structure parsed: {len(hierarchical_entries)} sections, ToC pages: {toc_pages}")
-                
+
                 return DocumentOutline(
                     entries=hierarchical_entries,
                     has_toc=has_toc,
                     toc_pages=toc_pages,
                     total_pages=total_pages
                 )
-                
+
         except Exception as e:
             logger.error(f"Error parsing document structure: {e}")
             # Return minimal structure
@@ -124,31 +274,48 @@ class TocParser:
                 toc_pages=[],
                 total_pages=1
             )
-    
+        finally:
+            self._close_ocr_resources()
+
+
     def _find_and_parse_toc(self, pdf_reader: pypdf.PdfReader) -> Tuple[List[TocEntry], List[int], bool]:
-        """Find and parse Table of Contents pages"""
+        """Find and parse Table of Contents pages with enhanced error recovery"""
         toc_pages = []
         toc_entries = []
-        
-        # Search first 10 pages for ToC
-        search_pages = min(10, len(pdf_reader.pages))
-        
+        successful_pages = 0
+        failed_pages = []
+
+        # Search first pages for ToC
+        search_pages = min(self.max_toc_search_pages, len(pdf_reader.pages))
+        logger.info(f"BUG-035 Fix: Searching {search_pages} pages for ToC with timeout protection")
+
         for page_num in range(search_pages):
             try:
                 page = pdf_reader.pages[page_num]
-                text = page.extract_text().lower()
-                
+                raw_text = self._extract_text_safely(page, page_num)
+                text = raw_text.lower()
+
+                # Skip pages where text extraction failed (timeout or error)
+                if not text:
+                    failed_pages.append(page_num + 1)
+                    logger.warning(f"BUG-035: Skipping page {page_num + 1} due to text extraction failure")
+                    continue
+
+                successful_pages += 1
+
                 # Check if this page contains ToC indicators
                 if any(re.search(pattern, text, re.IGNORECASE) for pattern in self.toc_indicators):
                     logger.info(f"Found ToC on page {page_num + 1}")
                     toc_pages.append(page_num + 1)
-                    
+
                     # Parse ToC entries from this page
                     page_entries = self._parse_toc_page(pdf_reader.pages[page_num], page_num + 1)
                     toc_entries.extend(page_entries)
-            
+
             except Exception as e:
-                logger.warning(f"Error processing page {page_num + 1} for ToC: {e}")
+                failed_pages.append(page_num + 1)
+                logger.warning(f"BUG-035: Error processing page {page_num + 1} for ToC: {e}")
+                continue  # Skip problematic pages, continue with others
         
         # If we found multiple ToC pages, continue parsing subsequent pages
         if toc_pages and len(toc_pages) == 1:
@@ -166,29 +333,63 @@ class TocParser:
                 except Exception as e:
                     logger.warning(f"Error parsing ToC continuation page {page_num + 1}: {e}")
         
+        if not toc_entries:
+            outline_entries = self._parse_pdf_outline(pdf_reader)
+            if outline_entries:
+                logger.info(
+                    "ToC text scan produced no entries; using PDF outline fallback (found %d sections)",
+                    len(outline_entries),
+                )
+                toc_entries = outline_entries
+                toc_pages = sorted({entry.page for entry in outline_entries})
+
         has_toc = len(toc_entries) > 0
-        logger.info(f"ToC parsing complete: {len(toc_entries)} entries found on pages {toc_pages}")
-        
+
+        # Enhanced logging for BUG-035 diagnostics
+        if failed_pages:
+            logger.warning(f"BUG-035: ToC parsing completed with {len(failed_pages)} failed pages: {failed_pages}")
+
+        logger.info(f"BUG-035 Fix: ToC parsing complete - {len(toc_entries)} entries found on pages {toc_pages}")
+        logger.info(f"BUG-035 Stats: {successful_pages}/{search_pages} pages processed successfully")
+
         return toc_entries, toc_pages, has_toc
     
     def _parse_toc_page(self, page: pypdf.PageObject, page_num: int) -> List[TocEntry]:
-        """Parse ToC entries from a single page"""
+        """Parse ToC entries from a single page with enhanced error recovery"""
         entries = []
-        text = page.extract_text()
+        text = self._extract_text_safely(page, page_num - 1)
+
+        # Handle cases where text extraction failed (timeout or error)
+        if not text:
+            logger.warning(f"BUG-035: No text extracted from ToC page {page_num} - skipping ToC parsing")
+            return entries
+
         lines = text.split('\n')
-        
         entry_count = 0
+        parse_errors = 0
+
         for line in lines:
             line = line.strip()
             if not line or len(line) < 5:
                 continue
-            
-            # Try to match ToC entry patterns
-            entry = self._parse_toc_line(line, entry_count)
-            if entry:
-                entries.append(entry)
-                entry_count += 1
-        
+
+            try:
+                # Try to match ToC entry patterns
+                entry = self._parse_toc_line(line, entry_count)
+                if entry:
+                    entries.append(entry)
+                    entry_count += 1
+            except Exception as e:
+                parse_errors += 1
+                logger.debug(f"BUG-035: Failed to parse ToC line '{line[:50]}...': {e}")
+                continue  # Skip problematic lines, continue with others
+
+        # Log summary statistics for debugging
+        if parse_errors > 0:
+            logger.warning(f"BUG-035: ToC page {page_num} had {parse_errors} parsing errors, extracted {len(entries)} entries")
+        else:
+            logger.debug(f"BUG-035: ToC page {page_num} successfully parsed {len(entries)} entries")
+
         return entries
     
     def _parse_toc_line(self, line: str, entry_count: int) -> Optional[TocEntry]:
@@ -246,28 +447,100 @@ class TocParser:
         else:
             return 1
     
+    def _parse_pdf_outline(self, pdf_reader: pypdf.PdfReader) -> List[TocEntry]:
+        """Build TocEntry list from embedded PDF outline/bookmarks."""
+        entries: List[TocEntry] = []
+        outline = getattr(pdf_reader, "outline", None)
+        if not outline:
+            outline = getattr(pdf_reader, "outlines", None)
+        if not outline:
+            return entries
+
+        def walk(nodes, level: int, parent_id: Optional[str]) -> None:
+            for node in nodes:
+                if isinstance(node, list):
+                    walk(node, level, parent_id)
+                    continue
+
+                title = getattr(node, "title", str(node)) or ""
+                title = title.strip()
+                try:
+                    page_index = pdf_reader.get_destination_page_number(node)
+                except Exception:
+                    destination = getattr(node, "destination", None)
+                    if destination is None:
+                        continue
+                    try:
+                        page_index = pdf_reader.get_destination_page_number(destination)
+                    except Exception:
+                        continue
+
+                section_id = f"outline_{len(entries):03d}"
+                entry = TocEntry(
+                    title=title[:100] or f"Section {len(entries) + 1}",
+                    page=page_index + 1,
+                    level=level,
+                    section_id=section_id,
+                    parent_id=parent_id,
+                )
+                entries.append(entry)
+                if parent_id:
+                    for existing in entries:
+                        if existing.section_id == parent_id:
+                            existing.children.append(section_id)
+                            break
+
+                child_nodes = getattr(node, "children", None)
+                if isinstance(child_nodes, list) and child_nodes:
+                    walk(child_nodes, level + 1, section_id)
+
+        initial_outline = outline if isinstance(outline, list) else [outline]
+        walk(initial_outline, 1, None)
+        return entries
+
     def _extract_headings_from_content(self, pdf_reader: pypdf.PdfReader) -> List[TocEntry]:
         """Extract headings directly from document content when ToC is unavailable"""
         headings = []
         heading_count = 0
-        
+        successful_pages = 0
+        failed_pages = []
+
         # Skip ToC pages and first few pages, focus on main content
         start_page = min(5, len(pdf_reader.pages) // 10)  # Start at 5 or 10% through document
-        
+        total_pages = len(pdf_reader.pages) - start_page
+
+        logger.info(f"BUG-035 Fix: Extracting headings from {total_pages} content pages with timeout protection")
+
         for page_num in range(start_page, len(pdf_reader.pages)):
             try:
                 page = pdf_reader.pages[page_num]
-                text = page.extract_text()
-                
+                text = self._extract_text_safely(page)
+
+                # Skip pages where text extraction failed (timeout or error)
+                if not text:
+                    failed_pages.append(page_num + 1)
+                    logger.debug(f"BUG-035: Skipping page {page_num + 1} due to text extraction failure")
+                    continue
+
+                successful_pages += 1
+
                 # Extract headings from this page
                 page_headings = self._extract_page_headings(text, page_num + 1, heading_count)
                 headings.extend(page_headings)
                 heading_count += len(page_headings)
-                
+
             except Exception as e:
-                logger.warning(f"Error extracting headings from page {page_num + 1}: {e}")
-        
-        logger.info(f"Extracted {len(headings)} headings from document content")
+                failed_pages.append(page_num + 1)
+                logger.warning(f"BUG-035: Error extracting headings from page {page_num + 1}: {e}")
+                continue  # Skip problematic pages, continue with others
+
+        # Enhanced logging for BUG-035 diagnostics
+        if failed_pages:
+            logger.warning(f"BUG-035: Heading extraction completed with {len(failed_pages)} failed pages: {failed_pages[:10]}")
+
+        logger.info(f"BUG-035 Fix: Extracted {len(headings)} headings from document content")
+        logger.info(f"BUG-035 Stats: {successful_pages}/{total_pages} content pages processed successfully")
+
         return headings
     
     def _extract_page_headings(self, text: str, page_num: int, base_count: int) -> List[TocEntry]:
