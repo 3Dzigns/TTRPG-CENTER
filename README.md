@@ -1,14 +1,14 @@
-# TTRPG Center - MVP Version 2
+﻿# TTRPG Center - MVP Version 2
 
 AI-powered tabletop RPG content management and intelligent query platform with comprehensive document ingestion and retrieval capabilities.
 
 ## Overview
 
-TTRPG Center is a comprehensive AI-powered platform designed for tabletop RPG content management. MVP v2 implements a full Pass 0→G ingestion pipeline with microservices architecture and strict environment isolation.
+TTRPG Center is a comprehensive AI-powered platform designed for tabletop RPG content management. MVP v2 implements a full Pass 0â†’G ingestion pipeline with microservices architecture and strict environment isolation.
 
 ### Key Features
 
-- **Pass 0→G Ingestion Pipeline**: Complete document processing from preflight checks to HGRN consistency validation
+- **Pass 0â†’G Ingestion Pipeline**: Complete document processing from preflight checks to HGRN consistency validation
 - **Environment Isolation**: Strict dev/test/prod environment separation with dedicated resources
 - **Microservices Architecture**: Scalable service-oriented design with proper port isolation
 - **External Test Execution**: Comprehensive testing infrastructure with web-based console
@@ -20,18 +20,18 @@ TTRPG Center is a comprehensive AI-powered platform designed for tabletop RPG co
 ### MVP v2 Phases (0-6)
 
 - **Phase 0**: Environment isolation, builds, and fast testing foundation
-- **Phase 1**: Pass 0→G ingestion pipeline (unstructured.io → Haystack → LlamaIndex)
+- **Phase 1**: Pass 0â†’G ingestion pipeline (unstructured.io â†’ Haystack â†’ LlamaIndex)
 - **Phase 2**: RAG retrieval with query classification and model routing
 - **Phase 3**: Graph workflows for guided processes
 - **Phase 4**: Admin UI for operational tools
 - **Phase 5**: User UI with retro terminal/LCARS design
 - **Phase 6**: Testing & feedback automation
 
-### Ingestion Pipeline (Pass 0→G)
+### Ingestion Pipeline (Pass 0â†’G)
 
 1. **Pass 0**: Preflight & De-dup - File validation and duplicate detection
 2. **Pass A**: TOC & Dictionary Seed - Table of contents extraction and dictionary initialization
-3. **Pass B**: Fast Split (≤10 MB parts) - Document splitting for processing optimization
+3. **Pass B**: Fast Split (â‰¤10 MB parts) - Document splitting for processing optimization
 4. **Pass C**: Extraction (Unstructured.io) - Content extraction and OCR processing
 5. **Pass D**: Normalize + Embeddings (Haystack) - Content normalization and vector embedding
 6. **Pass E**: Graph Compile (LlamaIndex) - Knowledge graph construction
@@ -42,29 +42,29 @@ TTRPG Center is a comprehensive AI-powered platform designed for tabletop RPG co
 
 ```
 env/
-├── dev/                    # Development environment (port 8000)
-│   ├── config/            # Environment-specific configuration
-│   ├── data/              # Development data
-│   ├── logs/              # Development logs
-│   └── artifacts/         # Development artifacts
-├── test/                   # Testing environment (port 8181)
-│   ├── config/
-│   ├── data/
-│   ├── logs/
-│   └── artifacts/
-└── prod/                   # Production environment (port 8282)
-    ├── config/
-    ├── data/
-    ├── logs/
-    └── artifacts/
+â”œâ”€â”€ dev/                    # Development environment (port 8000)
+â”‚   â”œâ”€â”€ config/            # Environment-specific configuration
+â”‚   â”œâ”€â”€ data/              # Development data
+â”‚   â”œâ”€â”€ logs/              # Development logs
+â”‚   â””â”€â”€ artifacts/         # Development artifacts
+â”œâ”€â”€ test/                   # Testing environment (port 8181)
+â”‚   â”œâ”€â”€ config/
+â”‚   â”œâ”€â”€ data/
+â”‚   â”œâ”€â”€ logs/
+â”‚   â””â”€â”€ artifacts/
+â””â”€â”€ prod/                   # Production environment (port 8282)
+    â”œâ”€â”€ config/
+    â”œâ”€â”€ data/
+    â”œâ”€â”€ logs/
+    â””â”€â”€ artifacts/
 ```
 
 ### Microservices
 
-- **Ingest Service** (ports: dev=8003, test=8184, prod=8285): Document ingestion and Pass 0→G pipeline
+- **Ingest Service** (ports: dev=8003, test=8184, prod=8285): Document ingestion and Pass 0â†’G pipeline
 - **Orchestrator** (ports: dev=8004, test=8185, prod=8286): Workflow coordination and management
 - **Admin API** (ports: dev=8001, test=8182, prod=8283): Administrative operations and monitoring
-- **User API** (ports: dev=8002, test=8183, prod=8284): User-facing query and retrieval operations
+- **User API** (ports: dev=8002, test=8181, prod=8284): User-facing query and retrieval operations
 
 ## Quick Start
 
@@ -141,7 +141,7 @@ LOG_LEVEL=INFO
 Environment-specific ports are configured in `env/{environment}/config/ports.json`:
 
 - **Development**: Main app (8000), Admin API (8001), User API (8002), Ingest (8003), Orchestrator (8004)
-- **Test**: Main app (8181), Admin API (8182), User API (8183), Ingest (8184), Orchestrator (8185)
+- **Test**: Main app (8181), Admin API (8182), User API (8181), Ingest (8184), Orchestrator (8185)
 - **Production**: Main app (8282), Admin API (8283), User API (8284), Ingest (8285), Orchestrator (8286)
 
 ## Usage
@@ -193,18 +193,18 @@ curl "http://localhost:8001/admin/status"
 
 ```
 /
-├── src_common/           # Shared libraries and utilities
-├── services/            # Microservices implementation
-│   ├── ingest/         # Document ingestion service
-│   ├── orchestrator/   # Workflow orchestration
-│   ├── admin_api/      # Administrative API
-│   ├── user_api/       # User-facing API
-│   ├── test_runner/    # External test execution
-│   └── test_console/   # Web-based test interface
-├── env/                # Environment isolation
-├── tests/              # Test suites
-├── scripts/            # Build and deployment scripts
-└── MVP-Version-2/      # Requirements and specifications
+â”œâ”€â”€ src_common/           # Shared libraries and utilities
+â”œâ”€â”€ services/            # Microservices implementation
+â”‚   â”œâ”€â”€ ingest/         # Document ingestion service
+â”‚   â”œâ”€â”€ orchestrator/   # Workflow orchestration
+â”‚   â”œâ”€â”€ admin_api/      # Administrative API
+â”‚   â”œâ”€â”€ user_api/       # User-facing API
+â”‚   â”œâ”€â”€ test_runner/    # External test execution
+â”‚   â””â”€â”€ test_console/   # Web-based test interface
+â”œâ”€â”€ env/                # Environment isolation
+â”œâ”€â”€ tests/              # Test suites
+â”œâ”€â”€ scripts/            # Build and deployment scripts
+â””â”€â”€ MVP-Version-2/      # Requirements and specifications
 ```
 
 ### Contributing
@@ -291,13 +291,17 @@ docker compose -f env/test/docker-compose.yml --profile testing up -d
 docker compose -f env/prod/docker-compose.yml --profile monitoring up -d
 ```
 
+### Immutable Image Pipeline
+
+Use `scripts/ci/container-build.sh` (container-with-2 compatible) to build and push versioned images, regenerate `env/<env>/images.lock`, and verify compose parity. Detailed instructions live in `docs/release/image-promotion.md` (including `ci/container-with-2.yml` pipeline wiring).
+
 ### Environment Promotion
 
 ```bash
 # Build with timestamped IDs
 ./scripts/build.ps1
 
-# Promote dev → test → prod
+# Promote dev â†’ test â†’ prod
 ./scripts/promote.ps1
 ```
 
@@ -315,11 +319,12 @@ docker compose -f env/prod/docker-compose.yml --profile monitoring up -d
 
 This implementation fully complies with MVP Version 2 requirements:
 
-- ✅ Pass 0→G ingestion pipeline with all 8 passes
-- ✅ Environment isolation (dev/test/prod)
-- ✅ Microservices architecture with port isolation
-- ✅ External test execution architecture
-- ✅ Structured JSON logging with required schema
-- ✅ Python 3.12+ with comprehensive type hints
-- ✅ Security-first approach with comprehensive measures
-- ✅ Docker Compose stacks for all environments
+- âœ… Pass 0â†’G ingestion pipeline with all 8 passes
+- âœ… Environment isolation (dev/test/prod)
+- âœ… Microservices architecture with port isolation
+- âœ… External test execution architecture
+- âœ… Structured JSON logging with required schema
+- âœ… Python 3.12+ with comprehensive type hints
+- âœ… Security-first approach with comprehensive measures
+- âœ… Docker Compose stacks for all environments
+

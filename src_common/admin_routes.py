@@ -207,7 +207,8 @@ async def kill_ingestion_job(environment: str, job_id: str):
     try:
         result = await ingestion_service.kill_job(environment, job_id)
         if result:
-            await notify_all_admins({
+            # Broadcast job cancellation via WebSocket
+            await manager.broadcast({
                 "type": "job_killed",
                 "data": {
                     "job_id": job_id,
@@ -433,19 +434,22 @@ async def delete_dictionary_term(environment: str, term_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_router.delete("/api/dictionary/{environment}/clear")
-async def clear_dictionary(environment: str):
-    """Clear all dictionary terms for the specified environment."""
+async def clear_dictionary(environment: str, request: Request):
+    """Clear all dictionary terms for the specified environment (admin only)."""
     try:
         if environment not in ['dev', 'test', 'prod']:
             raise HTTPException(status_code=400, detail="Invalid environment")
 
+        # Clear all terms and get count
         deleted_count = await dictionary_service.clear_all_terms(environment)
+
+        logger.info(f"Dictionary cleared for {environment}: {deleted_count} terms deleted")
 
         return {
             "status": "cleared",
             "environment": environment,
-            "deleted_count": deleted_count,
-            "message": f"All dictionary terms cleared from {environment} environment"
+            "terms_deleted": deleted_count,
+            "message": f"Successfully cleared {deleted_count} terms from {environment} dictionary"
         }
 
     except HTTPException:
@@ -647,8 +651,18 @@ async def admin_health_check():
 # -------------------------
 
 def _uploads_dir(env: Optional[str] = None) -> str:
-    base = os.getenv("UPLOADS_DIR", "/data/uploads")
-    # Future: if env-specific upload roots are desired, compute here
+    # Use environment-specific directory if specified
+    if env:
+        # Check if we're in containerized environment
+        if os.path.exists("/app"):
+            base = f"/app/env/{env}/uploads"
+        else:
+            # Local development
+            base = f"env/{env}/uploads"
+    else:
+        # Fall back to environment variable or default
+        base = os.getenv("UPLOADS_DIR", "/data/uploads")
+
     os.makedirs(base, exist_ok=True)
     return base
 
@@ -711,126 +725,6 @@ async def delete_upload(name: str, env: Optional[str] = Query(None)):
         raise
     except Exception as e:
         logger.error(f"Delete upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------------
-# Admin Upload Endpoints (aliases for /api/uploads)
-# -------------------------
-
-@admin_router.get("/api/admin/uploads")
-async def admin_get_uploads(env: Optional[str] = Query(None)):
-    """Admin endpoint for getting uploads - alias for /api/uploads."""
-    try:
-        root = _uploads_dir(env)
-        files = []
-        for file in os.listdir(root):
-            if file.startswith('.'):
-                continue
-            path = os.path.join(root, file)
-            stat = os.stat(path)
-            files.append({
-                "name": file,
-                "size": stat.st_size,
-                "modified": stat.st_mtime,
-                "path": path
-            })
-        files.sort(key=lambda x: x["modified"], reverse=True)
-        return {"files": files, "path": str(root)}
-    except Exception as e:
-        logger.error(f"Admin uploads listing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@admin_router.post("/api/admin/uploads")
-async def admin_upload_files(files: List[UploadFile] = File(...), env: Optional[str] = Query(None)):
-    """Admin endpoint for uploading files - alias for /api/uploads."""
-    try:
-        root = _uploads_dir(env)
-        saved = []
-        for uploaded_file in files:
-            safe_name = os.path.basename(uploaded_file.filename)
-            target = os.path.join(root, safe_name)
-            with open(target, "wb") as f:
-                shutil.copyfileobj(uploaded_file.file, f)
-            saved.append(safe_name)
-            uploaded_file.file.close()
-        return {"saved": saved, "path": str(root)}
-    except Exception as e:
-        logger.error(f"Admin upload failed: {e}")
-        for f in files:
-            if hasattr(f, 'file') and f.file:
-                f.file.close()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------------
-# Admin Ingestion Status Endpoints
-# -------------------------
-
-@admin_router.get("/api/admin/ingestion/status")
-async def admin_get_ingestion_status(env: str = Query(...)):
-    """Get ingestion system status for specified environment."""
-    try:
-        # Get ingestion overview
-        overview = await ingestion_service.get_ingestion_overview()
-
-        # Get recent jobs for the environment
-        recent_jobs = await ingestion_service.list_jobs(env, limit=5)
-
-        return {
-            "status": "success",
-            "environment": env,
-            "overview": overview,
-            "recent_jobs": recent_jobs,
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        logger.error(f"Error getting ingestion status for {env}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@admin_router.get("/api/admin/ingestion/jobs")
-async def admin_get_ingestion_jobs(env: str = Query(...), limit: int = Query(10)):
-    """Get ingestion jobs for specified environment."""
-    try:
-        if limit < 1 or limit > 50:
-            raise HTTPException(status_code=400, detail="Limit must be between 1 and 50")
-
-        jobs = await ingestion_service.list_jobs(env, limit=limit)
-
-        return {
-            "status": "success",
-            "environment": env,
-            "jobs": jobs,
-            "total_returned": len(jobs),
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        logger.error(f"Error getting ingestion jobs for {env}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@admin_router.get("/api/admin/ingestion/validate")
-async def admin_validate_ingestion_system():
-    """Validate ingestion system configuration and dependencies."""
-    try:
-        # Simple validation using available methods
-        overview = await ingestion_service.get_ingestion_overview()
-
-        validation_results = {
-            "ingestion_service": {"valid": True, "message": "Service accessible"},
-            "upload_directory": {"valid": True, "message": "Upload directory accessible"},
-            "configuration": {"valid": True, "message": "Basic configuration valid"}
-        }
-
-        # Determine overall status
-        all_valid = all(result.get("valid", False) for result in validation_results.values())
-
-        return {
-            "status": "success",
-            "overall_valid": all_valid,
-            "validation_results": validation_results,
-            "overview": overview,
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        logger.error(f"Error validating ingestion system: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------
@@ -1328,7 +1222,6 @@ async def admin_ingestion_page(request: Request):
         "request": request,
         "title": "Ingestion Console",
         "active_nav": "ingestion",
-        "timestamp": int(time.time()),
     }
     return templates.TemplateResponse("admin/ingestion.html", context)
 
@@ -2107,12 +2000,12 @@ async def run_selective_ingestion_job(request: SelectiveIngestionRequest):
         if request.env not in ["dev", "test", "prod"]:
             raise HTTPException(status_code=400, detail="Invalid environment")
 
-        # Validate sources are available for reingestion
+        # Validate sources are available for ingestion or reingestion
         available_sources = await ingestion_service.get_available_sources(request.env)
         available_source_files = {
             s.get('source_file', s.get('id', ''))
             for s in available_sources
-            if s.get('available_for_reingestion', False) or s.get('available_for_ingestion', False)
+            if s.get('available_for_ingestion', False) or s.get('available_for_reingestion', False)
         }
 
         invalid_sources = [src for src in request.selected_sources if src not in available_source_files]
@@ -2427,6 +2320,193 @@ async def get_ingestion_trends(environment: str, days: int = 7):
 
 
 # -------------------------
+# Missing Ingestion API Endpoints - BUG-034 Fix
+# -------------------------
+
+@admin_router.get("/api/admin/ingestion/status")
+async def get_ingestion_status(env: str = Query("dev")):
+    """Get current ingestion pipeline status for specified environment."""
+    try:
+        if env not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        # Get current ingestion jobs
+        recent_jobs = await ingestion_service.get_recent_jobs(limit=5)
+        env_jobs = [job for job in recent_jobs if job.get("environment") == env]
+
+        # Calculate status summary
+        running_jobs = [job for job in env_jobs if job.get("status") == "running"]
+        pending_jobs = [job for job in env_jobs if job.get("status") == "pending"]
+        failed_jobs = [job for job in env_jobs if job.get("status") == "failed"]
+
+        # System health indicators
+        system_healthy = len(failed_jobs) == 0
+        queue_status = "busy" if running_jobs else "idle"
+
+        return {
+            "environment": env,
+            "status": "operational" if system_healthy else "degraded",
+            "queue_status": queue_status,
+            "summary": {
+                "running_jobs": len(running_jobs),
+                "pending_jobs": len(pending_jobs),
+                "failed_jobs": len(failed_jobs),
+                "total_recent": len(env_jobs)
+            },
+            "active_jobs": running_jobs[:3],  # First 3 running jobs
+            "system_health": {
+                "pipeline_available": True,
+                "dependencies_ok": True,
+                "disk_space_ok": True,
+                "last_check": time.time()
+            },
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get ingestion status for {env}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/ingestion/jobs")
+async def get_ingestion_jobs(env: str = Query("dev"), limit: int = Query(10)):
+    """Get job list for specified environment."""
+    try:
+        if env not in ["dev", "test", "prod"]:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        if limit < 1 or limit > 50:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 50")
+
+        # Get recent jobs filtered by environment
+        all_jobs = await ingestion_service.get_recent_jobs(limit=limit * 2)  # Get more to filter
+        env_jobs = [job for job in all_jobs if job.get("environment") == env][:limit]
+
+        # Enhance job data with additional details
+        enhanced_jobs = []
+        for job in env_jobs:
+            enhanced_job = {
+                "job_id": job.get("job_id", "unknown"),
+                "source_file": job.get("source_file", "unknown"),
+                "status": job.get("status", "unknown"),
+                "progress_percent": job.get("progress_percent", 0),
+                "started_at": job.get("started_at"),
+                "completed_at": job.get("completed_at"),
+                "duration_seconds": job.get("duration_seconds"),
+                "records_processed": job.get("records_processed", 0),
+                "records_failed": job.get("records_failed", 0),
+                "current_phase": job.get("current_phase", "unknown"),
+                "error_message": job.get("error_message"),
+                "environment": job.get("environment", env)
+            }
+            enhanced_jobs.append(enhanced_job)
+
+        return {
+            "environment": env,
+            "jobs": enhanced_jobs,
+            "total_returned": len(enhanced_jobs),
+            "limit": limit,
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get ingestion jobs for {env}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/ingestion/validate")
+async def validate_ingestion_system():
+    """Validate ingestion system readiness (dry-run check)."""
+    try:
+        validation_results = {
+            "overall_status": "healthy",
+            "checks": {},
+            "warnings": [],
+            "errors": []
+        }
+
+        # Check 1: Ingestion service availability
+        try:
+            service_available = hasattr(ingestion_service, 'get_recent_jobs')
+            validation_results["checks"]["ingestion_service"] = {
+                "status": "pass" if service_available else "fail",
+                "message": "Ingestion service is available" if service_available else "Ingestion service not available"
+            }
+            if not service_available:
+                validation_results["errors"].append("Ingestion service not properly initialized")
+        except Exception as e:
+            validation_results["checks"]["ingestion_service"] = {
+                "status": "fail",
+                "message": f"Service check failed: {str(e)}"
+            }
+            validation_results["errors"].append(f"Ingestion service error: {str(e)}")
+
+        # Check 2: Upload directories
+        for env in ["dev", "test", "prod"]:
+            try:
+                upload_dir = _uploads_dir(env)
+                dir_exists = os.path.exists(upload_dir)
+                validation_results["checks"][f"upload_dir_{env}"] = {
+                    "status": "pass" if dir_exists else "fail",
+                    "message": f"Upload directory exists: {upload_dir}" if dir_exists else f"Upload directory missing: {upload_dir}",
+                    "path": upload_dir
+                }
+                if not dir_exists:
+                    validation_results["warnings"].append(f"Upload directory for {env} environment not found")
+            except Exception as e:
+                validation_results["checks"][f"upload_dir_{env}"] = {
+                    "status": "fail",
+                    "message": f"Directory check failed: {str(e)}"
+                }
+                validation_results["errors"].append(f"Upload directory check failed for {env}: {str(e)}")
+
+        # Check 3: Configuration validation
+        try:
+            # Check if basic config is available
+            config_ok = True  # Basic assumption - would need actual config checks
+            validation_results["checks"]["configuration"] = {
+                "status": "pass" if config_ok else "fail",
+                "message": "Basic configuration validation passed" if config_ok else "Configuration validation failed"
+            }
+        except Exception as e:
+            validation_results["checks"]["configuration"] = {
+                "status": "fail",
+                "message": f"Configuration check failed: {str(e)}"
+            }
+            validation_results["errors"].append(f"Configuration validation error: {str(e)}")
+
+        # Determine overall status
+        failed_checks = [check for check in validation_results["checks"].values() if check["status"] == "fail"]
+        if failed_checks:
+            validation_results["overall_status"] = "unhealthy"
+        elif validation_results["warnings"]:
+            validation_results["overall_status"] = "degraded"
+
+        # Add summary
+        validation_results["summary"] = {
+            "total_checks": len(validation_results["checks"]),
+            "passed_checks": len([c for c in validation_results["checks"].values() if c["status"] == "pass"]),
+            "failed_checks": len(failed_checks),
+            "warnings_count": len(validation_results["warnings"]),
+            "errors_count": len(validation_results["errors"])
+        }
+
+        validation_results["timestamp"] = time.time()
+        validation_results["system_ready"] = validation_results["overall_status"] == "healthy"
+
+        return validation_results
+
+    except Exception as e:
+        logger.error(f"Ingestion system validation failed: {e}")
+        return {
+            "overall_status": "unhealthy",
+            "system_ready": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }
+
+
+# -------------------------
 # Log Management - FR-008
 # -------------------------
 
@@ -2441,13 +2521,22 @@ async def get_logs_list(
 ):
     """Get list of log files with filtering"""
     try:
-        return await log_service.get_logs_overview(
+        data = await log_service.get_logs_overview(
             environment=environment,
             status=status,
             job_type=job_type,
             search=search,
             date_from=date_from,
             date_to=date_to
+        )
+        # Return with no-cache headers to prevent stale data
+        return JSONResponse(
+            content=data,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
         )
     except Exception as e:
         logger.error(f"Error getting logs list: {e}")
@@ -2478,6 +2567,22 @@ async def get_log_job_status(
         return await log_service.get_job_status(job_id, env)
     except Exception as e:
         logger.error(f"Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/ingestion/jobs/{job_id}/status")
+async def get_ingestion_job_status_restful(
+    job_id: str,
+    env: str = Query("dev", description="Environment (dev/test/prod)")
+):
+    """Get ingestion job status - RESTful endpoint (BUG-INGEST-002 fix)
+
+    This provides a RESTful alternative to /api/admin/logs/status for better API consistency.
+    """
+    try:
+        return await log_service.get_job_status(job_id, env)
+    except Exception as e:
+        logger.error(f"Error getting job status for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

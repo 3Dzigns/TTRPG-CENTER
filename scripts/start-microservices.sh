@@ -32,7 +32,7 @@ PORTS[admin_api_dev]=8001
 PORTS[admin_api_test]=8182
 PORTS[admin_api_prod]=8283
 PORTS[user_api_dev]=8002
-PORTS[user_api_test]=8183
+PORTS[user_api_test]=8181
 PORTS[user_api_prod]=8284
 
 start_microservice() {

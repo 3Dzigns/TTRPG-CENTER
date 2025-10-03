@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List, Optional
 
 from src_common.config import ConfigManager
 from src_common.logging import get_logger
+from src_common.job_logging import log_to_job, log_pass_start, log_pass_complete, log_heartbeat
 
 try:
     from haystack import Document  # type: ignore
@@ -56,9 +57,10 @@ class PassDResult:
 class VectorEnricher:
     """Handles chunk loading and embedding generation."""
 
-    def __init__(self, job_id: str, env: str) -> None:
+    def __init__(self, job_id: str, env: str, job_log_file: Optional[Path] = None) -> None:
         self.job_id = job_id
         self.env = env
+        self.job_log_file = job_log_file
         self.config = ConfigManager()
         self.embedding_model = self.config.get_config("PASS_D_EMBEDDING_MODEL", "text-embedding-3-small")
         self.vector_dim = int(self.config.get_config("PASS_D_EMBED_DIM", 384))
@@ -90,6 +92,10 @@ class VectorEnricher:
 
     def process(self, job_dir: Path) -> PassDResult:
         started_at = time.perf_counter()
+
+        # Pass start logging
+        log_pass_start("D", f"Vector Enrichment & NER (model={self.embedding_model})", self.job_log_file)
+
         pass_dir = job_dir / "pass_d"
         pass_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,7 +103,10 @@ class VectorEnricher:
         if not chunks_file.exists():
             raise FileNotFoundError(f"Pass C chunks not found: {chunks_file}")
 
+        logger.info(f"Pass D: Loading chunks from {chunks_file.name}")
         records = list(self._load_chunks(chunks_file))
+        logger.info(f"Pass D: Loaded {len(records)} chunks for vector enrichment")
+
         vectors: List[VectorRecord] = []
         haystack_used = False
         fallback_used = False
@@ -105,17 +114,27 @@ class VectorEnricher:
         if records:
             if self._haystack_retriever is not None:
                 try:
+                    logger.info(f"Pass D: Starting Haystack embedding generation for {len(records)} chunks (this may take 30-90s)")
+                    log_to_job(f"Starting Haystack embedding for {len(records)} chunks (30-90s operation)", self.job_log_file, "info", "D")
+                    embedding_started = time.perf_counter()
+
                     haystack_vectors = self._run_haystack(records)
                     vectors.extend(haystack_vectors)
                     haystack_used = True
+
+                    embedding_duration = time.perf_counter() - embedding_started
+                    logger.info(f"Pass D: Haystack embedding completed in {embedding_duration:.1f}s ({len(vectors)} vectors)")
+                    log_to_job(f"Haystack embedding completed in {embedding_duration:.1f}s ({len(vectors)} vectors)", self.job_log_file, "info", "D")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "pass_d_haystack_failure",
                         extra={"job_id": self.job_id, "reason": str(exc)},
                     )
+                    logger.info(f"Pass D: Falling back to zero-vector generation")
                     vectors.extend(self._fallback_vectors(records))
                     fallback_used = True
             else:
+                logger.info(f"Pass D: Haystack not available, using zero-vector fallback for {len(records)} chunks")
                 vectors.extend(self._fallback_vectors(records))
                 fallback_used = True
 
@@ -162,6 +181,8 @@ class VectorEnricher:
         ]
 
         processing_time_ms = int((time.perf_counter() - started_at) * 1000)
+        duration_seconds = processing_time_ms / 1000
+
         logger.info(
             "pass_d_complete",
             extra={
@@ -173,6 +194,15 @@ class VectorEnricher:
                 "duration_ms": processing_time_ms,
             },
         )
+
+        # Pass complete logging
+        stats = {
+            "chunks_vectorized": len(vectors),
+            "model": self.embedding_model,
+            "haystack_used": haystack_used,
+            "fallback_used": fallback_used
+        }
+        log_pass_complete("D", duration_seconds, stats, self.job_log_file)
 
         return PassDResult(
             job_id=self.job_id,
@@ -232,8 +262,8 @@ class VectorEnricher:
         return vectors
 
 
-def process_pass_d(job_dir: Path, job_id: str, env: str) -> PassDResult:
-    enricher = VectorEnricher(job_id=job_id, env=env)
+def process_pass_d(job_dir: Path, job_id: str, env: str, job_log_file: Optional[Path] = None) -> PassDResult:
+    enricher = VectorEnricher(job_id=job_id, env=env, job_log_file=job_log_file)
     return enricher.process(job_dir)
 
 

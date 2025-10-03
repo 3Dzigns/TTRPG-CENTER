@@ -1,15 +1,31 @@
 # MVP v2 Microservices Dockerfile
-FROM python:3.12-slim as base
+FROM python:3.12-slim AS base
 
 # Set build argument for service name
 ARG SERVICE_NAME
 ENV SERVICE_NAME=${SERVICE_NAME}
 
-# Install system dependencies
+# Install system dependencies including OCR tools for unstructured.io
 RUN apt-get update && apt-get install -y \
+    # Build tools
     gcc \
     g++ \
     curl \
+    # PDF processing (Poppler utilities - provides pdftotext)
+    poppler-utils \
+    # OCR (Tesseract)
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    # OpenGL dependencies for unstructured.io/cv2 (BUG-INGEST-001 fix)
+    libgl1 \
+    libglx0 \
+    libglib2.0-0t64 \
+    libxext6 \
+    libsm6 \
+    libxrender1 \
+    libfontconfig1 \
+    # Image processing
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -23,6 +39,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy source code
 COPY src_common/ ./src_common/
 COPY services/ ./services/
+COPY templates/ ./templates/
 COPY pyproject.toml ./
 
 # Create non-root user for security
@@ -38,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/healthz || exit 1
 
 # Default command - will be overridden by docker-compose
-CMD python -m uvicorn services.${SERVICE_NAME}.api:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["sh", "-c", "python -m uvicorn services.${SERVICE_NAME}.api:app --host 0.0.0.0 --port ${PORT:-8000}"]

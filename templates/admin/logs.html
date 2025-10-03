@@ -312,7 +312,9 @@ function setupCleanupHandlers() {
 async function loadLogsData() {
     try {
         console.log('Loading logs data...');
-        const response = await fetch('/api/admin/logs/list');
+        // Add cache-busting timestamp to ensure fresh data
+        const cacheBuster = `_=${Date.now()}`;
+        const response = await fetch(`/api/admin/logs/list?${cacheBuster}`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -435,6 +437,8 @@ async function filterLogs() {
                 params.append(key, value);
             }
         });
+        // Add cache-busting timestamp
+        params.append('_', Date.now().toString());
 
         const response = await fetch(`/api/admin/logs/list?${params}`);
         if (!response.ok) {

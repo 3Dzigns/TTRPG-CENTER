@@ -1,0 +1,120 @@
+{
+  "job_id": "test_job",
+  "split_performed": true,
+  "total_pages": 578,
+  "threshold_mb": 10,
+  "mode": "lightweight",
+  "lightweight": true,
+  "parts": [
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-01",
+      "section_id": "pages-1-58",
+      "page_start": 1,
+      "page_end": 58,
+      "relative_path": "pass_b/parts/test_job_part_01.pdf",
+      "checksum_sha256": "1251a9d6454134a80641a836363601af264ae841663d524020af564c788dfbc9",
+      "size_bytes": 29510672,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-02",
+      "section_id": "pages-59-116",
+      "page_start": 59,
+      "page_end": 116,
+      "relative_path": "pass_b/parts/test_job_part_02.pdf",
+      "checksum_sha256": "83910d6aec3f80677edfa8e6573b04b82b95e43d7145789d4757efd9f72aaf59",
+      "size_bytes": 16442018,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-03",
+      "section_id": "pages-117-174",
+      "page_start": 117,
+      "page_end": 174,
+      "relative_path": "pass_b/parts/test_job_part_03.pdf",
+      "checksum_sha256": "6a922ede1e02b97caf74e5379787608d8b135f281e5c93ae5762ccad076f4b28",
+      "size_bytes": 16732729,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-04",
+      "section_id": "pages-175-232",
+      "page_start": 175,
+      "page_end": 232,
+      "relative_path": "pass_b/parts/test_job_part_04.pdf",
+      "checksum_sha256": "7b60d9488972f64c43dc2008578ba13fdbdda8bd830e10b68b2eb6da69de0d6b",
+      "size_bytes": 20567526,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-05",
+      "section_id": "pages-233-290",
+      "page_start": 233,
+      "page_end": 290,
+      "relative_path": "pass_b/parts/test_job_part_05.pdf",
+      "checksum_sha256": "8fe66ccc804ae63114d24af455410825fc41af6ec13cd579485ab29d5526bd47",
+      "size_bytes": 4520128,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-06",
+      "section_id": "pages-291-348",
+      "page_start": 291,
+      "page_end": 348,
+      "relative_path": "pass_b/parts/test_job_part_06.pdf",
+      "checksum_sha256": "2adcc26bbc563d5483827b3c9a4badcd7794de4ed7d015a32fb08622b5ddf9ad",
+      "size_bytes": 4197654,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-07",
+      "section_id": "pages-349-406",
+      "page_start": 349,
+      "page_end": 406,
+      "relative_path": "pass_b/parts/test_job_part_07.pdf",
+      "checksum_sha256": "0e302e60ca7b79ba4a5e564a60acb92afbad404c0b14e12c868087d1807ac9da",
+      "size_bytes": 16521397,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-08",
+      "section_id": "pages-407-464",
+      "page_start": 407,
+      "page_end": 464,
+      "relative_path": "pass_b/parts/test_job_part_08.pdf",
+      "checksum_sha256": "0533ad90f8b447e5838b1684a91bf27eb8e20d6ae32711610b3e4cf9cce7bf93",
+      "size_bytes": 16951706,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-09",
+      "section_id": "pages-465-522",
+      "page_start": 465,
+      "page_end": 522,
+      "relative_path": "pass_b/parts/test_job_part_09.pdf",
+      "checksum_sha256": "0076ca0cdc0a6050abde85cf1c9763f89f8e0e5fc38a9f9306a748e46537218a",
+      "size_bytes": 5241073,
+      "section_title": null
+    },
+    {
+      "doc_id": "test_job",
+      "part_id": "test_job-part-10",
+      "section_id": "pages-523-578",
+      "page_start": 523,
+      "page_end": 578,
+      "relative_path": "pass_b/parts/test_job_part_10.pdf",
+      "checksum_sha256": "2da63840e97880292e44e4655bc17d4cb77c790cb9ba4e8b6991ae1a5dfa5528",
+      "size_bytes": 13450629,
+      "section_title": null
+    }
+  ]
+}

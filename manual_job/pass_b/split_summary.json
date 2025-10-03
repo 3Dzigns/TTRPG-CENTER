@@ -1,0 +1,12 @@
+{
+  "job_id": "manual_test",
+  "env": "dev",
+  "split_performed": true,
+  "total_pages": 578,
+  "file_size_bytes": 98535290,
+  "threshold_mb": 10,
+  "parts_created": 10,
+  "mode": "lightweight",
+  "lightweight": true,
+  "generated_at": "2025-10-02T13:59:29.302564-05:00"
+}

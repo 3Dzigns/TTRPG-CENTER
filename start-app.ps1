@@ -1,0 +1,21 @@
+docker run -d `
+  --name ttrpg-app-dev `
+  --network ttrpg-dev-network `
+  --user ttrpg `
+  -w /app `
+  --env-file="E:\TTRPG_Center\env\dev\config\.env" `
+  -e TARGET_ENV=dev `
+  -e SERVICE_NAME=app `
+  -e PORT=8000 `
+  -e "TZ=America/Chicago" `
+  -e PYTHONPATH=/app `
+  -e PYTHONUNBUFFERED=1 `
+  -v "E:\TTRPG_Center:/app" `
+  -v "E:\TTRPG_Center\env\dev\logs:/app/env/dev/logs" `
+  -v "E:\TTRPG_Center\env\dev\cache:/app/env/dev/cache" `
+  -v "E:\TTRPG_Center\env\dev\uploads:/app/env/dev/uploads" `
+  -p 8007:8000 `
+  --restart=unless-stopped `
+  --entrypoint=/opt/venv/bin/python `
+  ttrpg_center-app `
+  -m uvicorn app:app --host 0.0.0.0 --port 8000

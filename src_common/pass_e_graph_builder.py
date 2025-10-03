@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Optional
 
 from src_common.config import ConfigManager
 from src_common.logging import get_logger
+from src_common.job_logging import log_to_job, log_pass_start, log_pass_complete
 
 try:
     from llama_index.graph_stores.simple import SimpleGraphStore  # type: ignore
@@ -43,13 +44,18 @@ class PassEResult:
 class GraphBuilder:
     """Builds graph artifacts from vector data."""
 
-    def __init__(self, job_id: str, env: str) -> None:
+    def __init__(self, job_id: str, env: str, job_log_file: Optional[Path] = None) -> None:
         self.job_id = job_id
         self.env = env
+        self.job_log_file = job_log_file
         self.config = ConfigManager()
 
     def process(self, job_dir: Path) -> PassEResult:
         started_at = time.perf_counter()
+
+        # Pass start logging
+        log_pass_start("E", "Graph Building & Cross-References (LlamaIndex)", self.job_log_file)
+
         pass_dir = job_dir / "pass_e"
         pass_dir.mkdir(parents=True, exist_ok=True)
 
@@ -57,22 +63,35 @@ class GraphBuilder:
         if not vector_path.exists():
             raise FileNotFoundError(f"Pass D vectors not found: {vector_path}")
 
+        logger.info(f"Pass E: Loading vectors from {vector_path.name}")
         vector_records = list(self._load_vectors(vector_path))
+        logger.info(f"Pass E: Loaded {len(vector_records)} vectors for graph building")
+
         llama_used = False
         fallback_used = False
 
         if vector_records and LLAMA_AVAILABLE:
             try:
+                logger.info(f"Pass E: Starting LlamaIndex graph compilation for {len(vector_records)} vectors (this may take 20-60s)")
+                log_to_job(f"Starting LlamaIndex graph compilation for {len(vector_records)} vectors (20-60s operation)", self.job_log_file, "info", "E")
+                graph_started = time.perf_counter()
+
                 nodes, edges = self._build_with_llama(vector_records)
                 llama_used = True
+
+                graph_duration = time.perf_counter() - graph_started
+                logger.info(f"Pass E: LlamaIndex graph compiled in {graph_duration:.1f}s ({len(nodes)} nodes, {len(edges)} edges)")
+                log_to_job(f"Graph compiled in {graph_duration:.1f}s ({len(nodes)} nodes, {len(edges)} edges)", self.job_log_file, "info", "E")
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "pass_e_llama_failure",
                     extra={"job_id": self.job_id, "reason": str(exc)},
                 )
+                logger.info(f"Pass E: Falling back to simple graph generation")
                 nodes, edges = self._build_fallback(vector_records)
                 fallback_used = True
         else:
+            logger.info(f"Pass E: LlamaIndex not available, using fallback graph generation for {len(vector_records)} vectors")
             nodes, edges = self._build_fallback(vector_records)
             fallback_used = True
 
@@ -118,6 +137,8 @@ class GraphBuilder:
         ]
 
         processing_time_ms = int((time.perf_counter() - started_at) * 1000)
+        duration_seconds = processing_time_ms / 1000
+
         logger.info(
             "pass_e_complete",
             extra={
@@ -129,6 +150,15 @@ class GraphBuilder:
                 "duration_ms": processing_time_ms,
             },
         )
+
+        # Pass complete logging
+        stats = {
+            "nodes_created": len(nodes),
+            "edges_created": len(edges),
+            "llama_used": llama_used,
+            "fallback_used": fallback_used
+        }
+        log_pass_complete("E", duration_seconds, stats, self.job_log_file)
 
         return PassEResult(
             job_id=self.job_id,
@@ -212,8 +242,8 @@ class GraphBuilder:
         return actions
 
 
-def process_pass_e(job_dir: Path, job_id: str, env: str) -> PassEResult:
-    builder = GraphBuilder(job_id=job_id, env=env)
+def process_pass_e(job_dir: Path, job_id: str, env: str, job_log_file: Optional[Path] = None) -> PassEResult:
+    builder = GraphBuilder(job_id=job_id, env=env, job_log_file=job_log_file)
     return builder.process(job_dir)
 
 

@@ -59,7 +59,7 @@ const getApiUrl = (): string => {
   const currentEnv = import.meta.env.MODE || 'development';
   const portMap = {
     development: 8002,
-    test: 8183,
+    test: 8181,
     production: 8284
   };
   const port = portMap[currentEnv] || 8002;

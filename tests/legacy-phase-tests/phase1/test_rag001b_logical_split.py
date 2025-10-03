@@ -81,7 +81,7 @@ class TestPassBLogicalSplit:
             assert should_split == False, "Small PDF should not be split"
 
             # Test process_pass_b function
-            result = process_pass_b(Path(test_pdf_path), artifacts_dir, "test_job")
+            result = process_pass_b(Path(test_pdf_path), artifacts_dir, "test_job", "dev")
 
             # Verify result structure (PassBResult object)
             assert hasattr(result, 'split_performed'), "Result should indicate if split was performed"
@@ -147,7 +147,7 @@ class TestPassBLogicalSplit:
                 mock_writer.return_value = mock_writer_instance
 
                 # Test process_pass_b with large file
-                result = process_pass_b(Path(test_pdf_path), artifacts_dir, "test_job")
+                result = process_pass_b(Path(test_pdf_path), artifacts_dir, "test_job", "dev")
 
                 # Verify split was attempted for large file
                 assert hasattr(result, 'split_performed'), "Result should indicate if split was performed"
@@ -288,7 +288,7 @@ class TestPassBLogicalSplit:
                 f.write(b"%PDF-1.4\nContent\n%%EOF")
 
             # Test process_pass_b with small file
-            result = process_pass_b(Path(small_file), artifacts_dir, "test_job")
+            result = process_pass_b(Path(small_file), artifacts_dir, "test_job", "dev")
 
             # Verify manifest was updated
             updated_manifest = result["updated_manifest"]
@@ -310,7 +310,7 @@ class TestPassBLogicalSplit:
 
         # Test with non-existent artifacts directory
         with pytest.raises((FileNotFoundError, OSError)):
-            process_pass_b(Path("/nonexistent/file.pdf"), Path("/tmp"), "test_job")
+            process_pass_b(Path("/nonexistent/file.pdf"), Path("/tmp"), "test_job", "dev")
 
         # Test with invalid manifest
         with tempfile.TemporaryDirectory() as temp_dir:

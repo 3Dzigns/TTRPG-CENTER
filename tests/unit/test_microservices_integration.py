@@ -250,7 +250,7 @@ class TestMicroservicesIntegration:
             "ingest": {"dev": 8003, "test": 8184, "prod": 8285},
             "orchestrator": {"dev": 8004, "test": 8185, "prod": 8286},
             "admin_api": {"dev": 8001, "test": 8182, "prod": 8283},
-            "user_api": {"dev": 8002, "test": 8183, "prod": 8284}
+            "user_api": {"dev": 8002, "test": 8181, "prod": 8284}
         }
 
         # Verify no port conflicts

@@ -1,0 +1,120 @@
+{
+  "job_id": "manual_full",
+  "split_performed": true,
+  "total_pages": 578,
+  "threshold_mb": 10,
+  "mode": "standard",
+  "lightweight": false,
+  "parts": [
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-01",
+      "section_id": "pages-1-58",
+      "page_start": 1,
+      "page_end": 58,
+      "relative_path": "pass_b/parts/manual_full_part_01.pdf",
+      "checksum_sha256": "3431854b9a7ddd6659c7b6833f92370777ae6440ff9ef0f268b0a43a8c056cf5",
+      "size_bytes": 29493445,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-02",
+      "section_id": "pages-59-116",
+      "page_start": 59,
+      "page_end": 116,
+      "relative_path": "pass_b/parts/manual_full_part_02.pdf",
+      "checksum_sha256": "1a586942bb849dbd28d22acbd4cccef846c7f39cbb8e059b2e60c56b92665098",
+      "size_bytes": 16425840,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-03",
+      "section_id": "pages-117-174",
+      "page_start": 117,
+      "page_end": 174,
+      "relative_path": "pass_b/parts/manual_full_part_03.pdf",
+      "checksum_sha256": "a6d87bb982b22408f59be4f82750d1aff74fdca8316f8b2965e80ea542a00a1b",
+      "size_bytes": 16718214,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-04",
+      "section_id": "pages-175-232",
+      "page_start": 175,
+      "page_end": 232,
+      "relative_path": "pass_b/parts/manual_full_part_04.pdf",
+      "checksum_sha256": "ef694f1e18b31ef07dd7930c61cfbd0b8b96e9a809d1b489d6d4a180c0f01ea5",
+      "size_bytes": 20566284,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-05",
+      "section_id": "pages-233-290",
+      "page_start": 233,
+      "page_end": 290,
+      "relative_path": "pass_b/parts/manual_full_part_05.pdf",
+      "checksum_sha256": "68728efed0df0326e426287499a6292a6c1b597a1f273024ca67531162005f24",
+      "size_bytes": 4495549,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-06",
+      "section_id": "pages-291-348",
+      "page_start": 291,
+      "page_end": 348,
+      "relative_path": "pass_b/parts/manual_full_part_06.pdf",
+      "checksum_sha256": "dfa72c6dd3b4469232c49655d2bd535e264e342c30d9480649db1da5b31672cf",
+      "size_bytes": 4184649,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-07",
+      "section_id": "pages-349-406",
+      "page_start": 349,
+      "page_end": 406,
+      "relative_path": "pass_b/parts/manual_full_part_07.pdf",
+      "checksum_sha256": "85bdfccaf7c8ce82ed0136183b0468787cda79510acf89e2ec681dd28cb2a88d",
+      "size_bytes": 16505921,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-08",
+      "section_id": "pages-407-464",
+      "page_start": 407,
+      "page_end": 464,
+      "relative_path": "pass_b/parts/manual_full_part_08.pdf",
+      "checksum_sha256": "3f115c6022104abc8f4143d78ec3aea24ed8e9ecbfa40cb00a8038642acd15dd",
+      "size_bytes": 16949542,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-09",
+      "section_id": "pages-465-522",
+      "page_start": 465,
+      "page_end": 522,
+      "relative_path": "pass_b/parts/manual_full_part_09.pdf",
+      "checksum_sha256": "210ff720986f7e6b9968e77ddad6f6db0b7289bbabc2b691283c7a32431d4151",
+      "size_bytes": 5201483,
+      "section_title": null
+    },
+    {
+      "doc_id": "manual_full",
+      "part_id": "manual_full-part-10",
+      "section_id": "pages-523-578",
+      "page_start": 523,
+      "page_end": 578,
+      "relative_path": "pass_b/parts/manual_full_part_10.pdf",
+      "checksum_sha256": "5d75cbc472f55766a595016f3af952366990780ae87f3c87a1e8a71b785e58fa",
+      "size_bytes": 13430882,
+      "section_title": null
+    }
+  ]
+}

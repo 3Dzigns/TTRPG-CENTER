@@ -70,9 +70,9 @@ class TocParser:
 
         # Configure circuit breaker for PDF text extraction
         pdf_circuit_config = CircuitBreakerConfig(
-            failure_threshold=3,      # Open after 3 failures
+            failure_threshold=5,      # Open after 5 failures (increased for complex PDFs)
             recovery_timeout=60,      # Try recovery after 60 seconds
-            timeout=10.0,            # 10 second operation timeout
+            timeout=30.0,            # 30 second operation timeout (increased for complex pages)
             max_retry_attempts=2      # 2 retry attempts in half-open
         )
         self.pdf_circuit = get_circuit_breaker("pdf_text_extraction", pdf_circuit_config)
@@ -108,13 +108,13 @@ class TocParser:
         self._ocr_enabled = HAS_TESSERACT and HAS_PYMUPDF
 
 
-    def _extract_text_safely(self, page: pypdf.PageObject, page_index: int, timeout_seconds: float = 10.0) -> str:
+    def _extract_text_safely(self, page: pypdf.PageObject, page_index: int, timeout_seconds: float = 30.0) -> str:
         """
         Extract text from PDF page with timeout protection and circuit breaker.
 
         Args:
             page: PDF page object to extract text from
-            timeout_seconds: Maximum time to wait for extraction
+            timeout_seconds: Maximum time to wait for extraction (default 30s for complex pages)
 
         Returns:
             Extracted text or empty string on timeout/failure
@@ -125,7 +125,7 @@ class TocParser:
 
         try:
             # Use circuit breaker to protect against repeated failures
-            text = self.pdf_circuit.call(_extract_text_with_timeout, _extract_text, timeout_seconds)
+            text = self.pdf_circuit.call(self._extract_text_with_timeout, _extract_text, timeout_seconds)
         except Exception as e:
             logger.warning(f"Text extraction failed with circuit breaker: {e}")
             text = ""
@@ -192,6 +192,7 @@ class TocParser:
             logger.warning(f"TocParser: OCR fallback failed for page {page_index + 1}: {exc}")
             return ""
 
+    @staticmethod
     def _extract_text_with_timeout(extract_func, timeout_seconds: float) -> str:
         """
         Execute text extraction with timeout protection using ThreadPoolExecutor.
@@ -287,7 +288,7 @@ class TocParser:
 
         # Search first pages for ToC
         search_pages = min(self.max_toc_search_pages, len(pdf_reader.pages))
-        logger.info(f"BUG-035 Fix: Searching {search_pages} pages for ToC with timeout protection")
+        logger.info(f"ToC Search: Scanning {search_pages} pages with timeout protection")
 
         for page_num in range(search_pages):
             try:
@@ -298,7 +299,7 @@ class TocParser:
                 # Skip pages where text extraction failed (timeout or error)
                 if not text:
                     failed_pages.append(page_num + 1)
-                    logger.warning(f"BUG-035: Skipping page {page_num + 1} due to text extraction failure")
+                    logger.warning(f"ToC Search: Skipping page {page_num + 1} - text extraction failed (timeout protection active)")
                     continue
 
                 successful_pages += 1
@@ -314,7 +315,7 @@ class TocParser:
 
             except Exception as e:
                 failed_pages.append(page_num + 1)
-                logger.warning(f"BUG-035: Error processing page {page_num + 1} for ToC: {e}")
+                logger.warning(f"ToC Search: Error processing page {page_num + 1}: {e}")
                 continue  # Skip problematic pages, continue with others
         
         # If we found multiple ToC pages, continue parsing subsequent pages
@@ -345,12 +346,12 @@ class TocParser:
 
         has_toc = len(toc_entries) > 0
 
-        # Enhanced logging for BUG-035 diagnostics
+        # Enhanced diagnostic logging
         if failed_pages:
-            logger.warning(f"BUG-035: ToC parsing completed with {len(failed_pages)} failed pages: {failed_pages}")
+            logger.warning(f"ToC Search: Completed with {len(failed_pages)} failed pages: {failed_pages}")
 
-        logger.info(f"BUG-035 Fix: ToC parsing complete - {len(toc_entries)} entries found on pages {toc_pages}")
-        logger.info(f"BUG-035 Stats: {successful_pages}/{search_pages} pages processed successfully")
+        logger.info(f"ToC Parsing Complete: {len(toc_entries)} entries found on pages {toc_pages}")
+        logger.info(f"ToC Stats: {successful_pages}/{search_pages} pages processed successfully")
 
         return toc_entries, toc_pages, has_toc
     
@@ -361,7 +362,7 @@ class TocParser:
 
         # Handle cases where text extraction failed (timeout or error)
         if not text:
-            logger.warning(f"BUG-035: No text extracted from ToC page {page_num} - skipping ToC parsing")
+            logger.warning(f"ToC Parse: No text extracted from page {page_num} - skipping")
             return entries
 
         lines = text.split('\n')
@@ -381,14 +382,14 @@ class TocParser:
                     entry_count += 1
             except Exception as e:
                 parse_errors += 1
-                logger.debug(f"BUG-035: Failed to parse ToC line '{line[:50]}...': {e}")
+                logger.debug(f"ToC Parse: Failed to parse line '{line[:50]}...': {e}")
                 continue  # Skip problematic lines, continue with others
 
         # Log summary statistics for debugging
         if parse_errors > 0:
-            logger.warning(f"BUG-035: ToC page {page_num} had {parse_errors} parsing errors, extracted {len(entries)} entries")
+            logger.warning(f"ToC Parse: Page {page_num} had {parse_errors} parsing errors, extracted {len(entries)} entries")
         else:
-            logger.debug(f"BUG-035: ToC page {page_num} successfully parsed {len(entries)} entries")
+            logger.debug(f"ToC Parse: Page {page_num} successfully parsed {len(entries)} entries")
 
         return entries
     
@@ -509,7 +510,7 @@ class TocParser:
         start_page = min(5, len(pdf_reader.pages) // 10)  # Start at 5 or 10% through document
         total_pages = len(pdf_reader.pages) - start_page
 
-        logger.info(f"BUG-035 Fix: Extracting headings from {total_pages} content pages with timeout protection")
+        logger.info(f"Heading Extraction: Processing from {total_pages} content pages with timeout protection")
 
         for page_num in range(start_page, len(pdf_reader.pages)):
             try:
@@ -519,7 +520,7 @@ class TocParser:
                 # Skip pages where text extraction failed (timeout or error)
                 if not text:
                     failed_pages.append(page_num + 1)
-                    logger.debug(f"BUG-035: Skipping page {page_num + 1} due to text extraction failure")
+                    logger.debug(f"Heading Extraction: Skipping page {page_num + 1} due to text extraction failure")
                     continue
 
                 successful_pages += 1
@@ -531,15 +532,15 @@ class TocParser:
 
             except Exception as e:
                 failed_pages.append(page_num + 1)
-                logger.warning(f"BUG-035: Error extracting headings from page {page_num + 1}: {e}")
+                logger.warning(f"Heading Extraction: Error on page from page {page_num + 1}: {e}")
                 continue  # Skip problematic pages, continue with others
 
-        # Enhanced logging for BUG-035 diagnostics
+        # Enhanced diagnostic logging
         if failed_pages:
-            logger.warning(f"BUG-035: Heading extraction completed with {len(failed_pages)} failed pages: {failed_pages[:10]}")
+            logger.warning(f"Heading Extraction: completed with {len(failed_pages)} failed pages: {failed_pages[:10]}")
 
-        logger.info(f"BUG-035 Fix: Extracted {len(headings)} headings from document content")
-        logger.info(f"BUG-035 Stats: {successful_pages}/{total_pages} content pages processed successfully")
+        logger.info(f"Heading Extraction: Found {len(headings)} headings from document content")
+        logger.info(f"Extraction Stats: {successful_pages}/{total_pages} content pages processed successfully")
 
         return headings
     

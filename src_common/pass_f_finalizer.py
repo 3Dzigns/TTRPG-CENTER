@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from src_common.logging import get_logger
+from src_common.job_logging import log_to_job, log_pass_start, log_pass_complete
 
 logger = get_logger(__name__)
 
@@ -31,12 +32,17 @@ class PassFResult:
 class FinalizationRunner:
     """Verifies artifacts and produces manifest snapshot."""
 
-    def __init__(self, job_id: str, env: str) -> None:
+    def __init__(self, job_id: str, env: str, job_log_file: Optional[Path] = None) -> None:
         self.job_id = job_id
         self.env = env
+        self.job_log_file = job_log_file
 
     def process(self, job_dir: Path) -> PassFResult:
         started_at = time.perf_counter()
+
+        # Pass start logging
+        log_pass_start("F", "Finalization & Artifact Validation", self.job_log_file)
+
         pass_dir = job_dir / "pass_f"
         pass_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,6 +70,8 @@ class FinalizationRunner:
         ]
 
         processing_time_ms = int((time.perf_counter() - started_at) * 1000)
+        duration_seconds = processing_time_ms / 1000
+
         logger.info(
             "pass_f_complete",
             extra={
@@ -73,6 +81,14 @@ class FinalizationRunner:
                 "duration_ms": processing_time_ms,
             },
         )
+
+        # Pass complete logging
+        stats = {
+            "artifacts_indexed": manifest_snapshot["artifact_count"],
+            "checksum_failures": len(checksum_failures),
+            "success": len(checksum_failures) == 0
+        }
+        log_pass_complete("F", duration_seconds, stats, self.job_log_file)
 
         return PassFResult(
             job_id=self.job_id,
@@ -150,8 +166,8 @@ class FinalizationRunner:
         return {"path": manifest_path, "artifact_count": len(artifacts)}
 
 
-def process_pass_f(job_dir: Path, job_id: str, env: str) -> PassFResult:
-    runner = FinalizationRunner(job_id=job_id, env=env)
+def process_pass_f(job_dir: Path, job_id: str, env: str, job_log_file: Optional[Path] = None) -> PassFResult:
+    runner = FinalizationRunner(job_id=job_id, env=env, job_log_file=job_log_file)
     return runner.process(job_dir)
 
 

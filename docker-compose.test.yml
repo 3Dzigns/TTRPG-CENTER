@@ -1,4 +1,4 @@
-version: '3.8'
+﻿version: '3.8'
 
 networks:
   ttrpg-test:
@@ -69,11 +69,8 @@ services:
     restart: unless-stopped
 
   ingest:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: ingest
+    image: ${TEST_INGEST_IMAGE:-ghcr.io/ttrpg-center/ingest:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_INGEST_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-ingest-test
     working_dir: /app
     env_file:
@@ -104,11 +101,8 @@ services:
     restart: unless-stopped
 
   orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: orchestrator
+    image: ${TEST_ORCHESTRATOR_IMAGE:-ghcr.io/ttrpg-center/orchestrator:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_ORCHESTRATOR_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-orchestrator-test
     working_dir: /app
     env_file:
@@ -131,11 +125,8 @@ services:
     restart: unless-stopped
 
   admin-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: admin_api
+    image: ${TEST_ADMIN_API_IMAGE:-ghcr.io/ttrpg-center/admin-api:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_ADMIN_API_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-admin-api-test
     working_dir: /app
     env_file:
@@ -166,11 +157,8 @@ services:
     restart: unless-stopped
 
   user-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: user_api
+    image: ${TEST_USER_API_IMAGE:-ghcr.io/ttrpg-center/user-api:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_USER_API_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-user-api-test
     working_dir: /app
     env_file:
@@ -178,7 +166,7 @@ services:
     environment:
       TARGET_ENV: test
       SERVICE_NAME: user_api
-      PORT: "8183"
+      PORT: "8181"
     volumes:
       - ./:/app
       - ./env/test/logs:/app/env/test/logs
@@ -189,13 +177,12 @@ services:
       orchestrator:
         condition: service_started
     ports:
-      - "8183:8183"
+      - "8181:8181"
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      dockerfile: services/app/Dockerfile
+    image: ${TEST_APP_IMAGE:-ghcr.io/ttrpg-center/app:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_APP_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-app-test
     working_dir: /app
     env_file:
@@ -223,9 +210,8 @@ services:
     restart: unless-stopped
 
   test-runner:
-    build:
-      context: .
-      dockerfile: Dockerfile.test-runner
+    image: ${TEST_TEST_RUNNER_IMAGE:-ghcr.io/ttrpg-center/test-runner:test-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override TEST_TEST_RUNNER_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-test-runner-test
     working_dir: /app
     env_file:
@@ -250,3 +236,4 @@ services:
     restart: unless-stopped
     profiles:
       - testing
+

@@ -422,7 +422,28 @@ class MongoDictionaryService:
         except Exception as e:
             logger.error(f"Failed to delete dictionary entry '{term}': {e}")
             return False
-    
+
+    def clear_all_entries(self) -> tuple[bool, int]:
+        """
+        Clear all dictionary entries from the collection.
+
+        Returns:
+            Tuple of (success: bool, deleted_count: int)
+        """
+        if self.collection is None:
+            logger.error("Cannot clear entries: MongoDB collection not initialized")
+            return False, 0
+
+        try:
+            result = self.collection.delete_many({})
+            deleted_count = result.deleted_count
+            logger.info(f"Cleared all dictionary entries: {deleted_count} terms deleted")
+            return True, deleted_count
+
+        except Exception as e:
+            logger.error(f"Failed to clear dictionary entries: {e}")
+            return False, 0
+
     def get_categories(self) -> List[str]:
         """
         Get all available categories

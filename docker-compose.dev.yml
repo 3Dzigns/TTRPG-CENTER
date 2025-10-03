@@ -1,4 +1,4 @@
-version: '3.8'
+﻿version: '3.8'
 
 networks:
   ttrpg-dev:
@@ -17,7 +17,7 @@ services:
     ports:
       - "9042:9042"
     volumes:
-      - ./env/dev/data/cassandra:/var/lib/cassandra
+      - ttrpg_dev_data:/var/lib/cassandra
     networks:
       ttrpg-dev:
         aliases:
@@ -37,7 +37,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./env/dev/data/redis:/data
+      - ttrpg_dev_cache:/data
     networks:
       ttrpg-dev:
         aliases:
@@ -55,7 +55,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - ./env/dev/data/mongo:/data/db
+      - ttrpg_dev_data:/data/db
     networks:
       ttrpg-dev:
         aliases:
@@ -69,11 +69,8 @@ services:
     restart: unless-stopped
 
   ingest:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: ingest
+    image: ${DEV_INGEST_IMAGE:-ghcr.io/ttrpg-center/ingest:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_INGEST_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-ingest-dev
     working_dir: /app
     env_file:
@@ -82,14 +79,15 @@ services:
       TARGET_ENV: dev
       SERVICE_NAME: ingest
       PORT: "8003"
+      TZ: "America/Chicago"
     volumes:
-      - ./:/app
       - ./env/dev/data:/app/env/dev/data
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/artifacts:/app/env/dev/artifacts
       - ./env/dev/cache:/app/env/dev/cache
       - ./env/dev/uploads:/app/env/dev/uploads
       - ./env/dev/ssl:/app/env/dev/ssl
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
@@ -103,12 +101,47 @@ services:
       - "8003:8003"
     restart: unless-stopped
 
+  pipeline-worker:
+    image: ${DEV_PIPELINE_WORKER_IMAGE:-ghcr.io/ttrpg-center/pipeline-worker:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_PIPELINE_WORKER_IMAGE with released digest from scripts/registry/build-images.sh
+    container_name: ttrpg-pipeline-worker-dev
+    working_dir: /app
+    env_file:
+      - ./env/dev/config/.env
+    environment:
+      TARGET_ENV: dev
+      SERVICE_NAME: pipeline_worker
+      PORT: "8006"
+      BASE_PATH: "/app"
+      TZ: "America/Chicago"
+    volumes:
+      - ./env/dev/data:/app/env/dev/data
+      - ./env/dev/logs:/app/env/dev/logs
+      - ./env/dev/artifacts:/app/env/dev/artifacts
+      - ./env/dev/uploads:/app/env/dev/uploads
+      - ./:/app
+    networks:
+      - ttrpg-dev
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8006:8006"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8006/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: orchestrator
+    image: ${DEV_ORCHESTRATOR_IMAGE:-ghcr.io/ttrpg-center/orchestrator:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_ORCHESTRATOR_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-orchestrator-dev
     working_dir: /app
     env_file:
@@ -117,10 +150,11 @@ services:
       TARGET_ENV: dev
       SERVICE_NAME: orchestrator
       PORT: "8004"
+      TZ: "America/Chicago"
     volumes:
-      - ./:/app
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/cache:/app/env/dev/cache
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
@@ -131,11 +165,8 @@ services:
     restart: unless-stopped
 
   admin-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: admin_api
+    image: ${DEV_ADMIN_API_IMAGE:-ghcr.io/ttrpg-center/admin-api:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_ADMIN_API_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-admin-api-dev
     working_dir: /app
     env_file:
@@ -144,12 +175,13 @@ services:
       TARGET_ENV: dev
       SERVICE_NAME: admin_api
       PORT: "8001"
+      TZ: "America/Chicago"
     volumes:
-      - ./:/app
       - ./env/dev/data:/app/env/dev/data
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/artifacts:/app/env/dev/artifacts
       - ./env/dev/uploads:/app/env/dev/uploads
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
@@ -162,15 +194,12 @@ services:
       ingest:
         condition: service_started
     ports:
-      - "8001:8001"
+      - "8000:8001"
     restart: unless-stopped
 
   user-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: user_api
+    image: ${DEV_USER_API_IMAGE:-ghcr.io/ttrpg-center/user-api:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_USER_API_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-user-api-dev
     working_dir: /app
     env_file:
@@ -179,10 +208,11 @@ services:
       TARGET_ENV: dev
       SERVICE_NAME: user_api
       PORT: "8002"
+      TZ: "America/Chicago"
     volumes:
-      - ./:/app
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/cache:/app/env/dev/cache
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
@@ -193,9 +223,8 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      dockerfile: services/app/Dockerfile
+    image: ${DEV_APP_IMAGE:-ghcr.io/ttrpg-center/app:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_APP_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-app-dev
     working_dir: /app
     env_file:
@@ -204,28 +233,32 @@ services:
       TARGET_ENV: dev
       SERVICE_NAME: app
       PORT: "8000"
+      TZ: "America/Chicago"
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
     volumes:
-      - ./:/app
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/cache:/app/env/dev/cache
       - ./env/dev/uploads:/app/env/dev/uploads
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
-      admin-api:
-        condition: service_started
-      user-api:
-        condition: service_started
-      orchestrator:
-        condition: service_started
+      cassandra:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8007:8000"
     restart: unless-stopped
+    entrypoint: ["/opt/venv/bin/python", "-m", "uvicorn"]
+    command: ["app:app", "--host", "0.0.0.0", "--port", "8000"]
 
   test-runner:
-    build:
-      context: .
-      dockerfile: Dockerfile.test-runner
+    image: ${DEV_TEST_RUNNER_IMAGE:-ghcr.io/ttrpg-center/test-runner:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override DEV_TEST_RUNNER_IMAGE with released digest from scripts/registry/build-images.sh
     container_name: ttrpg-test-runner-dev
     working_dir: /app
     env_file:
@@ -234,10 +267,10 @@ services:
       TARGET_ENV: dev
       TEST_RUNNER_PORT: "8095"
     volumes:
-      - ./:/app
       - ./env/dev/logs:/app/env/dev/logs
       - ./env/dev/artifacts:/app/env/dev/artifacts
       - ./env/dev/cache:/app/env/dev/cache
+      - ./:/app
     networks:
       - ttrpg-dev
     depends_on:
@@ -250,3 +283,13 @@ services:
     restart: unless-stopped
     profiles:
       - testing
+
+volumes:
+  ttrpg_dev_uploads:
+  ttrpg_dev_data:
+  ttrpg_dev_logs:
+  ttrpg_dev_artifacts:
+  ttrpg_dev_cache:
+  ttrpg_dev_code:
+  ttrpg_dev_ssl:
+

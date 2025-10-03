@@ -106,7 +106,7 @@ src/
 ```
 
 ## API Integration
-- **User API**: Primary backend integration (port 8002/8183/8284)
+- **User API**: Primary backend integration (port 8002/8181/8284)
 - **Orchestrator**: Direct query processing
 - **Session Storage**: Context persistence
 - **WebSocket**: Real-time streaming

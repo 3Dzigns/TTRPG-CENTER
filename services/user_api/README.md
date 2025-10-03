@@ -11,7 +11,7 @@ User-facing API for /ask, /plan, /run endpoints and session memory management.
 - **User Experience**: Optimize response times and interaction quality
 
 ## Architecture
-- FastAPI service running on configurable ports (dev: 8002, test: 8183, prod: 8284)
+- FastAPI service running on configurable ports (dev: 8002, test: 8181, prod: 8284)
 - Integration with orchestrator service for query processing
 - Session-based context management
 - Real-time response streaming

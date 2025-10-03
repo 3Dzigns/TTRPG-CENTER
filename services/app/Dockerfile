@@ -99,4 +99,4 @@ LABEL org.opencontainers.image.title="TTRPG Center App" \
 
 # Entry point
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "src_common.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

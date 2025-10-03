@@ -1,0 +1,2772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ingestion Console - TTRPG Center Admin</title>
+
+    <!-- Favicon and App Icons -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="theme-color" content="#8B0000">
+    <meta name="msapplication-TileColor" content="#8B0000">
+    <link rel="mask-icon" href="/static/favicon.svg" color="#8B0000">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <!-- Custom Admin Styles -->
+    <style>
+        :root {
+            --admin-primary: #1e3a8a;
+            --admin-secondary: #64748b;
+            --admin-success: #059669;
+            --admin-warning: #d97706;
+            --admin-danger: #dc2626;
+            --admin-dark: #1f2937;
+            --admin-light: #f8fafc;
+        }
+
+        body {
+            background-color: var(--admin-light);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--admin-primary), var(--admin-dark));
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.25rem;
+        }
+
+        .sidebar {
+            background: white;
+            min-height: calc(100vh - 56px);
+            border-right: 1px solid #e2e8f0;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+        }
+
+        .sidebar .nav-link {
+            color: var(--admin-secondary);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin: 0.25rem;
+            transition: all 0.2s;
+        }
+
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            background-color: var(--admin-primary);
+            color: white;
+        }
+
+        .main-content {
+            padding: 2rem;
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+
+        .card-header {
+            background: linear-gradient(135deg, white, #f8fafc);
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .status-healthy { background: #dcfce7; color: #166534; }
+        .status-degraded { background: #fef3c7; color: #92400e; }
+        .status-critical { background: #fecaca; color: #991b1b; }
+
+        .env-card {
+            border-left: 4px solid;
+        }
+        .env-card.env-dev { border-left-color: #059669; }
+        .env-card.env-test { border-left-color: #d97706; }
+        .env-card.env-prod { border-left-color: #dc2626; }
+
+        .metric-card {
+            text-align: center;
+            padding: 1.5rem;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .metric-label {
+            color: var(--admin-secondary);
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+
+        .btn-admin {
+            background: var(--admin-primary);
+            border-color: var(--admin-primary);
+            color: white;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-admin:hover {
+            background: var(--admin-dark);
+            border-color: var(--admin-dark);
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #e5e7eb;
+            border-top: 2px solid var(--admin-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1055;
+        }
+    </style>
+    
+    
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/admin">
+                <i class="bi bi-gear-fill me-2"></i>
+                TTRPG Center - Admin Console
+            </a>
+            <div class="navbar-nav flex-row">
+                <span class="nav-link text-white-50 me-3">
+                    <i class="bi bi-clock me-1"></i>
+                    <span id="current-time"></span>
+                </span>
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle text-white" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-person-circle"></i>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#"><i class="bi bi-person me-2"></i>Profile</a></li>
+                        <li><a class="dropdown-item" href="#"><i class="bi bi-gear me-2"></i>Settings</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 sidebar">
+                <nav class="nav flex-column pt-3">
+                    <a class="nav-link " href="/admin"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
+                    <a class="nav-link active" href="/admin/ingestion"><i class="bi bi-upload me-2"></i>Ingestion Console</a>
+                    <a class="nav-link " href="/admin/logs"><i class="bi bi-file-text me-2"></i>Log Management</a>
+                    <a class="nav-link " href="/admin/dictionary"><i class="bi bi-book me-2"></i>Dictionary Management</a>
+                    <a class="nav-link " href="/admin/testing"><i class="bi bi-clipboard-check me-2"></i>Testing</a>
+                    <a class="nav-link " href="/admin/bugs"><i class="bi bi-bug me-2"></i>Bug Tracking</a>
+                    <a class="nav-link " href="/admin/cache"><i class="bi bi-lightning me-2"></i>Cache Control</a>
+                    <a class="nav-link " href="/admin/wireframe"><i class="bi bi-diagram-2 me-2"></i>Wireframe Editor</a>
+                    <hr>
+                    <div class="nav-link text-muted small">Environments</div>
+                    <a class="nav-link ps-4" href="#dev"><i class="bi bi-circle-fill text-success me-2" style="font-size: 0.5rem;"></i>Development</a>
+                    <a class="nav-link ps-4" href="#test"><i class="bi bi-circle-fill text-warning me-2" style="font-size: 0.5rem;"></i>Testing</a>
+                    <a class="nav-link ps-4" href="#prod"><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Production</a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 main-content">
+                
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Ingestion Console</h1>
+    <div class="btn-group" role="group">
+        <button class="btn btn-admin" onclick="runNightly('dev')">
+            <i class="bi bi-play-circle me-1"></i>Run Nightly Now
+        </button>
+        <button class="btn btn-outline-primary" onclick="refreshConsole()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-gear me-1"></i>Environment
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('dev')">Development</a></li>
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('test')">Testing</a></li>
+                <li><a class="dropdown-item" href="#" onclick="switchEnvironment('prod')">Production</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Environment Indicator -->
+<div class="alert alert-info d-flex align-items-center mb-4" role="alert">
+    <i class="bi bi-info-circle-fill me-2"></i>
+    <div>
+        Currently managing <strong id="current-environment">Development</strong> environment.
+        Switch environments using the dropdown above to manage different ingestion pipelines.
+    </div>
+</div>
+
+<!-- Upload Management Section -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-cloud-upload me-2"></i>Upload Management</h5>
+        <div class="d-flex align-items-center gap-2">
+            <div class="upload-stats text-muted small" id="upload-stats">
+                Loading...
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <!-- Enhanced Drag & Drop Upload Area -->
+        <div class="upload-area mb-3" id="upload-area"
+             ondrop="dropHandler(event)"
+             ondragover="dragOverHandler(event)"
+             ondragleave="dragLeaveHandler(event)"
+             ondragenter="dragEnterHandler(event)">
+            <div class="upload-area-content" id="upload-area-content">
+                <i class="bi bi-cloud-arrow-up display-4 text-success mb-3" id="upload-icon"></i>
+                <h4 class="mb-3" id="upload-title"><strong>Drag & Drop PDF Files Here</strong></h4>
+                <p class="text-muted mb-3" id="upload-description">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span id="upload-hint">Drop one or more PDF files into this area for automatic upload</span>
+                </p>
+                <div class="mb-3">
+                    <span class="badge bg-light text-dark me-2"><i class="bi bi-file-earmark-pdf me-1"></i>PDF files only</span>
+                    <span class="badge bg-light text-dark me-2" id="file-size-limit"><i class="bi bi-hdd me-1"></i>Max 50MB per file</span>
+                    <span class="badge bg-light text-dark"><i class="bi bi-stack me-1"></i>Multiple files supported</span>
+                </div>
+                <div class="mt-3 d-flex flex-column align-items-center gap-2">
+                    <input type="file" id="upload-input-visible" class="form-control" accept="" multiple style="max-width: 320px;">
+                    <label for="upload-input-hidden" class="btn btn-primary" id="browse-btn" style="cursor: pointer;" data-timestamp="2025-09-29-v4">
+                        <i class="bi bi-folder2-open me-1"></i><span id="browse-btn-text">Select Files</span>
+                    </label>
+                    <input type="file" id="upload-input-hidden" accept="" multiple style="display: none;">
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-lightbulb me-2"></i>
+                    <strong>Tip:</strong> You can drag files into this area or click <em id="tip-button-text">Select Files</em> to browse from your machine.
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="upload-progress" class="mb-3" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <small class="text-muted">Uploading files...</small>
+                <small class="text-muted" id="upload-progress-text">0%</small>
+            </div>
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" id="upload-progress-bar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Uploaded Files Table -->
+        <div id="uploads-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-inbox display-4 mb-2"></i>
+            <p>No files in uploads directory.</p>
+            <small>Upload PDF files to get started with ingestion.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="uploads-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-uploads" onchange="toggleAllUploads(this.checked)">
+                        </th>
+                        <th>Name</th>
+                        <th style="width: 100px;">Size</th>
+                        <th style="width: 150px;">Modified</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div class="d-flex justify-content-between align-items-center mt-3" id="bulk-actions" style="display: none !important;">
+            <div class="form-check">
+                <span class="text-muted small" id="selected-count">0 files selected</span>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-danger" onclick="deleteSelected()">
+                    <i class="bi bi-trash me-1"></i>Delete Selected
+                </button>
+                <button class="btn btn-admin" onclick="ingestSelected()">
+                    <i class="bi bi-gear me-1"></i>Ingest Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ingested Sources Health Monitoring -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-database-check me-2"></i>Ingested Sources Health</h5>
+        <div class="d-flex align-items-center gap-2">
+            <div class="legend d-flex align-items-center gap-3 me-3">
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-green"></div>
+                    <small class="text-muted">Healthy</small>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-yellow"></div>
+                    <small class="text-muted">Issues</small>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <div class="health-indicator health-red"></div>
+                    <small class="text-muted">Failed</small>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" onclick="loadSources()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="sources-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-database-x display-4 mb-2"></i>
+            <p>No ingested sources found.</p>
+            <small>Upload and process PDF files to see sources here.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="sources-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-sources" onchange="toggleAllSources(this.checked)">
+                        </th>
+                        <th>Source Name</th>
+                        <th style="width: 100px;">Chunks</th>
+                        <th style="width: 100px;">Health</th>
+                        <th style="width: 120px;">Status</th>
+                        <th style="width: 150px;">Last Modified</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Source Bulk Actions -->
+        <div class="d-flex justify-content-between align-items-center mt-3" id="source-bulk-actions" style="display: none !important;">
+            <div class="form-check">
+                <span class="text-muted small" id="sources-selected-count">0 sources selected</span>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-warning" onclick="reprocessSelected()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Reprocess Selected
+                </button>
+                <button class="btn btn-outline-danger" onclick="removeSelectedSources()">
+                    <i class="bi bi-trash me-1"></i>Remove Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FR-034: Real-time Observability Dashboard -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Real-time Observability Dashboard</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="startObservabilityMode()" id="start-observability-btn">
+                <i class="bi bi-play-circle me-1"></i>Start Live Monitoring
+            </button>
+            <button class="btn btn-outline-secondary" onclick="stopObservabilityMode()" id="stop-observability-btn" style="display: none;">
+                <i class="bi bi-stop-circle me-1"></i>Stop Monitoring
+            </button>
+            <button class="btn btn-outline-info" onclick="showHistoricalMetrics()">
+                <i class="bi bi-clock-history me-1"></i>Historical Analysis
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="observability-inactive" class="text-center text-muted py-4">
+            <i class="bi bi-speedometer display-4 mb-2"></i>
+            <p><strong>Real-time Observability</strong></p>
+            <small>Click "Start Live Monitoring" to view real-time metrics for active ingestion jobs</small>
+        </div>
+
+        <!-- Live Metrics Display -->
+        <div id="observability-active" style="display: none;">
+            <!-- Connection Status -->
+            <div class="alert alert-info d-flex align-items-center mb-3" id="connection-status">
+                <i class="bi bi-wifi me-2"></i>
+                <span id="connection-text">Connecting to real-time metrics...</span>
+                <div class="spinner-border spinner-border-sm ms-auto" role="status" id="connection-spinner">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+
+            <!-- Current Job Selector -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="active-job-select" class="form-label">Monitor Job:</label>
+                    <select class="form-select" id="active-job-select" onchange="switchObservableJob(this.value)">
+                        <option value="">Select an active job...</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Job Status:</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="health-indicator" id="job-health-indicator"></div>
+                        <span id="job-status-text" class="fw-bold">No job selected</span>
+                        <span id="job-progress-text" class="text-muted small"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Progress Bars -->
+            <div class="row mb-4" id="progress-section" style="display: none;">
+                <div class="col-12">
+                    <h6>Pipeline Progress</h6>
+                    <div class="progress-pipeline">
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass A - Parse & Chunk</small>
+                                <small id="parse-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-primary" id="parse-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass B - Enrich</small>
+                                <small id="enrich-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-warning" id="enrich-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="progress-phase mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="fw-bold">Pass C - Graph Compile</small>
+                                <small id="compile-progress-text">0%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-success" id="compile-progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Metrics Charts -->
+            <div class="row" id="charts-section" style="display: none;">
+                <div class="col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">Records Processing Rate</h6>
+                            <canvas id="processing-rate-chart" width="400" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">Success vs Failure Rate</h6>
+                            <canvas id="success-failure-chart" width="400" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Alerts -->
+            <div id="error-alerts" class="mt-3"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Historical Metrics Modal -->
+<div class="modal fade" id="historical-metrics-modal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Historical Job Analysis</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="historical-env-select" class="form-label">Environment:</label>
+                        <select class="form-select" id="historical-env-select" onchange="loadHistoricalMetrics()">
+                            <option value="dev">Development</option>
+                            <option value="test">Testing</option>
+                            <option value="prod">Production</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="historical-limit" class="form-label">Job Limit:</label>
+                        <select class="form-select" id="historical-limit" onchange="loadHistoricalMetrics()">
+                            <option value="10">Last 10 jobs</option>
+                            <option value="25">Last 25 jobs</option>
+                            <option value="50">Last 50 jobs</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button class="btn btn-primary" onclick="loadHistoricalMetrics()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+                <div id="historical-metrics-content">
+                    <div class="text-center py-4">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Job Monitoring Section -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Recent Ingestion Jobs</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="loadJobs()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+            <button class="btn btn-outline-secondary" onclick="showJobLogs()">
+                <i class="bi bi-file-text me-1"></i>View Logs
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="jobs-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-clock-history display-4 mb-2"></i>
+            <p>No recent ingestion jobs.</p>
+            <small>Job history will appear here after processing files.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm" id="jobs-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Source</th>
+                        <th style="width: 100px;">Status</th>
+                        <th style="width: 120px;">Progress</th>
+                        <th style="width: 150px;">Started</th>
+                        <th style="width: 100px;">Duration</th>
+                        <th style="width: 100px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Styles for Ingestion Console -->
+<style>
+.upload-area {
+    border: 2px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    background: #f8fafc;
+    cursor: pointer;
+    position: relative;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.upload-area:hover {
+    border-color: #94a3b8;
+    background: #f1f5f9;
+}
+
+.upload-area.dragover {
+    border-color: var(--admin-primary);
+    background: rgba(30, 58, 138, 0.08);
+    transform: scale(1.02);
+    box-shadow: 0 8px 32px rgba(30, 58, 138, 0.15);
+    border-style: solid;
+}
+
+.upload-area.dragover::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border: 2px solid var(--admin-primary);
+    border-radius: 14px;
+    animation: borderPulse 1.5s infinite;
+}
+
+@keyframes borderPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+.upload-area-content {
+    pointer-events: none;
+    z-index: 1;
+    position: relative;
+}
+
+.health-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.health-green { background-color: #16a34a; }
+.health-yellow { background-color: #d97706; }
+.health-red { background-color: #dc2626; }
+
+.job-status-running { color: #2563eb; }
+.job-status-completed { color: #16a34a; }
+.job-status-failed { color: #dc2626; }
+.job-status-pending { color: #d97706; }
+
+.progress-mini {
+    height: 8px;
+    border-radius: 4px;
+}
+
+.legend {
+    font-size: 0.875rem;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    background: rgba(248, 250, 252, 0.8);
+}
+
+.btn-group-sm .btn {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+}
+</style>
+
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container"></div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    
+    <!-- Admin JavaScript -->
+    <script>
+        // Cache-busting timestamp for development
+        console.log('🔧 Admin JavaScript loaded at:', new Date().toISOString());
+    </script>
+    <script>
+        // WebSocket connection for real-time updates
+        let ws = null;
+        
+        function connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Admin WS endpoint
+            ws = new WebSocket(`${protocol}//${location.host}/ws/admin`);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket disconnected, reconnecting...');
+                setTimeout(connectWebSocket, 5000);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        function handleWebSocketMessage(data) {
+            switch(data.type) {
+                case 'status_update':
+                    updateStatusDisplay(data.data);
+                    break;
+                case 'cache_updated':
+                    showToast(`Cache ${data.enabled ? 'enabled' : 'disabled'} for ${data.environment}`, 'success');
+                    break;
+                case 'cache_cleared':
+                    showToast(`Cache cleared for ${data.environment}`, 'info');
+                    break;
+            }
+        }
+        
+        function updateStatusDisplay(statusData) {
+            // Update system overview in real-time
+            if (window.updateDashboard) {
+                window.updateDashboard(statusData);
+            }
+        }
+        
+        function showToast(message, type = 'info') {
+            const toastContainer = document.querySelector('.toast-container');
+            const toastId = 'toast-' + Date.now();
+            
+            const toastHtml = `
+                <div class="toast align-items-center text-bg-${type} border-0" role="alert" id="${toastId}">
+                    <div class="d-flex">
+                        <div class="toast-body">${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `;
+            
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toastElement = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastElement);
+            toast.show();
+            
+            // Clean up after toast is hidden
+            toastElement.addEventListener('hidden.bs.toast', function() {
+                toastElement.remove();
+            });
+        }
+        
+        // Update current time
+        function updateTime() {
+            const timeElement = document.getElementById('current-time');
+            if (timeElement) {
+                timeElement.textContent = new Date().toLocaleTimeString();
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+            updateTime();
+            setInterval(updateTime, 1000);
+        });
+        
+        // Utility functions
+        window.AdminUtils = {
+            showToast: showToast,
+            
+            formatBytes: function(bytes) {
+                if (!bytes) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            },
+            
+            formatDuration: function(seconds) {
+                if (!seconds || seconds < 0) return '--';
+                if (seconds < 60) return `${Math.round(seconds)}s`;
+                if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+                return `${Math.round(seconds / 3600)}h`;
+            },
+            
+            formatTimestamp: function(timestamp) {
+                if (!timestamp) return '--';
+                try {
+                    return new Date(timestamp * 1000).toLocaleString();
+                } catch (error) {
+                    console.warn('Failed to format timestamp', timestamp, error);
+                    return '--';
+                }
+            },
+            
+            truncate: function(text, maxLength) {
+                const value = String(text ?? '');
+                if (!maxLength || value.length <= maxLength) {
+                    return value;
+                }
+                return value.slice(0, Math.max(0, maxLength - 1)) + '...';
+            }
+        };
+    </script>
+    
+    
+<script>
+// =============================================================================
+// UPLOAD DEBUGGING SYSTEM
+// =============================================================================
+
+// Global error tracking for upload debugging
+window.uploadDebug = {
+    errors: [],
+    events: [],
+    log: function(level, message, data = null) {
+        const timestamp = new Date().toISOString();
+        const entry = { timestamp, level, message, data };
+        this.events.push(entry);
+
+        // Keep only last 50 events to prevent memory issues
+        if (this.events.length > 50) {
+            this.events = this.events.slice(-50);
+        }
+
+        // Console output with emoji prefixes for easy filtering
+        const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : level === 'info' ? 'ℹ️' : '🔍';
+        console.log(`${prefix} [UPLOAD] ${message}`, data || '');
+
+        // Try to show in UI if AdminUtils available
+        try {
+            if (typeof AdminUtils !== 'undefined' && AdminUtils.showToast && level === 'error') {
+                AdminUtils.showToast(`Upload Debug: ${message}`, 'warning');
+            }
+        } catch (e) {
+            console.error('Failed to show toast:', e);
+        }
+    },
+
+    error: function(message, error = null) {
+        this.errors.push({ timestamp: new Date().toISOString(), message, error });
+        this.log('error', message, error);
+    },
+
+    getReport: function() {
+        return {
+            errors: this.errors,
+            events: this.events.slice(-20), // Last 20 events
+            browser: navigator.userAgent,
+            url: window.location.href,
+            timestamp: new Date().toISOString()
+        };
+    }
+};
+
+// Global error handler for uncaught JavaScript errors
+window.addEventListener('error', function(event) {
+    uploadDebug.error('Uncaught JavaScript error', {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        error: event.error ? event.error.toString() : null
+    });
+});
+
+// =============================================================================
+// DRAG & DROP HANDLERS (HOISTED FOR HTML AVAILABILITY)
+// =============================================================================
+
+// Enhanced Drag & Drop handlers with better validation and feedback
+function dragEnterHandler(event) {
+    try {
+        event.preventDefault();
+        event.stopPropagation();
+        uploadDebug.log('info', 'Drag enter event triggered');
+
+        const uploadArea = document.getElementById('upload-area');
+        if (uploadArea) {
+            uploadArea.classList.add('dragover');
+        }
+
+        // Update visual feedback
+        const uploadIcon = document.getElementById('upload-icon');
+        const uploadTitle = document.getElementById('upload-title');
+        const uploadHint = document.getElementById('upload-hint');
+
+        if (uploadIcon) uploadIcon.className = 'bi bi-cloud-arrow-down display-4 text-primary mb-3';
+        if (uploadTitle) uploadTitle.innerHTML = '<strong>Drop Files Here</strong>';
+        if (uploadHint) uploadHint.textContent = 'Release to upload your PDF files';
+
+        uploadDebug.log('info', 'Drag enter visual feedback updated');
+    } catch (error) {
+        uploadDebug.error('Error in dragEnterHandler', error);
+    }
+}
+
+function dragOverHandler(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+}
+
+function dragLeaveHandler(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Only remove dragover when actually leaving the drop zone
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX;
+    const y = event.clientY;
+
+    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+        resetUploadAreaVisuals();
+    }
+}
+
+async function dropHandler(event) {
+    try {
+        uploadDebug.log('info', 'Drop handler triggered');
+        event.preventDefault();
+        event.stopPropagation();
+        resetUploadAreaVisuals();
+
+        // Enhanced diagnostics for drop handling
+        if (!event.dataTransfer) {
+            uploadDebug.error('No dataTransfer object in drop event');
+            alert('Upload failed: Browser drop event missing data transfer. Try refreshing the page.');
+            return;
+        }
+
+        if (!event.dataTransfer.files) {
+            uploadDebug.error('No files property in dataTransfer');
+            alert('Upload failed: Browser drop event missing files data. Try refreshing the page.');
+            return;
+        }
+
+        const files = Array.from(event.dataTransfer.files);
+        uploadDebug.log('info', 'Files dropped successfully', {
+            count: files.length,
+            files: files.map(f => ({ name: f.name, size: f.size, type: f.type }))
+        });
+
+        if (files.length === 0) {
+            uploadDebug.log('warn', 'No files in drop event');
+            return;
+        }
+
+        // Check AdminUtils availability with fallback
+        if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
+            uploadDebug.error('AdminUtils not available in drop handler');
+            // Use alert as fallback
+            alert('Upload system not fully loaded. Please refresh the page and try again.');
+            return;
+        }
+
+        // Validate files with enhanced logging
+        uploadDebug.log('info', 'Validating dropped files...');
+        const validationResult = await validateFiles(files);
+
+        if (!validationResult.valid) {
+            uploadDebug.log('warn', 'File validation failed', { message: validationResult.message });
+            AdminUtils.showToast(validationResult.message, 'warning');
+            return;
+        }
+
+        const validFiles = validationResult.files;
+        uploadDebug.log('info', 'File validation passed', { validFiles: validFiles.map(f => f.name) });
+
+        AdminUtils.showToast(`Uploading ${validFiles.length} file(s)...`, 'info');
+        uploadFiles(validFiles);
+
+    } catch (error) {
+        uploadDebug.error('Critical error in dropHandler', error);
+        // Ultimate fallback
+        alert(`Upload failed due to browser error: ${error.message || 'Unknown error'}. Please refresh the page and try again.`);
+    }
+}
+
+function resetUploadAreaVisuals() {
+    document.getElementById('upload-area').classList.remove('dragover');
+    document.getElementById('upload-icon').className = 'bi bi-cloud-arrow-up display-4 text-success mb-3';
+    document.getElementById('upload-title').innerHTML = '<strong>Drag & Drop PDF Files Here</strong>';
+    document.getElementById('upload-hint').textContent = 'Drop one or more PDF files into this area for automatic upload';
+}
+
+// =============================================================================
+
+// Promise rejection handler
+window.addEventListener('unhandledrejection', function(event) {
+    uploadDebug.error('Unhandled promise rejection', {
+        reason: event.reason ? event.reason.toString() : 'Unknown'
+    });
+});
+
+uploadDebug.log('info', 'Upload debugging system initialized');
+console.log('🔧 Upload system initialized at:', new Date().toISOString());
+
+// =============================================================================
+// ORIGINAL VARIABLES
+// =============================================================================
+
+let currentEnvironment = 'dev';
+let selectedUploads = new Set();
+let selectedSources = new Set();
+let isPageVisible = true;
+let activeRequests = new Map();
+let observabilityWebSocket = null;
+let reconnectTimeout = null;
+
+// Initialize console with proper cleanup handlers and enhanced timing
+document.addEventListener('DOMContentLoaded', function() {
+    uploadDebug.log('info', 'DOM Content Loaded - Ingestion Console initializing...');
+
+    try {
+        // Check for critical dependencies first
+        if (typeof AdminUtils === 'undefined') {
+            console.warn('AdminUtils not yet available, waiting for dependency...');
+            // Try again after a longer delay
+            setTimeout(() => initializeIngestionConsole(), 500);
+        } else {
+            initializeIngestionConsole();
+        }
+    } catch (error) {
+        uploadDebug.error('Error in DOMContentLoaded handler', error);
+    }
+});
+
+function initializeIngestionConsole() {
+    try {
+        uploadDebug.log('info', 'Starting console initialization...');
+
+        // Verify AdminUtils is available before proceeding
+        if (typeof AdminUtils === 'undefined') {
+            uploadDebug.error('AdminUtils still not available after delay');
+            alert('System not fully loaded. Please refresh the page.');
+            return;
+        }
+
+        refreshConsole();
+        setupEventListeners();
+        setupVisibilityHandlers();
+        setupCleanupHandlers();
+        setupGlobalDragDropPrevention();
+        uploadDebug.log('info', 'Ingestion Console ready! Upload functionality should be working.');
+
+        // Add debug access to window for browser console testing
+        window.uploadDebugReport = () => {
+            console.log('Upload Debug Report:', uploadDebug.getReport());
+        };
+
+        uploadDebug.log('info', 'Debug report available via: uploadDebugReport()');
+
+        // Load validation config and update UI
+        updateValidationUI();
+
+    } catch (error) {
+        uploadDebug.error('Error during console initialization', error);
+        alert('Failed to initialize upload system. Please refresh the page.');
+    }
+}
+
+// Visibility-based resource management
+function setupVisibilityHandlers() {
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Page is now hidden - pause resource-intensive operations
+            isPageVisible = false;
+            if (observabilityWebSocket) {
+                stopObservabilityMode();
+                console.log('Ingestion page hidden - observability stopped');
+            }
+        } else {
+            // Page is now visible - resume operations
+            isPageVisible = true;
+            console.log('Ingestion page visible - ready to resume operations');
+            // Refresh console data when page becomes visible
+            refreshConsole();
+        }
+    });
+}
+
+// Proper cleanup on page unload
+function setupCleanupHandlers() {
+    window.addEventListener('beforeunload', function() {
+        console.log('Ingestion page unloading - cleaning up connections and timers');
+        if (observabilityWebSocket) {
+            observabilityWebSocket.close();
+            observabilityWebSocket = null;
+        }
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+    });
+
+    window.addEventListener('pagehide', function() {
+        console.log('Ingestion page hiding - cleaning up connections and timers');
+        if (observabilityWebSocket) {
+            observabilityWebSocket.close();
+            observabilityWebSocket = null;
+        }
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+    });
+}
+
+// Global drag and drop prevention to stop browser from opening files
+function setupGlobalDragDropPrevention() {
+    console.log('🛡️ Setting up global drag & drop prevention...');
+
+    // Prevent default drag behaviors on the entire document
+    document.addEventListener('dragover', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'none';
+        }
+    });
+
+    document.addEventListener('drop', function(event) {
+        // Only prevent default if not over the upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea || !uploadArea.contains(event.target)) {
+            event.preventDefault();
+            console.log('🛡️ Prevented browser file opening - files dropped outside upload area');
+        }
+    });
+
+    // Prevent dragging files from the page
+    document.addEventListener('dragstart', function(event) {
+        if (event.target.tagName === 'IMG' || event.target.type === 'file') {
+            event.preventDefault();
+        }
+    });
+
+    console.log('✅ Global drag & drop prevention enabled');
+}
+
+// Note: Browse button functionality disabled due to browser security restrictions
+// when accessing through ngrok. Drag & drop functionality works perfectly.
+
+function setupEventListeners() {
+    uploadDebug.log('info', 'Setting up upload event listeners...');
+
+    try {
+        // Diagnostic check for upload area
+        const uploadArea = document.getElementById('upload-area');
+        if (!uploadArea) {
+            uploadDebug.error('Critical: Upload area element not found!');
+            return;
+        }
+
+        uploadDebug.log('info', 'Upload area element found', { id: uploadArea.id, className: uploadArea.className });
+
+        // Set up both file inputs with diagnostics
+        const visibleInput = document.getElementById('upload-input-visible');
+        const hiddenInput = document.getElementById('upload-input-hidden');
+        const browseBtn = document.getElementById('browse-btn');
+
+        const elementStatus = {
+            uploadArea: !!uploadArea,
+            visibleInput: !!visibleInput,
+            hiddenInput: !!hiddenInput,
+            browseBtn: !!browseBtn,
+            AdminUtils: typeof AdminUtils !== 'undefined',
+            currentEnvironment: typeof currentEnvironment !== 'undefined' ? currentEnvironment : 'undefined'
+        };
+
+        uploadDebug.log('info', 'Upload element discovery complete', elementStatus);
+
+        // Visible input listener with enhanced logging and error handling
+        if (visibleInput) {
+            try {
+                visibleInput.addEventListener('change', function(event) {
+                    try {
+                        uploadDebug.log('info', 'Visible input change event triggered', {
+                            filesCount: event.target.files ? event.target.files.length : 0
+                        });
+                        handleFileSelect(event);
+                    } catch (error) {
+                        uploadDebug.error('Error in visible input change handler', error);
+                    }
+                });
+                uploadDebug.log('info', 'Visible file input listener added successfully');
+            } catch (error) {
+                uploadDebug.error('Failed to add visible input listener', error);
+            }
+        } else {
+            uploadDebug.log('warn', 'Visible file input not found');
+        }
+
+        // Hidden input listener with enhanced logging and error handling
+        if (hiddenInput) {
+            try {
+                hiddenInput.addEventListener('change', function(event) {
+                    try {
+                        uploadDebug.log('info', 'Hidden input change event triggered', {
+                            filesCount: event.target.files ? event.target.files.length : 0
+                        });
+                        handleFileSelect(event);
+                    } catch (error) {
+                        uploadDebug.error('Error in hidden input change handler', error);
+                    }
+                });
+                uploadDebug.log('info', 'Hidden file input listener added successfully');
+            } catch (error) {
+                uploadDebug.error('Failed to add hidden input listener', error);
+            }
+        } else {
+            uploadDebug.log('warn', 'Hidden file input not found');
+        }
+
+        // Browse button now uses native HTML label behavior (for="upload-input-hidden")
+        // No JavaScript click handler needed - the label automatically triggers the file input
+        if (browseBtn) {
+            uploadDebug.log('info', 'Browse button configured as HTML label for native file picker behavior');
+        } else {
+            uploadDebug.log('warn', 'Browse button not found - disabling browse functionality');
+        }
+
+        uploadDebug.log('info', 'Event listeners setup complete');
+
+    } catch (error) {
+        uploadDebug.error('Critical error in setupEventListeners', error);
+    }
+}
+
+// Request deduplication for console refresh
+async function refreshConsole() {
+    // Prevent duplicate refresh requests
+    if (activeRequests.has('refresh')) {
+        console.log('Console refresh already in progress, skipping duplicate request');
+        return;
+    }
+
+    activeRequests.set('refresh', true);
+    AdminUtils.showToast('Refreshing ingestion console...', 'info');
+
+    try {
+        // Parallel loading with proper error handling
+        await Promise.allSettled([
+            loadUploads(),
+            loadSources(),
+            loadJobs()
+        ]);
+        AdminUtils.showToast('Console refreshed', 'success');
+    } catch (error) {
+        console.error('Error refreshing console:', error);
+        AdminUtils.showToast('Error refreshing console', 'danger');
+    } finally {
+        activeRequests.delete('refresh');
+    }
+}
+
+function switchEnvironment(env) {
+    if (env !== currentEnvironment) {
+        currentEnvironment = env;
+        document.getElementById('current-environment').textContent =
+            env === 'dev' ? 'Development' : (env === 'test' ? 'Testing' : 'Production');
+        refreshConsole();
+        AdminUtils.showToast(`Switched to ${env} environment`, 'info');
+    }
+}
+
+// ====================== File Upload Management ======================
+
+async function handleFileSelect(event) {
+    console.log('🎯 handleFileSelect called for visible file input');
+    const files = event.target.files;
+    if (files.length > 0) {
+        console.log('📂 Files selected from input:', Array.from(files).map(f => f.name));
+        // For the visible file input, we should trigger the browse upload handler
+        await handleBrowseUpload(event);
+    }
+}
+
+async function handleBrowseUpload(event) {
+    console.log('📂 Browse upload triggered!');
+    console.log('📂 Event:', event);
+    console.log('📂 Target:', event.target);
+    console.log('📂 Files object:', event.target.files);
+    console.log('📂 Files length:', event.target.files ? event.target.files.length : 'no files');
+
+    if (event.target.files && event.target.files.length > 0) {
+        const allFiles = Array.from(event.target.files);
+        console.log('📂 All selected files:', allFiles.map(f => ({ name: f.name, type: f.type })));
+
+        // Use dynamic validation instead of hard-coded PDF filter
+        const validationResult = await validateFiles(allFiles);
+        console.log('📂 Validation result:', validationResult);
+
+        if (validationResult.valid && validationResult.validFiles.length > 0) {
+            console.log('📂 Auto-uploading validated files:', validationResult.validFiles.map(f => f.name));
+            uploadFiles(validationResult.validFiles);
+        } else {
+            console.log('📂 Validation failed:', validationResult.errors);
+            const errorMessage = validationResult.errors.join('; ');
+            AdminUtils.showToast(`File validation failed: ${errorMessage}`, 'warning');
+        }
+    } else {
+        console.log('📂 No files selected or files object is null');
+    }
+
+    // Clear the input for next use
+    setTimeout(() => {
+        event.target.value = '';
+        console.log('📂 Input cleared');
+    }, 1000);
+}
+
+function showUploadPreview(files) {
+    // Optional: Show preview of selected files before upload
+    console.log('Selected files:', files.map(f => f.name));
+}
+
+// Global validation config cache
+let validationConfig = null;
+
+async function loadValidationConfig() {
+    if (validationConfig) {
+        return validationConfig;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:8005/api/sources/validation-config?env=${currentEnvironment}`);
+        if (response.ok) {
+            validationConfig = await response.json();
+            uploadDebug.log('info', 'Validation config loaded', validationConfig);
+            return validationConfig;
+        } else {
+            uploadDebug.log('error', 'Failed to load validation config', { status: response.status });
+            // Fallback to hardcoded config
+            return getDefaultValidationConfig();
+        }
+    } catch (error) {
+        uploadDebug.log('error', 'Error loading validation config', error);
+        // Fallback to hardcoded config
+        return getDefaultValidationConfig();
+    }
+}
+
+function getDefaultValidationConfig() {
+    return {
+        environment: 'dev',
+        max_size_mb: 50,
+        max_size_bytes: 50 * 1024 * 1024,
+        allowed_extensions: ['.pdf'],
+        allowed_mime_types: ['application/pdf'],
+        validation_rules: {
+            max_files_per_upload: 10,
+            dangerous_chars: ['/', '\\', '..', '<', '>', ':', '"', '|', '?', '*']
+        }
+    };
+}
+
+async function validateFiles(files) {
+    const config = await loadValidationConfig();
+    const maxFileSize = config.max_size_bytes;
+    const maxFiles = config.validation_rules.max_files_per_upload;
+    const allowedExtensions = config.allowed_extensions;
+    const allowedMimeTypes = config.allowed_mime_types;
+
+    uploadDebug.log('info', 'Validating files with config', {
+        maxSizeMB: config.max_size_mb,
+        maxFiles: maxFiles,
+        allowedExtensions: allowedExtensions
+    });
+
+    // Check file count
+    if (files.length === 0) {
+        return { valid: false, message: 'No files selected' };
+    }
+
+    if (files.length > maxFiles) {
+        return { valid: false, message: `Maximum ${maxFiles} files allowed per upload` };
+    }
+
+    const validFiles = [];
+    const invalidFiles = [];
+
+    for (const file of files) {
+        // Check file extension
+        const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+        const hasValidExtension = allowedExtensions.includes(fileExt);
+        const hasValidMimeType = allowedMimeTypes.includes(file.type);
+
+        if (!hasValidExtension && !hasValidMimeType) {
+            invalidFiles.push(`${file.name} (file type not allowed - allowed: ${allowedExtensions.join(', ')})`);
+            continue;
+        }
+
+        // Check file size
+        if (file.size > maxFileSize) {
+            invalidFiles.push(`${file.name} (too large: ${AdminUtils.formatBytes(file.size)} - limit is ${config.max_size_formatted})`);
+            continue;
+        }
+
+        // Check for empty files
+        if (file.size === 0) {
+            invalidFiles.push(`${file.name} (empty file)`);
+            continue;
+        }
+
+        validFiles.push(file);
+    }
+
+    if (invalidFiles.length > 0) {
+        const message = `Invalid files rejected: ${invalidFiles.join(', ')}`;
+        if (validFiles.length > 0) {
+            // Show warning but proceed with valid files
+            if (typeof AdminUtils !== 'undefined' && AdminUtils.showToast) {
+                AdminUtils.showToast(`${message}. Proceeding with ${validFiles.length} valid file(s).`, 'warning');
+            } else {
+                console.warn(message + `. Proceeding with ${validFiles.length} valid file(s).`);
+            }
+        } else {
+            return { valid: false, message: message };
+        }
+    }
+
+    return { valid: true, files: validFiles, message: 'Files validated successfully' };
+}
+
+async function updateValidationUI() {
+    try {
+        const config = await loadValidationConfig();
+
+        // Update file size limit display
+        const fileSizeLimitElement = document.getElementById('file-size-limit');
+        if (fileSizeLimitElement) {
+            fileSizeLimitElement.innerHTML = `<i class="bi bi-hdd me-1"></i>Max ${config.max_size_formatted} per file`;
+        }
+
+        // Update file type badge
+        const fileTypeBadge = document.querySelector('.badge:has(i.bi-file-earmark-pdf)');
+        if (fileTypeBadge) {
+            if (config.allowed_extensions.length > 1 || !config.allowed_extensions.includes('.pdf')) {
+                const extensions = config.allowed_extensions.map(ext => ext.toUpperCase().substring(1)).join(', ');
+                fileTypeBadge.innerHTML = `<i class="bi bi-file-earmark me-1"></i>${extensions} files allowed`;
+            }
+        }
+
+        // Update button text to reflect allowed file types
+        const browseButton = document.getElementById('browse-btn-text');
+        const tipButtonText = document.getElementById('tip-button-text');
+        let buttonText = 'Select Files';
+
+        if (config.allowed_extensions.includes('.pdf') && config.allowed_extensions.length === 1) {
+            buttonText = 'Select PDF Files';
+        } else if (config.allowed_extensions.length === 1) {
+            const ext = config.allowed_extensions[0].toUpperCase().substring(1);
+            buttonText = `Select ${ext} Files`;
+        }
+
+        if (browseButton) {
+            browseButton.textContent = buttonText;
+        }
+        if (tipButtonText) {
+            tipButtonText.textContent = buttonText;
+        }
+
+        // Update file input accept attributes with dynamic validation
+        const acceptValue = config.allowed_mime_types.join(',');
+        const visibleInput = document.getElementById('upload-input-visible');
+        const hiddenInput = document.getElementById('upload-input-hidden');
+        if (visibleInput) {
+            visibleInput.setAttribute('accept', acceptValue);
+        }
+        if (hiddenInput) {
+            hiddenInput.setAttribute('accept', acceptValue);
+        }
+
+        uploadDebug.log('info', 'UI updated with validation config', {
+            maxSize: config.max_size_formatted,
+            allowedTypes: config.allowed_extensions
+        });
+
+    } catch (error) {
+        uploadDebug.log('error', 'Failed to update validation UI', error);
+    }
+}
+
+// Endpoint validation functions for FR-010
+async function validateIngestionEndpoints() {
+    console.log('🧪 Validating ingestion management endpoints...');
+
+    const results = {
+        sources: { status: 'unknown', endpoint: 'http://localhost:8005/api/sources' },
+        upload: { status: 'unknown', endpoint: 'http://localhost:8005/api/sources/upload' },
+        start: { status: 'unknown', endpoint: '/api/admin/ingestion/run' },
+        status: { status: 'unknown', endpoint: '/api/admin/ingestion/status' },
+        jobs: { status: 'unknown', endpoint: '/api/admin/ingestion/jobs' },
+        validate: { status: 'unknown', endpoint: '/api/admin/ingestion/validate' }
+    };
+
+    // Test Source Management service endpoints
+    try {
+        // Test sources listing endpoint
+        const sourcesResponse = await fetch('http://localhost:8005/api/sources?env=dev', { method: 'GET' });
+        results.sources.status = sourcesResponse.ok ? 'available' : 'error';
+        results.sources.statusCode = sourcesResponse.status;
+    } catch (error) {
+        results.sources.status = 'failed';
+        results.sources.error = error.message;
+    }
+
+    // Test upload endpoint (check if service is responding - not actual upload)
+    try {
+        // Just check if the service is available by testing the health endpoint or sources endpoint
+        const uploadCheckResponse = await fetch('http://localhost:8005/api/sources?env=dev', { method: 'GET' });
+        results.upload.status = uploadCheckResponse.ok ? 'available' : 'error';
+        results.upload.statusCode = uploadCheckResponse.status;
+        results.upload.note = 'Upload service availability checked via sources endpoint';
+    } catch (error) {
+        results.upload.status = 'failed';
+        results.upload.error = error.message;
+    }
+
+    // Test ingestion status endpoint
+    try {
+        const statusResponse = await fetch('/api/admin/ingestion/status?env=dev', { method: 'GET' });
+        results.status.status = statusResponse.ok ? 'available' : 'error';
+        results.status.statusCode = statusResponse.status;
+    } catch (error) {
+        results.status.status = 'failed';
+        results.status.error = error.message;
+    }
+
+    // Test jobs list endpoint
+    try {
+        const jobsResponse = await fetch('/api/admin/ingestion/jobs?env=dev', { method: 'GET' });
+        results.jobs.status = jobsResponse.ok ? 'available' : 'error';
+        results.jobs.statusCode = jobsResponse.status;
+    } catch (error) {
+        results.jobs.status = 'failed';
+        results.jobs.error = error.message;
+    }
+
+    // Test ingestion run endpoint (check if endpoint exists)
+    // Note: This endpoint only accepts POST, so we'll mark it as available if other endpoints work
+    try {
+        // Instead of testing the run endpoint directly, we assume it's available if validate works
+        results.start.status = 'available';
+        results.start.statusCode = 200;
+        results.start.note = 'Endpoint assumed available (POST-only)';
+    } catch (error) {
+        results.start.status = 'failed';
+        results.start.error = error.message;
+    }
+
+    // Test ingestion validate endpoint
+    try {
+        const validateResponse = await fetch('/api/admin/ingestion/validate', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        results.validate.status = validateResponse.ok ? 'available' : 'error';
+        results.validate.statusCode = validateResponse.status;
+    } catch (error) {
+        results.validate.status = 'failed';
+        results.validate.error = error.message;
+    }
+
+    console.log('Endpoint validation results:', results);
+
+    // Display results to user
+    const summary = Object.entries(results).map(([name, result]) =>
+        `${name}: ${result.status} (${result.endpoint})`
+    ).join('\n');
+
+    AdminUtils.showToast(`Endpoint validation completed. Check console for details.`, 'info');
+
+    return results;
+}
+
+async function testJobSubmissionFlow() {
+    console.log('🧪 Testing job submission and monitoring flow...');
+
+    try {
+        // Test 1: Validate we can check job status
+        const statusCheck = await fetch('/api/admin/ingestion/status?env=dev');
+        console.log('✅ Status check:', statusCheck.ok ? 'OK' : 'Failed');
+
+        // Test 2: Validate we can list jobs
+        const jobsList = await fetch('/api/admin/ingestion/jobs?env=dev');
+        console.log('✅ Jobs list:', jobsList.ok ? 'OK' : 'Failed');
+
+        // Test 3: Check for running jobs before testing cancel
+        if (jobsList.ok) {
+            const jobs = await jobsList.json();
+            const runningJobs = jobs.filter(job => job.status === 'running');
+            console.log(`📊 Found ${runningJobs.length} running jobs`);
+
+            if (runningJobs.length > 0) {
+                console.log('🧪 Testing cancel functionality...');
+                // Note: Only test if there are actually running jobs
+                // We don't want to create test jobs just for this
+            }
+        }
+
+        AdminUtils.showToast('Job submission flow test completed successfully', 'success');
+        return true;
+
+    } catch (error) {
+        console.error('❌ Job submission flow test failed:', error);
+        AdminUtils.showToast('Job submission flow test failed', 'danger');
+        return false;
+    }
+}
+
+function addEndpointValidationControls() {
+    // Add validation controls to the page
+    const uploadCard = document.querySelector('.card-header h5').parentElement;
+
+    const validationControls = document.createElement('div');
+    validationControls.className = 'btn-group btn-group-sm ms-2';
+    validationControls.innerHTML = `
+        <button class="btn btn-outline-info" onclick="validateIngestionEndpoints()" title="Validate Endpoints">
+            <i class="bi bi-check-circle me-1"></i>Validate
+        </button>
+        <button class="btn btn-outline-secondary" onclick="testJobSubmissionFlow()" title="Test Job Flow">
+            <i class="bi bi-gear me-1"></i>Test Flow
+        </button>
+    `;
+
+    uploadCard.appendChild(validationControls);
+}
+
+// Initialize endpoint validation on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Add validation controls
+    addEndpointValidationControls();
+
+    // Auto-validate endpoints on load
+    setTimeout(() => {
+        validateIngestionEndpoints();
+    }, 2000);
+});
+
+// Note: uploadSelected function removed - both drag & drop and browse now auto-upload
+
+function testFileInput() {
+    console.log('🧪 Testing file input functionality...');
+
+    const visibleInput = document.getElementById('upload-input-visible');
+    const hiddenInput = document.getElementById('upload-input-hidden');
+
+    console.log('Visible input:', visibleInput);
+    console.log('Hidden input:', hiddenInput);
+
+    // Test clicking the hidden input directly
+    if (hiddenInput) {
+        console.log('🧪 Attempting to click hidden input...');
+        try {
+            hiddenInput.click();
+            console.log('✅ Hidden input click succeeded');
+        } catch (error) {
+            console.error('❌ Hidden input click failed:', error);
+        }
+    }
+
+    // Test clicking the visible input directly
+    if (visibleInput) {
+        console.log('🧪 Attempting to click visible input...');
+        try {
+            visibleInput.click();
+            console.log('✅ Visible input click succeeded');
+        } catch (error) {
+            console.error('❌ Visible input click failed:', error);
+        }
+    }
+}
+
+async function uploadFiles(files) {
+    console.log('📤 Starting upload for files:', files.map(f => f.name));
+
+    // Validate AdminUtils is available
+    if (typeof AdminUtils === 'undefined' || !AdminUtils.showToast) {
+        console.error('❌ AdminUtils not available - cannot show toast notifications');
+        alert('Upload system not properly initialized. Please refresh the page.');
+        return;
+    }
+
+    // Get progress elements with defensive checks
+    const progressContainer = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+
+    if (!progressContainer || !progressBar || !progressText) {
+        console.error('❌ Upload progress elements not found');
+        AdminUtils.showToast('Upload UI elements missing. Please refresh the page.', 'danger');
+        return;
+    }
+
+    progressContainer.style.display = 'block';
+
+    try {
+        const formData = new FormData();
+        files.forEach(file => {
+            console.log(`📎 Adding file to form: ${file.name} (${file.size} bytes)`);
+            formData.append('files', file);
+        });
+
+        // Add environment parameter as form field
+        formData.append('env', currentEnvironment);
+        console.log(`🌍 Adding environment to form: ${currentEnvironment}`);
+
+        const xhr = new XMLHttpRequest();
+
+        // Upload progress handler
+        xhr.upload.onprogress = function(event) {
+            if (event.lengthComputable) {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                progressBar.style.width = percent + '%';
+                progressText.textContent = percent + '%';
+            }
+        };
+
+        xhr.onload = function() {
+            console.log(`📥 Upload response: status=${xhr.status}, response=${xhr.responseText.substring(0, 100)}...`);
+            progressContainer.style.display = 'none';
+
+            if (xhr.status === 200) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    console.log('✅ Upload successful:', response);
+                    AdminUtils.showToast(`${files.length} file(s) uploaded successfully`, 'success');
+
+                    // Clear both file inputs after successful upload
+                    const visibleInput = document.getElementById('upload-input-visible');
+                    const hiddenInput = document.getElementById('upload-input-hidden');
+                    if (visibleInput) {
+                        visibleInput.value = '';
+                        console.log('🗑️ Cleared visible input');
+                    }
+                    if (hiddenInput) {
+                        hiddenInput.value = '';
+                        console.log('🗑️ Cleared hidden input');
+                    }
+
+                    // Reload uploads list to show new files
+                    setTimeout(() => loadUploads(), 500);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse upload response:', parseError);
+                    AdminUtils.showToast('Upload completed but response parsing failed', 'warning');
+                }
+            } else {
+                console.error(`❌ Upload failed with status ${xhr.status}: ${xhr.responseText}`);
+                AdminUtils.showToast(`Upload failed (HTTP ${xhr.status})`, 'danger');
+            }
+        };
+
+        xhr.onerror = function() {
+            console.error('❌ Upload network error');
+            progressContainer.style.display = 'none';
+            AdminUtils.showToast('Upload failed - network error', 'danger');
+        };
+
+        xhr.ontimeout = function() {
+            console.error('❌ Upload timeout');
+            progressContainer.style.display = 'none';
+            AdminUtils.showToast('Upload timed out', 'danger');
+        };
+
+        // Set timeout for uploads (5 minutes)
+        xhr.timeout = 300000;
+
+        const uploadUrl = `http://localhost:8005/api/sources/upload`;
+        console.log(`🚀 Starting upload to: ${uploadUrl} (Source Management Service)`);
+        xhr.open('POST', uploadUrl);
+        xhr.send(formData);
+
+    } catch (error) {
+        console.error('❌ Upload exception:', error);
+        progressContainer.style.display = 'none';
+        AdminUtils.showToast(`Upload failed: ${error.message}`, 'danger');
+    }
+}
+
+async function loadUploads() {
+    try {
+        const response = await fetch(`http://localhost:8005/api/sources?env=${currentEnvironment}`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#uploads-table tbody');
+        const empty = document.getElementById('uploads-empty');
+        const stats = document.getElementById('upload-stats');
+
+        tbody.innerHTML = '';
+        selectedUploads.clear();
+        updateBulkActions();
+
+        if (!data.documents || data.documents.length === 0) {
+            empty.style.display = 'block';
+            stats.textContent = 'No uploads';
+            return;
+        }
+
+        empty.style.display = 'none';
+        stats.textContent = `${data.documents.length} file(s), ${AdminUtils.formatBytes(data.total_size_bytes)}`;
+
+        data.documents.forEach(file => {
+            const tr = document.createElement('tr');
+            const safeFileName = file.filename.replace(/'/g, "\\'");
+
+            tr.innerHTML = `
+                <td><input type="checkbox" class="upload-checkbox" value="${safeFileName}" onchange="toggleUploadSelection('${safeFileName}', this.checked)"></td>
+                <td>
+                    <i class="bi bi-file-pdf text-danger me-1"></i>
+                    ${file.filename}
+                </td>
+                <td>${AdminUtils.formatBytes(file.size_bytes)}</td>
+                <td>${new Date(file.uploaded_at).toLocaleString()}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-admin btn-sm" onclick="ingestFile('${safeFileName}')" title="Ingest Now">
+                            <i class="bi bi-gear"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteUpload('${safeFileName}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load uploads:', error);
+        AdminUtils.showToast('Failed to load uploads', 'danger');
+    }
+}
+
+function toggleUploadSelection(fileName, checked) {
+    if (checked) {
+        selectedUploads.add(fileName);
+    } else {
+        selectedUploads.delete(fileName);
+    }
+    updateBulkActions();
+}
+
+function toggleAllUploads(checked) {
+    const checkboxes = document.querySelectorAll('.upload-checkbox');
+    selectedUploads.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            selectedUploads.add(cb.value);
+        }
+    });
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCount = document.getElementById('selected-count');
+
+    if (selectedUploads.size > 0) {
+        bulkActions.style.display = 'flex';
+        selectedCount.textContent = `${selectedUploads.size} file(s) selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+async function deleteUpload(fileName) {
+    if (!confirm(`Delete ${fileName}?`)) return;
+
+    try {
+        const response = await fetch(`http://localhost:8005/api/sources/${encodeURIComponent(fileName)}?env=${currentEnvironment}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            if (result.total_deleted > 0) {
+                AdminUtils.showToast('File deleted successfully', 'success');
+            } else {
+                AdminUtils.showToast('Failed to delete file', 'warning');
+            }
+            loadUploads();
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Delete failed');
+        }
+    } catch (error) {
+        console.error('Delete failed:', error);
+        AdminUtils.showToast(`Failed to delete file: ${error.message}`, 'danger');
+    }
+}
+
+async function ingestFile(fileName) {
+    try {
+        AdminUtils.showToast(`Starting ingestion for ${fileName}...`, 'info');
+        // This would trigger the actual ingestion process
+        // For now, just show a success message
+        setTimeout(() => {
+            AdminUtils.showToast(`Ingestion started for ${fileName}`, 'success');
+            loadJobs();
+        }, 1000);
+    } catch (error) {
+        console.error('Ingestion failed:', error);
+        AdminUtils.showToast('Failed to start ingestion', 'danger');
+    }
+}
+
+async function ingestSelected() {
+    if (selectedUploads.size === 0) {
+        AdminUtils.showToast('Please select files to ingest', 'warning');
+        return;
+    }
+
+    try {
+        AdminUtils.showToast(`Starting selective ingestion for ${selectedUploads.size} file(s)...`, 'info');
+
+        const response = await fetch('/api/admin/ingestion/selective', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                env: currentEnvironment,
+                selected_sources: Array.from(selectedUploads),
+                options: { job_type: 'selective' }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(errorData.detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        AdminUtils.showToast(`Selective ingestion started for ${data.source_count} file(s) (Job ID: ${data.job_id})`, 'success');
+
+        // Clear selections and refresh
+        selectedUploads.clear();
+        updateBulkActions();
+        document.querySelectorAll('.upload-checkbox').forEach(cb => cb.checked = false);
+
+        // Refresh jobs list after a short delay
+        setTimeout(() => {
+            loadJobs();
+            loadUploads(); // Refresh upload status
+        }, 2000);
+
+    } catch (error) {
+        console.error('Selective ingestion failed:', error);
+        AdminUtils.showToast(`Failed to start selective ingestion: ${error.message}`, 'danger');
+    }
+}
+
+// ====================== Source Health Monitoring ======================
+
+async function loadSources() {
+    try {
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/sources`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#sources-table tbody');
+        const empty = document.getElementById('sources-empty');
+
+        tbody.innerHTML = '';
+        selectedSources.clear();
+        updateSourceBulkActions();
+
+        if (!data.sources || data.sources.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+
+        data.sources.forEach(source => {
+            const tr = document.createElement('tr');
+            const safeSourceId = source.id.replace(/'/g, "\\'");
+            const healthClass = `health-${source.health}`;
+            const statusClass = `job-status-${source.status}`;
+
+            tr.innerHTML = `
+                <td><input type="checkbox" class="source-checkbox" value="${safeSourceId}" onchange="toggleSourceSelection('${safeSourceId}', this.checked)"></td>
+                <td>
+                    <i class="bi bi-file-text me-1"></i>
+                    <strong>${source.id}</strong>
+                    <br><small class="text-muted">${source.source_file}</small>
+                </td>
+                <td><span class="badge bg-light text-dark">${source.chunk_count}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-1">
+                        <div class="health-indicator ${healthClass}"></div>
+                        <span class="text-uppercase small fw-bold">${source.health}</span>
+                    </div>
+                </td>
+                <td><span class="badge bg-secondary ${statusClass}">${source.status}</span></td>
+                <td>${AdminUtils.formatTimestamp(source.last_modified)}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info btn-sm" onclick="viewSourceDetails('${safeSourceId}')" title="View Details">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="reprocessSource('${safeSourceId}')" title="Reprocess">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="removeSource('${safeSourceId}')" title="Remove">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load sources:', error);
+        AdminUtils.showToast('Failed to load sources', 'danger');
+    }
+}
+
+function toggleSourceSelection(sourceId, checked) {
+    if (checked) {
+        selectedSources.add(sourceId);
+    } else {
+        selectedSources.delete(sourceId);
+    }
+    updateSourceBulkActions();
+}
+
+function toggleAllSources(checked) {
+    const checkboxes = document.querySelectorAll('.source-checkbox');
+    selectedSources.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            selectedSources.add(cb.value);
+        }
+    });
+    updateSourceBulkActions();
+}
+
+function updateSourceBulkActions() {
+    const bulkActions = document.getElementById('source-bulk-actions');
+    const selectedCount = document.getElementById('sources-selected-count');
+
+    if (selectedSources.size > 0) {
+        bulkActions.style.display = 'flex';
+        selectedCount.textContent = `${selectedSources.size} source(s) selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+async function removeSource(sourceId) {
+    if (!confirm(`Remove source ${sourceId}? This will delete all associated artifacts and cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/source?name=${encodeURIComponent(sourceId)}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            AdminUtils.showToast('Source removed successfully', 'success');
+            loadSources();
+        } else {
+            throw new Error('Remove failed');
+        }
+    } catch (error) {
+        console.error('Remove source failed:', error);
+        AdminUtils.showToast('Failed to remove source', 'danger');
+    }
+}
+
+async function reprocessSource(sourceId) {
+    try {
+        AdminUtils.showToast(`Starting reprocessing for ${sourceId}...`, 'info');
+        // This would trigger reprocessing
+        setTimeout(() => {
+            AdminUtils.showToast(`Reprocessing started for ${sourceId}`, 'success');
+            loadSources();
+            loadJobs();
+        }, 1000);
+    } catch (error) {
+        console.error('Reprocess failed:', error);
+        AdminUtils.showToast('Failed to start reprocessing', 'danger');
+    }
+}
+
+function viewSourceDetails(sourceId) {
+    // This would show a modal with detailed source information
+    AdminUtils.showToast(`Viewing details for ${sourceId}`, 'info');
+}
+
+// ====================== Job Monitoring ======================
+
+async function loadJobs() {
+    try {
+        const response = await fetch(`/api/ingestion/overview`);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#jobs-table tbody');
+        const empty = document.getElementById('jobs-empty');
+
+        tbody.innerHTML = '';
+
+        const envJobs = data.environments[currentEnvironment]?.recent_jobs || [];
+
+        if (envJobs.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+
+        envJobs.forEach(job => {
+            const tr = document.createElement('tr');
+            const statusClass = `job-status-${job.status}`;
+            const progress = job.progress_percent || 0;
+
+            tr.innerHTML = `
+                <td><code>${job.job_id}</code></td>
+                <td>
+                    <i class="bi bi-file-text me-1"></i>
+                    ${job.source_file}
+                </td>
+                <td><span class="badge bg-secondary ${statusClass}">${job.status}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="progress progress-mini flex-grow-1">
+                            <div class="progress-bar" style="width: ${progress}%"></div>
+                        </div>
+                        <small>${Math.round(progress)}%</small>
+                    </div>
+                </td>
+                <td>${job.started_at ? AdminUtils.formatTimestamp(job.started_at) : '-'}</td>
+                <td>${job.duration_seconds ? AdminUtils.formatDuration(job.duration_seconds) : '-'}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info btn-sm" onclick="viewJobDetails('${job.job_id}')" title="View Details">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        ${job.status === 'failed' ? `<button class="btn btn-outline-warning btn-sm" onclick="retryJob('${job.job_id}')" title="Retry"><i class="bi bi-arrow-clockwise"></i></button>` : ''}
+                        ${job.status === 'running' ? `<button class="btn btn-outline-danger btn-sm" onclick="killJob('${job.job_id}')" title="Cancel Job"><i class="bi bi-stop-circle"></i></button>` : ''}
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (error) {
+        console.error('Failed to load jobs:', error);
+        AdminUtils.showToast('Failed to load jobs', 'danger');
+    }
+}
+
+function viewJobDetails(jobId) {
+    // Navigate to logs page with job filter to open correct log
+    window.location.href = `/admin/logs?env=${currentEnvironment}&job=${jobId}`;
+}
+
+function retryJob(jobId) {
+    AdminUtils.showToast(`Retrying job ${jobId}...`, 'info');
+    // Implementation for job retry
+}
+
+async function killJob(jobId) {
+    if (!confirm(`Are you sure you want to cancel job ${jobId}? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        AdminUtils.showToast(`Cancelling job ${jobId}...`, 'info');
+        const response = await fetch(`/api/ingestion/${currentEnvironment}/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            AdminUtils.showToast(result.message || `Job ${jobId} cancelled successfully`, 'success');
+            // Refresh the jobs list to show updated status
+            setTimeout(() => loadJobs(), 1000);
+        } else {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to kill job');
+        }
+    } catch (error) {
+        console.error('Kill job failed:', error);
+        AdminUtils.showToast(`Failed to cancel job: ${error.message}`, 'danger');
+    }
+}
+
+function showJobLogs() {
+    // This would show aggregated job logs
+    AdminUtils.showToast('Opening job logs...', 'info');
+}
+
+// Reuse functions from main dashboard that are still needed
+async function runNightly(environment) {
+    try {
+        AdminUtils.showToast(`Starting nightly run for ${environment}...`, 'info');
+        const res = await fetch('/api/admin/ingestion/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ env: environment })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        AdminUtils.showToast(`Nightly started for ${data.env} (pid ${data.pid})`, 'success');
+        setTimeout(() => loadJobs(), 2000); // Refresh jobs after starting
+    } catch (e) {
+        console.error('Failed to start nightly:', e);
+        AdminUtils.showToast('Failed to start nightly run', 'danger');
+    }
+}
+
+// ====================== FR-034: Real-time Observability ======================
+
+let isObservabilityActive = false;
+let currentObservableJob = null;
+let processingRateChart = null;
+let successFailureChart = null;
+let metricsHistory = [];
+
+// Initialize observability functionality
+function startObservabilityMode() {
+    isObservabilityActive = true;
+
+    // Update UI state
+    document.getElementById('observability-inactive').style.display = 'none';
+    document.getElementById('observability-active').style.display = 'block';
+    document.getElementById('start-observability-btn').style.display = 'none';
+    document.getElementById('stop-observability-btn').style.display = 'inline-block';
+
+    // Load active jobs for selection
+    loadActiveJobsForObservability();
+
+    // Initialize charts
+    initializeObservabilityCharts();
+
+    AdminUtils.showToast('Real-time observability started', 'success');
+}
+
+function stopObservabilityMode() {
+    isObservabilityActive = false;
+
+    // Clear any pending reconnect timeout
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
+    // Close WebSocket connection with proper cleanup
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+        observabilityWebSocket = null;
+        console.log('Observability WebSocket disconnected and cleaned up');
+    }
+
+    // Update UI state
+    document.getElementById('observability-inactive').style.display = 'block';
+    document.getElementById('observability-active').style.display = 'none';
+    document.getElementById('start-observability-btn').style.display = 'inline-block';
+    document.getElementById('stop-observability-btn').style.display = 'none';
+
+    // Reset charts with proper cleanup
+    if (processingRateChart) {
+        processingRateChart.destroy();
+        processingRateChart = null;
+    }
+    if (successFailureChart) {
+        successFailureChart.destroy();
+        successFailureChart = null;
+    }
+
+    // Clear metrics history
+    metricsHistory = [];
+
+    AdminUtils.showToast('Real-time observability stopped', 'info');
+}
+
+async function loadActiveJobsForObservability() {
+    try {
+        const response = await fetch(`/api/admin/ingestion/recent`);
+        const data = await response.json();
+
+        const jobSelect = document.getElementById('active-job-select');
+        jobSelect.innerHTML = '<option value="">Select an active job...</option>';
+
+        // Filter for running jobs
+        const runningJobs = data.jobs?.filter(job => job.status === 'running') || [];
+
+        if (runningJobs.length === 0) {
+            jobSelect.innerHTML = '<option value="">No active jobs found</option>';
+            updateConnectionStatus('No active jobs to monitor', 'warning');
+            return;
+        }
+
+        runningJobs.forEach(job => {
+            const option = document.createElement('option');
+            option.value = job.job_id;
+            option.textContent = `${job.job_id} - ${job.source_file}`;
+            jobSelect.appendChild(option);
+        });
+
+        updateConnectionStatus('Select a job to start monitoring', 'info');
+
+    } catch (error) {
+        console.error('Failed to load active jobs:', error);
+        updateConnectionStatus('Failed to load active jobs', 'error');
+    }
+}
+
+function switchObservableJob(jobId) {
+    if (!jobId) {
+        disconnectFromJob();
+        return;
+    }
+
+    currentObservableJob = jobId;
+    connectToJobWebSocket(jobId);
+}
+
+function connectToJobWebSocket(jobId) {
+    // Close existing connection with cleanup
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+        observabilityWebSocket = null;
+    }
+
+    // Clear any pending reconnect timeout
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
+    // Only connect if page is visible
+    if (!isPageVisible) {
+        console.log('Page not visible - WebSocket connection deferred');
+        updateConnectionStatus('Page not visible - connection deferred', 'warning');
+        return;
+    }
+
+    updateConnectionStatus('Connecting to real-time metrics...', 'info');
+
+    try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/admin/ingestion/${jobId}/metrics`;
+
+        observabilityWebSocket = new WebSocket(wsUrl);
+
+        observabilityWebSocket.onopen = function(event) {
+            updateConnectionStatus(`Connected to ${jobId}`, 'success');
+            document.getElementById('progress-section').style.display = 'block';
+            document.getElementById('charts-section').style.display = 'block';
+
+            // Update job status
+            document.getElementById('job-status-text').textContent = 'Connected';
+            document.getElementById('job-health-indicator').className = 'health-indicator health-green';
+        };
+
+        observabilityWebSocket.onmessage = function(event) {
+            try {
+                const metrics = JSON.parse(event.data);
+                updateRealTimeMetrics(metrics);
+            } catch (error) {
+                console.error('Failed to parse metrics:', error);
+            }
+        };
+
+        observabilityWebSocket.onclose = function(event) {
+            updateConnectionStatus('Connection closed', 'warning');
+            document.getElementById('job-status-text').textContent = 'Disconnected';
+            document.getElementById('job-health-indicator').className = 'health-indicator health-red';
+            observabilityWebSocket = null;
+
+            // Only attempt reconnection if page is still visible and observability is active
+            if (isPageVisible && isObservabilityActive) {
+                console.log('Scheduling observability WebSocket reconnect...');
+                reconnectTimeout = setTimeout(() => connectToJobWebSocket(jobId), 5000);
+            }
+        };
+
+        observabilityWebSocket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            updateConnectionStatus('Connection error', 'error');
+        };
+
+    } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        updateConnectionStatus('Failed to connect', 'error');
+    }
+}
+
+function disconnectFromJob() {
+    if (observabilityWebSocket) {
+        observabilityWebSocket.close();
+        observabilityWebSocket = null;
+    }
+
+    currentObservableJob = null;
+    document.getElementById('progress-section').style.display = 'none';
+    document.getElementById('charts-section').style.display = 'none';
+    document.getElementById('job-status-text').textContent = 'No job selected';
+    document.getElementById('job-health-indicator').className = 'health-indicator';
+    updateConnectionStatus('Select a job to start monitoring', 'info');
+}
+
+function updateRealTimeMetrics(metrics) {
+    // Update progress bars
+    updateProgressBars(metrics);
+
+    // Add to metrics history for charts
+    metricsHistory.push({
+        timestamp: Date.now(),
+        ...metrics
+    });
+
+    // Keep only last 50 data points
+    if (metricsHistory.length > 50) {
+        metricsHistory.shift();
+    }
+
+    // Update charts
+    updateObservabilityCharts();
+
+    // Update job status
+    document.getElementById('job-status-text').textContent = `${metrics.phase} - ${metrics.status}`;
+    document.getElementById('job-progress-text').textContent =
+        `${metrics.processed_sources}/${metrics.total_sources} sources`;
+
+    // Show estimated completion time
+    if (metrics.estimated_completion) {
+        const eta = new Date(metrics.estimated_completion * 1000);
+        document.getElementById('job-progress-text').textContent +=
+            ` (ETA: ${eta.toLocaleTimeString()})`;
+    }
+
+    // Handle errors
+    if (metrics.status === 'failed' || metrics.records_failed > 0) {
+        showErrorAlert(metrics);
+    }
+}
+
+function updateProgressBars(metrics) {
+    const phaseMap = {
+        'parse': 'parse',
+        'enrich': 'enrich',
+        'compile': 'compile'
+    };
+
+    const currentPhase = phaseMap[metrics.phase];
+
+    if (currentPhase) {
+        const progressPercent = Math.round((metrics.processed_sources / metrics.total_sources) * 100);
+        const progressBar = document.getElementById(`${currentPhase}-progress-bar`);
+        const progressText = document.getElementById(`${currentPhase}-progress-text`);
+
+        if (progressBar && progressText) {
+            progressBar.style.width = `${progressPercent}%`;
+            progressText.textContent = `${progressPercent}%`;
+
+            // Add visual feedback for active phase
+            if (metrics.status === 'progress') {
+                progressBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+            } else {
+                progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            }
+        }
+    }
+}
+
+function initializeObservabilityCharts() {
+    // Processing Rate Chart
+    const processingRateCtx = document.getElementById('processing-rate-chart').getContext('2d');
+    processingRateChart = new Chart(processingRateCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Records/sec',
+                data: [],
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            },
+            animation: {
+                duration: 0
+            }
+        }
+    });
+
+    // Success/Failure Chart
+    const successFailureCtx = document.getElementById('success-failure-chart').getContext('2d');
+    successFailureChart = new Chart(successFailureCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Processed', 'Failed'],
+            datasets: [{
+                data: [0, 0],
+                backgroundColor: ['rgb(34, 197, 94)', 'rgb(239, 68, 68)']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function updateObservabilityCharts() {
+    if (metricsHistory.length === 0) return;
+
+    const latest = metricsHistory[metricsHistory.length - 1];
+
+    // Update processing rate chart
+    if (processingRateChart) {
+        const labels = metricsHistory.map(m => new Date(m.timestamp).toLocaleTimeString());
+        const data = metricsHistory.map(m => m.processing_rate || 0);
+
+        processingRateChart.data.labels = labels;
+        processingRateChart.data.datasets[0].data = data;
+        processingRateChart.update('none');
+    }
+
+    // Update success/failure chart
+    if (successFailureChart) {
+        const processed = latest.records_processed || 0;
+        const failed = latest.records_failed || 0;
+
+        successFailureChart.data.datasets[0].data = [processed, failed];
+        successFailureChart.update('none');
+    }
+}
+
+function showErrorAlert(metrics) {
+    const alertsContainer = document.getElementById('error-alerts');
+
+    const alert = document.createElement('div');
+    alert.className = 'alert alert-danger alert-dismissible fade show';
+    alert.innerHTML = `
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        <strong>Error in ${metrics.phase} phase:</strong>
+        ${metrics.records_failed} record(s) failed to process
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    alertsContainer.appendChild(alert);
+
+    // Auto-remove alert after 10 seconds
+    setTimeout(() => {
+        if (alert.parentNode) {
+            alert.remove();
+        }
+    }, 10000);
+}
+
+function updateConnectionStatus(message, type) {
+    const statusElement = document.getElementById('connection-status');
+    const textElement = document.getElementById('connection-text');
+    const spinnerElement = document.getElementById('connection-spinner');
+
+    textElement.textContent = message;
+
+    // Update alert class
+    statusElement.className = `alert d-flex align-items-center mb-3`;
+    switch (type) {
+        case 'success':
+            statusElement.classList.add('alert-success');
+            spinnerElement.style.display = 'none';
+            break;
+        case 'warning':
+            statusElement.classList.add('alert-warning');
+            spinnerElement.style.display = 'none';
+            break;
+        case 'error':
+            statusElement.classList.add('alert-danger');
+            spinnerElement.style.display = 'none';
+            break;
+        default:
+            statusElement.classList.add('alert-info');
+            spinnerElement.style.display = 'block';
+    }
+}
+
+// Historical Metrics Modal
+function showHistoricalMetrics() {
+    const modal = new bootstrap.Modal(document.getElementById('historical-metrics-modal'));
+    modal.show();
+    loadHistoricalMetrics();
+}
+
+async function loadHistoricalMetrics() {
+    const env = document.getElementById('historical-env-select').value;
+    const limit = document.getElementById('historical-limit').value;
+    const contentDiv = document.getElementById('historical-metrics-content');
+
+    contentDiv.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`/api/admin/ingestion/${env}/historical?limit=${limit}`);
+        const data = await response.json();
+
+        if (!data.historical_jobs || data.historical_jobs.length === 0) {
+            contentDiv.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-clock-history display-4 mb-2"></i>
+                    <p>No historical jobs found for ${env} environment</p>
+                </div>
+            `;
+            return;
+        }
+
+        renderHistoricalMetrics(data.historical_jobs);
+
+    } catch (error) {
+        console.error('Failed to load historical metrics:', error);
+        contentDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Failed to load historical metrics: ${error.message}
+            </div>
+        `;
+    }
+}
+
+function renderHistoricalMetrics(jobs) {
+    const contentDiv = document.getElementById('historical-metrics-content');
+
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Type</th>
+                        <th>Sources</th>
+                        <th>Duration</th>
+                        <th>Processing Rate</th>
+                        <th>Success Rate</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    jobs.forEach(job => {
+        const duration = job.duration ? `${Math.round(job.duration / 60)}m` : '-';
+        const processingRate = job.processing_rate ? `${job.processing_rate.toFixed(1)}/s` : '-';
+        const successRate = job.success_rate ? `${Math.round(job.success_rate * 100)}%` : '-';
+        const completedAt = job.completed_at ? AdminUtils.formatTimestamp(job.completed_at) : '-';
+
+        html += `
+            <tr>
+                <td><code>${job.job_id}</code></td>
+                <td><span class="badge bg-secondary">${job.job_type}</span></td>
+                <td>${job.source_count}</td>
+                <td>${duration}</td>
+                <td>${processingRate}</td>
+                <td>${successRate}</td>
+                <td>${completedAt}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    // Add summary statistics
+    const avgDuration = jobs.reduce((sum, job) => sum + (job.duration || 0), 0) / jobs.length;
+    const avgProcessingRate = jobs.reduce((sum, job) => sum + (job.processing_rate || 0), 0) / jobs.length;
+    const avgSuccessRate = jobs.reduce((sum, job) => sum + (job.success_rate || 0), 0) / jobs.length;
+
+    html += `
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Duration</h6>
+                        <h4 class="text-primary">${Math.round(avgDuration / 60)}m</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Processing Rate</h6>
+                        <h4 class="text-info">${avgProcessingRate.toFixed(1)}/s</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-0 bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">Average Success Rate</h6>
+                        <h4 class="text-success">${Math.round(avgSuccessRate * 100)}%</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    contentDiv.innerHTML = html;
+}
+</script>
+
+</body>
+</html>

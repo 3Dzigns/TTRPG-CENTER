@@ -34,6 +34,7 @@ class EnvironmentValidator:
         self.current_env = self._detect_environment()
         self.env_paths = self._get_environment_paths()
         self.cross_env_blocked = self._get_cross_env_setting()
+        self.environment_name = self.current_env
 
     def validate_environment_setup(self) -> Dict[str, str]:
         """Validate complete environment setup."""
@@ -57,18 +58,21 @@ class EnvironmentValidator:
         logger.info("Environment validation completed successfully")
         return results
 
+
     def validate_path_access(self, path: str) -> bool:
         """Validate that path access is within current environment."""
         normalized_path = Path(path).resolve()
         path_str = str(normalized_path)
+        normalized_str = path_str.replace("\\", "/")
 
-        if "src_common" in path_str:
+        if "src_common" in normalized_str:
             return True
-        if any(dir_name in path_str for dir_name in ["scripts", "config"]):
+        if any(dir_name in normalized_str for dir_name in ["scripts", "config"]):
             return True
 
         for env in self.VALID_ENVIRONMENTS:
-            if f"env/{env}/" in path_str or f"env\\{env}\\" in path_str:
+            marker = f"env/{env}/"
+            if marker in normalized_str:
                 if env != self.current_env:
                     error_msg = f"Cross-environment path access blocked: {path} (current: {self.current_env})"
                     logger.error(error_msg)
@@ -162,9 +166,40 @@ class EnvironmentValidator:
         }
 
     def _get_cross_env_setting(self) -> bool:
+        """Get cross-environment access blocked setting from environment variable."""
         setting = os.getenv("CROSS_ENV_ACCESS_BLOCKED", "true").lower()
         return setting in ("true", "1", "yes", "on")
 
+    def set_environment(self, environment: str) -> None:
+        """Explicitly set the active environment context."""
+        if environment not in self.VALID_ENVIRONMENTS:
+            raise ValueError(f"Invalid environment: {environment}")
+        if environment == self.current_env:
+            return
+        logger.info(f"Switching environment context from {self.current_env} to {environment}")
+        self.current_env = environment
+        self.environment_name = environment
+        self.env_paths = self._get_environment_paths()
+        self.cross_env_blocked = self._get_cross_env_setting()
+        self.ensure_environment_directories()
+
+    def get_environment_info(self) -> Dict[str, Dict[str, str]]:
+        """Return structured environment metadata for callers expecting legacy payloads."""
+        paths = {
+            'base_path': str(self.env_paths['base']),
+            'code_path': str(self.env_paths['code']),
+            'data_path': str(self.env_paths['data']),
+            'logs_path': str(self.env_paths['logs']),
+            'artifacts_path': str(self.env_paths['artifacts']),
+            'uploads_path': str(self.env_paths['uploads']),
+            'cache_path': str(self.env_paths['cache']),
+            'config_path': str(self.env_paths['config']),
+            'ssl_path': str(self.env_paths['ssl']),
+        }
+        return {
+            'environment': self.current_env,
+            'paths': paths,
+        }
     def _validate_environment_identity(self) -> str:
         try:
             target_env = os.getenv("TARGET_ENV")
@@ -281,7 +316,7 @@ class EnvironmentValidator:
             for key, value in os.environ.items():
                 if isinstance(value, str):
                     for other_env in other_envs:
-                        if f"env/{other_env}/" in value or f"env\\{other_env}\\" in value:
+                        if f"env/{other_env}/" in value or f"env\\{other_env}" in value:
                             cross_refs.append(f"{key}={value}")
 
             if cross_refs:

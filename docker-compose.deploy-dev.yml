@@ -1,0 +1,203 @@
+version: '3.8'
+
+# DEV DEPLOYMENT COMPOSE FILE
+# Purpose: Deploy all services to DEV environment with latest images
+# Usage: docker compose -f docker-compose.deploy-dev.yml up -d
+
+services:
+  # --- DATASTORES ---
+  cassandra:
+    image: cassandra:4.1
+    container_name: ttrpg-cassandra-dev
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=ttrpg_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+    volumes:
+      - ttrpg_dev_data:/var/lib/cassandra
+    networks:
+      - ttrpg-dev
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe cluster'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  mongo:
+    image: mongo:7.0
+    container_name: ttrpg-mongo-dev
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=ttrpg_dev
+    volumes:
+      - ttrpg_dev_data:/data/db
+    networks:
+      - ttrpg-dev
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: ttrpg-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - ttrpg_dev_cache:/data
+    networks:
+      - ttrpg-dev
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- MICROSERVICES ---
+  ingest:
+    image: ttrpg-ingest:dev-20251003
+    container_name: ttrpg-ingest-dev
+    ports:
+      - "8003:8003"
+    environment:
+      - ENVIRONMENT=dev
+      - SERVICE_NAME=ingest
+      - PORT=8003
+    env_file:
+      - ./env/dev/config/.env
+    volumes:
+      - ./src_common:/app/src_common:ro
+      - ./services/ingest:/app/services/ingest:ro
+      - ttrpg_dev_logs:/app/env/dev/logs
+      - ttrpg_dev_artifacts:/app/env/dev/artifacts
+      - ttrpg_dev_uploads:/app/env/dev/uploads
+    networks:
+      - ttrpg-dev
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  pipeline-worker:
+    image: ttrpg-pipeline-worker:dev-20251003
+    container_name: ttrpg-pipeline-worker-dev
+    ports:
+      - "8006:8006"
+    environment:
+      - ENVIRONMENT=dev
+      - SERVICE_NAME=pipeline_worker
+      - PORT=8006
+    env_file:
+      - ./env/dev/config/.env
+    volumes:
+      - ./src_common:/app/src_common:ro
+      - ./services/pipeline_worker:/app/services/pipeline_worker:ro
+      - ttrpg_dev_logs:/app/env/dev/logs
+      - ttrpg_dev_artifacts:/app/env/dev/artifacts
+    networks:
+      - ttrpg-dev
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  orchestrator:
+    image: ttrpg-orchestrator:dev-20251003
+    container_name: ttrpg-orchestrator-dev
+    ports:
+      - "8004:8004"
+    environment:
+      - ENVIRONMENT=dev
+      - SERVICE_NAME=orchestrator
+      - PORT=8004
+    env_file:
+      - ./env/dev/config/.env
+    volumes:
+      - ./src_common:/app/src_common:ro
+      - ./services/orchestrator:/app/services/orchestrator:ro
+      - ttrpg_dev_logs:/app/env/dev/logs
+      - ttrpg_dev_artifacts:/app/env/dev/artifacts
+    networks:
+      - ttrpg-dev
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  admin-api:
+    image: ttrpg-admin-api:dev-20251003
+    container_name: ttrpg-admin-api-dev
+    ports:
+      - "8000:8001"
+    environment:
+      - ENVIRONMENT=dev
+      - SERVICE_NAME=admin_api
+      - PORT=8001
+    env_file:
+      - ./env/dev/config/.env
+    volumes:
+      - ./src_common:/app/src_common:ro
+      - ./services/admin_api:/app/services/admin_api:ro
+      - ./templates:/app/templates:ro
+      - ttrpg_dev_logs:/app/env/dev/logs
+      - ttrpg_dev_artifacts:/app/env/dev/artifacts
+      - ttrpg_dev_uploads:/app/env/dev/uploads
+    networks:
+      - ttrpg-dev
+    depends_on:
+      ingest:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+      pipeline-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  ttrpg-dev:
+    name: ttrpg-dev-network
+    driver: bridge
+
+volumes:
+  ttrpg_dev_data:
+    name: ttrpg_dev_data
+  ttrpg_dev_logs:
+    name: ttrpg_dev_logs
+  ttrpg_dev_artifacts:
+    name: ttrpg_dev_artifacts
+  ttrpg_dev_uploads:
+    name: ttrpg_dev_uploads
+  ttrpg_dev_cache:
+    name: ttrpg_dev_cache

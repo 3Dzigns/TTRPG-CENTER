@@ -1,0 +1,42 @@
+version: '3.8'
+
+# REBUILD COMPOSE FILE
+# Purpose: Build all microservice images with latest code changes
+# Usage: docker compose -f docker-compose.rebuild.yml build
+
+services:
+  ingest-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: ingest
+    image: ttrpg-ingest:dev-20251003
+    command: /bin/true  # No-op command, we just want to build
+
+  pipeline-worker-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: pipeline_worker
+    image: ttrpg-pipeline-worker:dev-20251003
+    command: /bin/true
+
+  orchestrator-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: orchestrator
+    image: ttrpg-orchestrator:dev-20251003
+    command: /bin/true
+
+  admin-api-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+      args:
+        SERVICE_NAME: admin_api
+    image: ttrpg-admin-api:dev-20251003
+    command: /bin/true

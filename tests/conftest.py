@@ -88,7 +88,7 @@ def test_environment_config(target_environment: str) -> Dict[str, Any]:
             "uploads_path": "env/test/uploads",
             "ssl_path": "env/test/ssl",
             "admin_api_url": "http://localhost:8182",
-            "user_api_url": "http://localhost:8183",
+            "user_api_url": "http://localhost:8181",
             "ingest_service_url": "http://localhost:8184",
             "orchestrator_url": "http://localhost:8185",
             "test_runner_url": "http://localhost:8195",

@@ -13,13 +13,17 @@ from pypdf import PdfReader
 
 from src_common.config import ConfigManager
 from src_common.logging import get_logger
+from src_common.ocr_validator import validate_ocr_dependencies, OCRValidator
+from src_common.job_logging import log_to_job, log_pass_start, log_pass_complete, log_heartbeat
 
 try:
     from unstructured.partition.pdf import partition_pdf  # type: ignore
     UNSTRUCTURED_AVAILABLE = True
-except Exception:  # pragma: no cover - import guard
+    UNSTRUCTURED_IMPORT_ERROR = None
+except Exception as e:  # pragma: no cover - import guard
     partition_pdf = None
     UNSTRUCTURED_AVAILABLE = False
+    UNSTRUCTURED_IMPORT_ERROR = str(e)
 
 logger = get_logger(__name__)
 
@@ -52,14 +56,16 @@ class PassCResult:
     artifacts: List[str]
     success: bool = True
     error_message: Optional[str] = None
+    chunks_loaded: int = 0
 
 
 class ExtractionRunner:
     """Handles Pass C extraction logic."""
 
-    def __init__(self, job_id: str, env: str) -> None:
+    def __init__(self, job_id: str, env: str, job_log_file: Optional[Path] = None) -> None:
         self.job_id = job_id
         self.env = env
+        self.job_log_file = job_log_file
         self.config = ConfigManager()
         self.allow_fallback = self._read_bool("ALLOW_UNSTRUCTURED_FALLBACK", default=False)
         self.ocr_languages = self.config.get_config("UNSTRUCTURED_OCR_LANGUAGES", "eng")
@@ -72,6 +78,10 @@ class ExtractionRunner:
 
     def process(self, source_pdf: Path, job_dir: Path) -> PassCResult:
         started_at = time.perf_counter()
+
+        # Pass start logging
+        log_pass_start("C", f"Content Extraction - {source_pdf.name}", self.job_log_file)
+
         logger.info(
             "pass_c_start",
             extra={
@@ -91,11 +101,33 @@ class ExtractionRunner:
         used_unstructured = False
         fallback_used = False
 
-        for part in parts:
+        total_parts = len(parts)
+        last_log_time = 0.0  # Initialize for heartbeat
+
+        for part_idx, part in enumerate(parts, 1):
+            logger.info(f"Pass C: Processing part {part_idx}/{total_parts}: {part.name}")
+
+            # Heartbeat before processing (prevents >10s silence for slow parts)
+            last_log_time = log_heartbeat(
+                part_idx,
+                total_parts,
+                f"Extracting {part.name}",
+                self.job_log_file,
+                "C",
+                last_log_time,
+                heartbeat_interval=8.0
+            )
+
+            part_started = time.perf_counter()
+
             part_chunks, part_used_unstructured, part_used_fallback = self._extract_part(part)
             chunks.extend(part_chunks)
             used_unstructured = used_unstructured or part_used_unstructured
             fallback_used = fallback_used or part_used_fallback
+
+            part_duration = time.perf_counter() - part_started
+            logger.info(f"  Part {part_idx} completed: {len(part_chunks)} chunks extracted in {part_duration:.1f}s")
+            log_to_job(f"Part {part_idx}/{total_parts} completed: {len(part_chunks)} chunks in {part_duration:.1f}s", self.job_log_file, "info", "C")
 
         chunks_file = pass_dir / f"{self.job_id}_pass_c_chunks.jsonl"
         with chunks_file.open("w", encoding="utf-8") as handle:
@@ -125,6 +157,8 @@ class ExtractionRunner:
         ]
 
         processing_time_ms = int((time.perf_counter() - started_at) * 1000)
+        duration_seconds = processing_time_ms / 1000
+
         logger.info(
             "pass_c_complete",
             extra={
@@ -137,6 +171,15 @@ class ExtractionRunner:
             },
         )
 
+        # Pass complete logging
+        stats = {
+            "parts_processed": len(parts),
+            "chunks_extracted": len(chunks),
+            "used_unstructured": used_unstructured,
+            "fallback_used": fallback_used
+        }
+        log_pass_complete("C", duration_seconds, stats, self.job_log_file)
+
         return PassCResult(
             job_id=self.job_id,
             parts_processed=len(parts),
@@ -146,6 +189,7 @@ class ExtractionRunner:
             fallback_used=fallback_used,
             processing_time_ms=processing_time_ms,
             artifacts=artifacts,
+            chunks_loaded=len(chunks),
         )
 
     def _discover_parts(self, job_dir: Path, source_pdf: Path) -> List[Path]:
@@ -170,7 +214,16 @@ class ExtractionRunner:
         lineage_prefix = part_path.stem
         try:
             if not UNSTRUCTURED_AVAILABLE:
-                raise RuntimeError("unstructured library not available")
+                # Run OCR dependency validation to provide detailed error message
+                validator = OCRValidator()
+                validator.validate_all()
+                error_msg = f"unstructured library not available: {UNSTRUCTURED_IMPORT_ERROR}\n{validator.get_summary()}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            # Log start of extraction (can take 30s+ for large PDFs)
+            extraction_started = time.perf_counter()
+            logger.info(f"Pass C: Starting unstructured.io extraction for {part_path.name} (this may take 30-60s for large PDFs)")
 
             elements = partition_pdf(
                 filename=str(part_path),
@@ -179,10 +232,14 @@ class ExtractionRunner:
                 include_metadata=True,
                 ocr_languages=self.ocr_languages,
             )
+
+            extraction_duration = time.perf_counter() - extraction_started
+            logger.info(f"Pass C: Unstructured extraction completed in {extraction_duration:.1f}s, converting to chunks...")
+
             chunks = self._convert_unstructured_elements(elements, lineage_prefix)
             logger.info(
                 "pass_c_unstructured_ok",
-                extra={"job_id": self.job_id, "part": part_path.name, "chunks": len(chunks)},
+                extra={"job_id": self.job_id, "part": part_path.name, "chunks": len(chunks), "extraction_seconds": extraction_duration},
             )
             return chunks, True, False
         except Exception as exc:  # noqa: BLE001
@@ -257,8 +314,8 @@ class ExtractionRunner:
         return chunks
 
 
-def process_pass_c(source_pdf: Path, job_dir: Path, job_id: str, env: str) -> PassCResult:
-    runner = ExtractionRunner(job_id=job_id, env=env)
+def process_pass_c(source_pdf: Path, job_dir: Path, job_id: str, env: str, job_log_file: Optional[Path] = None) -> PassCResult:
+    runner = ExtractionRunner(job_id=job_id, env=env, job_log_file=job_log_file)
     return runner.process(source_pdf, job_dir)
 
 

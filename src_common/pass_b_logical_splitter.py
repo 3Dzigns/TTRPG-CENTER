@@ -16,6 +16,62 @@ from pypdf import PdfReader, PdfWriter
 from src_common.config import ConfigManager
 from src_common.logging import get_logger
 
+try:
+    from src_common.job_logging import log_to_job, log_pass_start, log_pass_complete, log_heartbeat
+except ImportError:  # pragma: no cover - legacy runtime fallback
+    from datetime import datetime
+
+    def _fallback_write(message: str, log_file_path=None) -> None:
+        if not log_file_path:
+            return
+        try:
+            path_obj = Path(log_file_path)
+            path_obj.parent.mkdir(parents=True, exist_ok=True)
+            with path_obj.open('a', encoding='utf-8') as handle:
+                handle.write(message + "\n")
+        except Exception:
+            return
+
+    def log_to_job(message: str, log_file_path=None, level: str = 'info', pass_name: str | None = None) -> None:
+        timestamp = datetime.now().isoformat()
+        prefix = f"[{timestamp}] "
+        if pass_name:
+            prefix += f"Pass {pass_name}: "
+        _fallback_write(prefix + message, log_file_path)
+
+    def log_pass_start(pass_name: str, description: str, log_file_path=None) -> None:
+        banner = '=' * 60
+        log_to_job(f"{banner}\n{description}\n{banner}", log_file_path, 'info', pass_name)
+
+    def log_pass_complete(pass_name: str, duration_seconds: float, stats: dict, log_file_path=None) -> None:
+        stats_str = ', '.join(f"{k}={v}" for k, v in stats.items())
+        log_to_job(f"Completed in {duration_seconds:.2f}s - {stats_str}", log_file_path, 'info', pass_name)
+        log_to_job('=' * 60, log_file_path, 'info', pass_name)
+
+    def log_heartbeat(
+        current: int,
+        total: int,
+        item_name: str,
+        log_file_path=None,
+        pass_name: str | None = None,
+        last_logged: float = 0.0,
+        heartbeat_interval: float = 8.0
+    ) -> float:
+        import time
+
+        now = time.time()
+        if now - last_logged >= heartbeat_interval:
+            progress_pct = (current / total * 100) if total else 0
+            log_to_job(
+                f"Processing {current}/{total} ({progress_pct:.1f}%): {item_name}",
+                log_file_path,
+                'info',
+                pass_name
+            )
+            return now
+        return last_logged
+
+
 logger = get_logger(__name__)
 
 # Retain legacy constant for compatibility with existing tests
@@ -91,34 +147,35 @@ class LogicalSplitter:
         self.min_pages_per_part = max(1, min(self.max_pages_per_part, configured_min_pages))
         configured_target_pages = int(self.processing_config.get("pass_b_target_pages_per_part", 25))
         self.target_pages_per_part = min(self.max_pages_per_part, max(self.min_pages_per_part, configured_target_pages))
+        self.max_toc_sections = int(self.processing_config.get("pass_b_max_toc_sections", 200))
         self.pass_a_manifest = pass_a_manifest
         self.job_log_file = job_log_file
         self.section_catalog: List[Dict[str, Any]] = []
         self.section_titles: List[str] = []
         self.source_pdf_name: Optional[str] = None
+        self.source_doc_id: Optional[str] = None
 
     def _log_job(self, message: str) -> None:
-        if not self.job_log_file:
-            return
-        try:
-            log_path = Path(self.job_log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            prefix = f"Pass B job={self.job_id}"
-            if self.source_pdf_name:
-                prefix += f", source={self.source_pdf_name}"
-            with log_path.open("a", encoding="utf-8") as handle:
-                handle.write(f"[{iso_timestamp()}] {prefix} :: {message}\n")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "pass_b_job_log_write_failed",
-                extra={"job_id": self.job_id, "error": str(exc)},
-            )
+        """Legacy wrapper around standardized job logging"""
+        if self.source_pdf_name:
+            message = f"source={self.source_pdf_name} :: {message}"
+        log_to_job(message, self.job_log_file, "info", "B")
 
     def _load_toc_entries(self, job_dir: Path, total_pages: int) -> List[Dict[str, Any]]:
-        """Load ToC metadata emitted by Pass A if available."""
+        """Load ToC metadata emitted by Pass A if available.
+
+        Prioritizes new passA.toc.json format, falls back to legacy formats.
+        """
         candidates = []
+
+        # Priority 1: New passA.toc.json format (from Pass A TOC-only extraction)
+        candidates.append(job_dir / "pass_a" / f"{self.job_id}_passA.toc.json")
+
+        # Priority 2: Explicit pass_a_manifest if provided
         if self.pass_a_manifest:
             candidates.append(Path(self.pass_a_manifest))
+
+        # Priority 3: Legacy formats (backward compatibility)
         candidates.append(job_dir / f"{self.job_id}_pass_a_manifest.json")
         candidates.append(job_dir / f"{self.job_id}_pass_a_dict.json")
 
@@ -138,6 +195,32 @@ class LogicalSplitter:
                 )
                 continue
 
+            # Extract document ID from Pass A data
+            if 'document_id' in data and not self.source_doc_id:
+                self.source_doc_id = data['document_id']
+                logger.info(
+                    "pass_b_doc_id_loaded",
+                    extra={"job_id": self.job_id, "doc_id": self.source_doc_id}
+                )
+
+            # NEW FORMAT: passA.toc.json with sections array
+            if 'sections' in data and isinstance(data.get('sections'), list):
+                sections = data['sections']
+                if sections:
+                    logger.info(
+                        "pass_b_toc_loaded_new_format",
+                        extra={
+                            "job_id": self.job_id,
+                            "manifest": str(candidate_path),
+                            "sections": len(sections),
+                            "extraction_method": data.get('extraction_method', 'unknown')
+                        },
+                    )
+                    catalog = self._build_section_catalog_from_new_format(sections, total_pages)
+                    if catalog:
+                        return catalog
+
+            # LEGACY FORMAT: toc_sections or toc arrays
             sections = data.get('toc_sections') or data.get('toc') or []
             if not sections:
                 continue
@@ -145,12 +228,60 @@ class LogicalSplitter:
             catalog = self._build_section_catalog(sections, total_pages)
             if catalog:
                 logger.info(
-                    "pass_b_toc_loaded",
+                    "pass_b_toc_loaded_legacy_format",
                     extra={"job_id": self.job_id, "manifest": str(candidate_path), "sections": len(catalog)},
                 )
                 return catalog
 
         return []
+
+    def _build_section_catalog_from_new_format(self, sections: List[Dict[str, Any]], total_pages: int) -> List[Dict[str, Any]]:
+        """Build section catalog from new passA.toc.json format.
+
+        New format sections have:
+        - section_id: SHA1 hash
+        - title: Section title
+        - start_page: 1-indexed start page
+        - end_page: 1-indexed end page
+        - level: Hierarchy level (1, 2, 3, ...)
+        - parent_id: Parent section ID or null
+        """
+        catalog: List[Dict[str, Any]] = []
+        if not sections:
+            return catalog
+
+        for section in sections:
+            # Validate required fields
+            if not all(key in section for key in ['section_id', 'title', 'start_page', 'end_page', 'level']):
+                logger.warning(
+                    "pass_b_invalid_toc_section",
+                    extra={"job_id": self.job_id, "section": section}
+                )
+                continue
+
+            # Extract and validate page ranges
+            start_page = int(section['start_page'])
+            end_page = int(section['end_page'])
+
+            # Clamp to valid page range
+            start_page = max(1, min(start_page, total_pages))
+            end_page = max(start_page, min(end_page, total_pages))
+
+            catalog.append({
+                "section_id": section['section_id'],
+                "title": section['title'],
+                "page_start": start_page,
+                "page_end": end_page,
+                "level": section['level'],
+                "parent_id": section.get('parent_id'),
+            })
+
+        logger.info(
+            "pass_b_catalog_built_from_new_format",
+            extra={"job_id": self.job_id, "sections": len(catalog)}
+        )
+
+        return catalog
 
     def _build_section_catalog(self, sections: List[Dict[str, Any]], total_pages: int) -> List[Dict[str, Any]]:
         """Normalize ToC entries and compute page ranges."""
@@ -251,11 +382,12 @@ class LogicalSplitter:
         boundaries = self._candidate_section_boundaries(start_page, max_end)
         if is_last_part:
             final_end = max(start_page, min(total_pages, max_end))
-            return {
+            selection = {
                 "page_end": final_end,
                 "selection_reason": "final_remainder",
                 "toc_candidates": boundaries,
             }
+            return selection
 
         if boundaries:
             eligible = [end for end in boundaries if end >= min_end]
@@ -264,17 +396,168 @@ class LogicalSplitter:
                     eligible,
                     key=lambda candidate: (abs(candidate - target_end), candidate),
                 )
-                return {
+                selection = {
                     "page_end": best,
                     "selection_reason": "toc_aligned",
                     "toc_candidates": boundaries,
                 }
+                return selection
 
-        return {
+        selection = {
             "page_end": max_end,
             "selection_reason": "limit_enforced",
             "toc_candidates": boundaries,
         }
+        return selection
+
+    def _estimate_tokens(self, page_count: int) -> int:
+        """Estimate token count from page count using simple heuristic.
+
+        Assumes average 500 words per page, 1.3 tokens per word.
+        This is a rough estimate for splitting decisions.
+        """
+        return int(page_count * 500 * 1.3)
+
+    def _generate_toc_based_splits(self, total_pages: int) -> List[Dict[str, Any]]:
+        """Generate splits based on TOC structure (structure-first approach).
+
+        Strategy per AI spec:
+        1. Split on TOC section boundaries (level 1)
+        2. Use sub-headings (level 2/3) if section too large (>8k tokens)
+        3. Target 3-8k tokens per part
+        4. Cap at 30 pages only at safe boundaries
+        """
+        if not self.section_catalog:
+            # No TOC available, fall back to page-based splitting
+            logger.info("pass_b_no_toc_fallback", extra={"job_id": self.job_id})
+            return self._generate_page_ranges(total_pages)
+
+        ranges: List[Dict[str, Any]] = []
+        current_page = 1
+
+        # Group sections by level 1 (top-level chapters/parts)
+        level_1_sections = [s for s in self.section_catalog if s['level'] == 1]
+
+        if level_1_sections and len(level_1_sections) > self.max_toc_sections:
+            logger.info("pass_b_toc_overflow", extra={
+                "job_id": self.job_id,
+                "sections": len(level_1_sections),
+                "threshold": self.max_toc_sections,
+            })
+            self._log_job(
+                f"Pass B: TOC has {len(level_1_sections)} level-1 sections; falling back to page-based splitting"
+            )
+            return self._generate_page_ranges(total_pages)
+
+        if not level_1_sections:
+            # No level 1 sections, use all sections as boundaries
+            level_1_sections = self.section_catalog
+
+        for section_idx, section in enumerate(level_1_sections):
+            section_start = section['page_start']
+            section_end = section['page_end']
+            section_pages = section_end - section_start + 1
+            section_tokens = self._estimate_tokens(section_pages)
+
+            # If section fits target (3-8k tokens / ~5-13 pages), use as-is
+            if 3000 <= section_tokens <= 8000:
+                ranges.append({
+                    "page_start": section_start,
+                    "page_end": section_end,
+                    "selection_reason": "toc_section_optimal",
+                    "section_id": section['section_id'],
+                    "section_title": section['title'],
+                    "section_level": section['level'],
+                    "estimated_tokens": section_tokens,
+                })
+                current_page = section_end + 1
+
+            # If section is too large (>8k tokens), try to split using sub-headings
+            elif section_tokens > 8000:
+                # Find sub-sections (level 2+) within this section
+                subsections = [
+                    s for s in self.section_catalog
+                    if s['page_start'] >= section_start
+                    and s['page_end'] <= section_end
+                    and s['level'] > section['level']
+                ]
+
+                if subsections:
+                    # Split using sub-headings
+                    for subsection in subsections:
+                        subsection_pages = subsection['page_end'] - subsection['page_start'] + 1
+                        subsection_tokens = self._estimate_tokens(subsection_pages)
+
+                        # Cap at 30 pages per AI spec
+                        if subsection_pages <= 30:
+                            ranges.append({
+                                "page_start": subsection['page_start'],
+                                "page_end": subsection['page_end'],
+                                "selection_reason": "toc_subsection_split",
+                                "section_id": subsection['section_id'],
+                                "section_title": subsection['title'],
+                                "section_level": subsection['level'],
+                                "estimated_tokens": subsection_tokens,
+                            })
+                        else:
+                            # Subsection itself is too large, split into chunks
+                            chunk_start = subsection['page_start']
+                            while chunk_start <= subsection['page_end']:
+                                chunk_end = min(chunk_start + 29, subsection['page_end'])
+                                chunk_tokens = self._estimate_tokens(chunk_end - chunk_start + 1)
+
+                                ranges.append({
+                                    "page_start": chunk_start,
+                                    "page_end": chunk_end,
+                                    "selection_reason": "large_subsection_chunked",
+                                    "section_id": subsection['section_id'],
+                                    "section_title": subsection['title'],
+                                    "section_level": subsection['level'],
+                                    "estimated_tokens": chunk_tokens,
+                                })
+                                chunk_start = chunk_end + 1
+
+                    current_page = section_end + 1
+                else:
+                    # No subsections, split into page chunks (cap at 30 pages)
+                    chunk_start = section_start
+                    while chunk_start <= section_end:
+                        chunk_end = min(chunk_start + 29, section_end)
+                        chunk_tokens = self._estimate_tokens(chunk_end - chunk_start + 1)
+
+                        ranges.append({
+                            "page_start": chunk_start,
+                            "page_end": chunk_end,
+                            "selection_reason": "large_section_chunked",
+                            "section_id": section['section_id'],
+                            "section_title": section['title'],
+                            "section_level": section['level'],
+                            "estimated_tokens": chunk_tokens,
+                        })
+                        chunk_start = chunk_end + 1
+
+                    current_page = section_end + 1
+
+            # If section is too small (<3k tokens), combine with next section if possible
+            else:
+                # For now, include small sections as-is (could be combined in future)
+                ranges.append({
+                    "page_start": section_start,
+                    "page_end": section_end,
+                    "selection_reason": "toc_section_small",
+                    "section_id": section['section_id'],
+                    "section_title": section['title'],
+                    "section_level": section['level'],
+                    "estimated_tokens": section_tokens,
+                })
+                current_page = section_end + 1
+
+        logger.info(
+            "pass_b_toc_based_splits_generated",
+            extra={"job_id": self.job_id, "parts": len(ranges), "total_pages": total_pages}
+        )
+
+        return ranges
 
     def _generate_page_ranges(self, total_pages: int) -> List[Dict[str, Any]]:
         """Plan the page ranges for each split using page constraints and ToC hints."""
@@ -347,12 +630,84 @@ class LogicalSplitter:
             ranges[-1]["selection_reason"] = "final_remainder"
 
         return ranges
+
+    def _sanitize_page_ranges(self, page_ranges: List[Dict[str, Any]], total_pages: int) -> List[Dict[str, Any]]:
+        """Clamp and validate planned page ranges before PDF slicing."""
+        if total_pages <= 0 or not page_ranges:
+            return []
+
+        sanitized: List[Dict[str, Any]] = []
+        adjustments: List[Dict[str, Any]] = []
+
+        for index, raw_range in enumerate(page_ranges, start=1):
+            raw_start = raw_range.get('page_start', 1)
+            raw_end = raw_range.get('page_end', raw_start)
+
+            try:
+                start_page = int(raw_start)
+            except Exception:
+                start_page = 1
+            try:
+                end_page = int(raw_end)
+            except Exception:
+                end_page = start_page
+
+            original_start, original_end = start_page, end_page
+
+            if start_page < 1:
+                start_page = 1
+            if total_pages > 0 and start_page > total_pages:
+                start_page = total_pages
+
+            if end_page < start_page:
+                end_page = start_page
+            if total_pages > 0 and end_page > total_pages:
+                end_page = total_pages
+
+            if total_pages > 0 and start_page > total_pages:
+                continue
+
+            if original_start != start_page or original_end != end_page:
+                adjustments.append({
+                    'index': index,
+                    'original_start': original_start,
+                    'original_end': original_end,
+                    'adjusted_start': start_page,
+                    'adjusted_end': end_page,
+                })
+
+            normalized = dict(raw_range)
+            normalized['page_start'] = start_page
+            normalized['page_end'] = end_page
+            sanitized.append(normalized)
+
+        if adjustments:
+            logger.warning(
+                'pass_b_page_ranges_normalized',
+                extra={
+                    'job_id': self.job_id,
+                    'total_pages': total_pages,
+                    'adjusted_ranges': len(adjustments),
+                },
+            )
+            for detail in adjustments[:5]:
+                self._log_job(
+                    f"Pass B normalized range #{detail['index']}: {detail['original_start']}-{detail['original_end']} -> {detail['adjusted_start']}-{detail['adjusted_end']}"
+                )
+
+        return sanitized
+
     def process(self, source_pdf: Path, job_dir: Path, lightweight: bool = False) -> PassBResult:
-    min_pages_per_part: int = 20
-    max_pages_per_part: int = 30
-    target_pages_per_part: int = 25
+        """Process PDF and determine if logical splitting is needed."""
+        min_pages_per_part: int = 20
+        max_pages_per_part: int = 30
+        target_pages_per_part: int = 25
         started_at = time.perf_counter()
         mode = "lightweight" if lightweight else "standard"
+
+        # Pass start logging
+        log_pass_start("B", f"Logical Splitting ({mode} mode) - {source_pdf.name}", self.job_log_file)
+
         logger.info(
             "pass_b_split_start",
             extra={
@@ -410,8 +765,218 @@ class LogicalSplitter:
         artifacts: List[str] = []
         split_plan: List[Dict[str, Any]] = []
         plan_path: Optional[Path] = None
+        parts_jsonl: List[Dict[str, Any]] = []  # For passB.parts.jsonl
 
-        if split_performed:
+        # NEW STRATEGY: TOC-first splitting
+        # If TOC is available, use structure-based splitting regardless of file size
+        # Otherwise, fall back to size-based splitting
+        use_toc_splitting = len(self.section_catalog) > 0
+
+        if use_toc_splitting:
+            # TOC-BASED SPLITTING (Structure-first approach per AI spec)
+            logger.info(
+                "pass_b_using_toc_splitting",
+                extra={
+                    "job_id": self.job_id,
+                    "total_pages": total_pages,
+                    "toc_sections": len(self.section_catalog),
+                    "mode": mode,
+                },
+            )
+            self._log_job(
+                f"Pass B strategy: TOC-based splitting with {len(self.section_catalog)} sections"
+            )
+
+            # Generate TOC-based split plan
+            page_ranges = self._generate_toc_based_splits(total_pages)
+            page_ranges = self._sanitize_page_ranges(page_ranges, total_pages)
+            if not page_ranges:
+                logger.warning(
+                    "pass_b_toc_plan_empty",
+                    extra={"job_id": self.job_id, "total_pages": total_pages, "mode": mode},
+                )
+                self._log_job("Pass B: TOC plan invalid, falling back to page-based ranges")
+                page_ranges = self._sanitize_page_ranges(self._generate_page_ranges(total_pages), total_pages)
+
+            split_performed = len(page_ranges) > 1
+
+            logger.info(
+                "pass_b_toc_plan_established",
+                extra={
+                    "job_id": self.job_id,
+                    "parts": len(page_ranges),
+                    "total_pages": total_pages,
+                    "mode": mode,
+                },
+            )
+
+            # Process each TOC-based range
+            part_index = 0
+            for page_range in page_ranges:
+                part_number = part_index + 1
+                part_start_page = page_range["page_start"]
+                aligned_end = page_range["page_end"]
+
+                if lightweight and not split_performed:
+                    # Lightweight mode with no splitting - skip PDF generation
+                    # Just record the plan
+                    split_plan.append({
+                        "part_id": None,
+                        "page_start": part_start_page,
+                        "page_end": aligned_end,
+                        "section_id": page_range.get("section_id"),
+                        "section_title": page_range.get("section_title"),
+                    })
+                    part_index += 1
+                    continue
+
+                # Generate actual PDF part
+                part_started_at = time.perf_counter()
+                writer = PdfWriter()
+
+                # Add pages with progress logging (heartbeat every 8s)
+                total_pages_in_part = aligned_end - part_start_page + 1
+                pages_processed = 0
+                last_log_time = 0.0
+
+                logger.info(f"Pass B: Building part {part_number} - adding {total_pages_in_part} pages...")
+                log_to_job(f"Building part {part_number} - {total_pages_in_part} pages", self.job_log_file, "info", "B")
+
+                for page_number in range(part_start_page - 1, aligned_end):
+                    writer.add_page(reader.pages[page_number])
+                    pages_processed += 1
+
+                    # Standardized heartbeat logging (prevents >10s silence)
+                    last_log_time = log_heartbeat(
+                        pages_processed,
+                        total_pages_in_part,
+                        f"Part {part_number} page {page_number + 1}",
+                        self.job_log_file,
+                        "B",
+                        last_log_time,
+                        heartbeat_interval=8.0
+                    )
+
+                part_filename = f"{self.job_id}_part_{part_number:02d}.pdf"
+                part_path = parts_dir / part_filename
+
+                logger.info(f"Pass B: Writing part {part_number} to disk: {part_filename}")
+                write_started = time.perf_counter()
+
+                with part_path.open("wb") as handle:
+                    writer.write(handle)
+
+                write_duration = time.perf_counter() - write_started
+                logger.info(f"  File write completed in {write_duration:.2f}s ({part_path.stat().st_size / 1024 / 1024:.2f} MB)")
+
+                checksum = _sha256(part_path)
+                part_relative = part_path.relative_to(job_dir).as_posix()
+
+                # Use section ID from TOC if available
+                section_id = page_range.get("section_id", f"pages-{part_start_page}-{aligned_end}")
+                section_title = page_range.get("section_title")
+
+                # Use source document ID if available, otherwise fall back to job_id
+                doc_id_for_part = self.source_doc_id if self.source_doc_id else self.job_id
+
+                part_meta = SplitPart(
+                    doc_id=doc_id_for_part,
+                    part_id=f"{self.job_id}-part-{part_number:02d}",
+                    section_id=section_id,
+                    page_start=part_start_page,
+                    page_end=aligned_end,
+                    relative_path=part_relative,
+                    checksum_sha256=checksum,
+                    size_bytes=part_path.stat().st_size,
+                    section_title=section_title,
+                )
+                parts.append(part_meta)
+                artifacts.append(part_relative)
+
+                # Build split plan entry
+                split_plan.append({
+                    "part_id": part_meta.part_id,
+                    "page_start": part_meta.page_start,
+                    "page_end": part_meta.page_end,
+                    "section_id": section_id,
+                    "section_title": section_title,
+                    "selection_reason": page_range.get("selection_reason", "toc_based"),
+                    "estimated_tokens": page_range.get("estimated_tokens"),
+                })
+
+                # Build JSONL entry for passB.parts.jsonl (per AI spec)
+                parts_jsonl.append({
+                    "part_id": part_meta.part_id,
+                    "doc_id": doc_id_for_part,
+                    "page_start": part_meta.page_start,
+                    "page_end": part_meta.page_end,
+                    "page_count": aligned_end - part_start_page + 1,
+                    "section_id": section_id,
+                    "section_title": section_title,
+                    "section_level": page_range.get("section_level"),
+                    "relative_path": part_relative,
+                    "size_bytes": part_meta.size_bytes,
+                    "checksum_sha256": checksum,
+                    "reason": page_range.get("selection_reason", "toc_based"),
+                    "estimated_tokens": page_range.get("estimated_tokens"),
+                })
+
+                part_duration_ms = int((time.perf_counter() - part_started_at) * 1000)
+                page_count = aligned_end - part_start_page + 1
+
+                # Comprehensive logging
+                logger.info(
+                    f"Pass B: Created part {part_number}: {self.source_pdf_name} "
+                    f"(pages {part_start_page}-{aligned_end}, {page_count} pages) → {part_filename}"
+                )
+                logger.info(f"  Source: {self.source_pdf_name}")
+                logger.info(f"  Document ID: {doc_id_for_part}")
+                logger.info(f"  Section: {section_title or section_id}")
+                logger.info(f"  Output: {part_relative}")
+                logger.info(f"  Pages: {part_start_page}-{aligned_end} ({page_count} pages)")
+                logger.info(f"  Size: {part_meta.size_bytes:,} bytes")
+                logger.info(f"  Checksum: {checksum[:16]}...")
+                logger.info(f"  Duration: {part_duration_ms}ms")
+
+                # Structured log for automation
+                logger.info(
+                    "pass_b_part_emitted",
+                    extra={
+                        "job_id": self.job_id,
+                        "doc_id": doc_id_for_part,
+                        "source_file": self.source_pdf_name,
+                        "part_index": part_number,
+                        "page_start": part_meta.page_start,
+                        "page_end": part_meta.page_end,
+                        "page_count": page_count,
+                        "size_bytes": part_meta.size_bytes,
+                        "duration_ms": part_duration_ms,
+                        "output_file": part_filename,
+                        "relative_path": part_relative,
+                        "checksum": checksum,
+                    },
+                )
+                self._log_job(
+                    f"Pass B part {part_number}: {self.source_pdf_name} "
+                    f"→ {part_filename} (pages {part_meta.page_start}-{part_meta.page_end}, "
+                    f"section={section_title or section_id}, doc_id={doc_id_for_part})"
+                )
+
+                part_index += 1
+
+        elif split_performed:
+            # FALLBACK: SIZE-BASED SPLITTING (when no TOC available)
+            logger.info(
+                "pass_b_using_size_splitting",
+                extra={
+                    "job_id": self.job_id,
+                    "total_pages": total_pages,
+                    "file_size_bytes": file_size,
+                    "mode": mode,
+                },
+            )
+            self._log_job("Pass B strategy: Size-based splitting (no TOC available)")
+
             safe_threshold = max(threshold_bytes, 1)
             estimated_parts = max(2, math.ceil(file_size / safe_threshold))
             pages_per_part = max(1, math.ceil(total_pages / estimated_parts))
@@ -429,12 +994,11 @@ class LogicalSplitter:
                 },
             )
 
-            sections_detected = len(self.section_catalog)
             self._log_job(
                 "Pass B plan: estimated_parts="
                 f"{estimated_parts}, pages_per_part={pages_per_part}, "
                 f"total_pages={total_pages}, threshold_mb={self.threshold_mb}, "
-                f"mode={mode}, lightweight={lightweight}, toc_sections={sections_detected}"
+                f"mode={mode}, lightweight={lightweight}, toc_sections=0"
             )
 
             current_page = 1
@@ -444,52 +1008,55 @@ class LogicalSplitter:
                 part_number = part_index + 1
                 part_start_page = current_page
                 proposed_end = min(total_pages, part_start_page + pages_per_part - 1)
-                aligned_end = proposed_end
-
-                if lightweight and self.section_catalog:
-                    candidate = self._align_end_page(part_start_page, proposed_end, total_pages)
-                    if candidate >= part_start_page:
-                        aligned_end = candidate
-
-                if aligned_end < part_start_page:
-                    aligned_end = proposed_end
-                if aligned_end < part_start_page:
-                    aligned_end = part_start_page
-
-                if aligned_end != proposed_end:
-                    logger.info(
-                        "pass_b_boundary_adjusted",
-                        extra={
-                            "job_id": self.job_id,
-                            "part_index": part_number,
-                            "requested_end": proposed_end,
-                            "aligned_end": aligned_end,
-                            "mode": mode,
-                            "lightweight": lightweight,
-                        },
-                    )
-                    self._log_job(
-                        "Pass B boundary adjust: part="
-                        f"{part_number}, requested_end={proposed_end}, aligned_end={aligned_end}, "
-                        f"mode={mode}, lightweight={lightweight}"
-                    )
+                aligned_end = min(proposed_end, total_pages)
 
                 part_started_at = time.perf_counter()
                 writer = PdfWriter()
+
+                # Add pages with progress logging (heartbeat every 8s)
+                total_pages_in_part = aligned_end - part_start_page + 1
+                pages_processed = 0
+                last_log_time = 0.0  # Initialize for heartbeat
+
+                logger.info(f"Pass B: Building part {part_number}/{estimated_parts} - adding {total_pages_in_part} pages...")
+                log_to_job(f"Building part {part_number}/{estimated_parts} - {total_pages_in_part} pages", self.job_log_file, "info", "B")
+
                 for page_number in range(part_start_page - 1, aligned_end):
                     writer.add_page(reader.pages[page_number])
+                    pages_processed += 1
+
+                    # Standardized heartbeat logging (prevents >10s silence)
+                    last_log_time = log_heartbeat(
+                        pages_processed,
+                        total_pages_in_part,
+                        f"Part {part_number} page {page_number + 1}",
+                        self.job_log_file,
+                        "B",
+                        last_log_time,
+                        heartbeat_interval=8.0
+                    )
 
                 part_filename = f"{self.job_id}_part_{part_number:02d}.pdf"
                 part_path = parts_dir / part_filename
+
+                logger.info(f"Pass B: Writing part {part_number} to disk: {part_filename}")
+                write_started = time.perf_counter()
+
                 with part_path.open("wb") as handle:
                     writer.write(handle)
+
+                write_duration = time.perf_counter() - write_started
+                logger.info(f"  File write completed in {write_duration:.2f}s ({part_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
                 checksum = _sha256(part_path)
                 part_relative = part_path.relative_to(job_dir).as_posix()
                 pages_label = f"pages-{part_start_page}-{aligned_end}"
 
+                # Use source document ID if available, otherwise fall back to job_id
+                doc_id_for_part = self.source_doc_id if self.source_doc_id else self.job_id
+
                 part_meta = SplitPart(
-                    doc_id=self.job_id,
+                    doc_id=doc_id_for_part,
                     part_id=f"{self.job_id}-part-{part_number:02d}",
                     section_id=pages_label,
                     page_start=part_start_page,
@@ -512,22 +1079,57 @@ class LogicalSplitter:
                 )
 
                 part_duration_ms = int((time.perf_counter() - part_started_at) * 1000)
+                page_count = aligned_end - part_start_page + 1
+
+                # Comprehensive logging with all traceability info
+                logger.info(
+                    f"Pass B: Created chunk {part_number}/{estimated_parts}: {self.source_pdf_name} "
+                    f"(pages {part_start_page}-{aligned_end}, {page_count} pages) → {part_filename}"
+                )
+                logger.info(
+                    f"  Source: {self.source_pdf_name}"
+                )
+                logger.info(
+                    f"  Document ID: {doc_id_for_part}"
+                )
+                logger.info(
+                    f"  Output: {part_relative}"
+                )
+                logger.info(
+                    f"  Pages: {part_start_page}-{aligned_end} ({page_count} pages)"
+                )
+                logger.info(
+                    f"  Size: {part_meta.size_bytes:,} bytes"
+                )
+                logger.info(
+                    f"  Checksum: {checksum[:16]}..."
+                )
+                logger.info(
+                    f"  Duration: {part_duration_ms}ms"
+                )
+
+                # Structured log for automation
                 logger.info(
                     "pass_b_part_emitted",
                     extra={
                         "job_id": self.job_id,
+                        "doc_id": doc_id_for_part,
+                        "source_file": self.source_pdf_name,
                         "part_index": part_number,
                         "page_start": part_meta.page_start,
                         "page_end": part_meta.page_end,
+                        "page_count": page_count,
                         "size_bytes": part_meta.size_bytes,
                         "duration_ms": part_duration_ms,
-                        "pages_label": part_meta.section_id,
+                        "output_file": part_filename,
+                        "relative_path": part_relative,
+                        "checksum": checksum,
                     },
                 )
                 self._log_job(
-                    "Pass B part="
-                    f"{part_number}, pages={part_meta.page_start}-{part_meta.page_end}, "
-                    f"size_bytes={part_meta.size_bytes}, path={part_relative}"
+                    f"Pass B chunk {part_number}/{estimated_parts}: {self.source_pdf_name} "
+                    f"→ {part_filename} (pages {part_meta.page_start}-{part_meta.page_end}, "
+                    f"doc_id={doc_id_for_part})"
                 )
 
                 part_index += 1
@@ -631,7 +1233,27 @@ class LogicalSplitter:
                 )
             artifacts.append(plan_path.relative_to(job_dir).as_posix())
 
+        # Generate passB.parts.jsonl (JSONL format per AI spec)
+        if parts_jsonl:
+            parts_jsonl_path = pass_dir / f"{self.job_id}_passB.parts.jsonl"
+            with parts_jsonl_path.open("w", encoding="utf-8") as handle:
+                for part_entry in parts_jsonl:
+                    handle.write(json.dumps(part_entry, ensure_ascii=False) + "\n")
+
+            artifacts.append(parts_jsonl_path.relative_to(job_dir).as_posix())
+            logger.info(
+                "pass_b_parts_jsonl_generated",
+                extra={
+                    "job_id": self.job_id,
+                    "path": str(parts_jsonl_path),
+                    "entries": len(parts_jsonl)
+                }
+            )
+            self._log_job(f"Pass B: Generated passB.parts.jsonl with {len(parts_jsonl)} entries")
+
         duration_ms = int((time.perf_counter() - started_at) * 1000)
+        duration_seconds = duration_ms / 1000
+
         logger.info(
             "pass_b_split_complete",
             extra={
@@ -642,6 +1264,15 @@ class LogicalSplitter:
                 "mode": mode,
             },
         )
+
+        # Pass complete logging
+        stats = {
+            "split_performed": split_performed,
+            "parts": len(parts),
+            "total_pages": total_pages,
+            "sections": len(self.section_catalog)
+        }
+        log_pass_complete("B", duration_seconds, stats, self.job_log_file)
 
         return PassBResult(
             job_id=self.job_id,
@@ -669,10 +1300,7 @@ class PassBLogicalSplitter(LogicalSplitter):
         pdf_path: Path,
         output_dir: Path,
         pass_a_manifest: Optional[Path] = None,
-        lightweight: bool = False,
-    min_pages_per_part: int = 20
-    max_pages_per_part: int = 30
-    target_pages_per_part: int = 25
+        lightweight: bool = False
     ) -> PassBResult:
         if pass_a_manifest is not None:
             self.pass_a_manifest = Path(pass_a_manifest)
@@ -687,8 +1315,8 @@ def process_pass_b(
     pass_a_manifest: Optional[Path] = None,
     job_log_file: Optional[Path] = None,
     lightweight: bool = False,
-    min_pages_per_part: int = 20
-    max_pages_per_part: int = 30
+    min_pages_per_part: int = 20,
+    max_pages_per_part: int = 30,
     target_pages_per_part: int = 25
 ) -> PassBResult:
     """Entry point used by the ingestion pipeline."""

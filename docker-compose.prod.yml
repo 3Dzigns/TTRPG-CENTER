@@ -69,11 +69,8 @@ services:
     restart: unless-stopped
 
   ingest:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: ingest
+    image: ${PROD_INGEST_IMAGE:-ghcr.io/ttrpg-center/ingest:prod-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override PROD_INGEST_IMAGE with released digest from scripts/registry/build-images.py
     container_name: ttrpg-ingest-prod
     working_dir: /app
     env_file:
@@ -104,11 +101,8 @@ services:
     restart: unless-stopped
 
   orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: orchestrator
+    image: ${PROD_ORCHESTRATOR_IMAGE:-ghcr.io/ttrpg-center/orchestrator:prod-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override PROD_ORCHESTRATOR_IMAGE with released digest from scripts/registry/build-images.py
     container_name: ttrpg-orchestrator-prod
     working_dir: /app
     env_file:
@@ -131,11 +125,8 @@ services:
     restart: unless-stopped
 
   admin-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: admin_api
+    image: ${PROD_ADMIN_API_IMAGE:-ghcr.io/ttrpg-center/admin-api:prod-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override PROD_ADMIN_API_IMAGE with released digest from scripts/registry/build-images.py
     container_name: ttrpg-admin-api-prod
     working_dir: /app
     env_file:
@@ -166,11 +157,8 @@ services:
     restart: unless-stopped
 
   user-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.microservice
-      args:
-        SERVICE_NAME: user_api
+    image: ${PROD_USER_API_IMAGE:-ghcr.io/ttrpg-center/user-api:prod-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override PROD_USER_API_IMAGE with released digest from scripts/registry/build-images.py
     container_name: ttrpg-user-api-prod
     working_dir: /app
     env_file:
@@ -193,9 +181,8 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      dockerfile: services/app/Dockerfile
+    image: ${PROD_APP_IMAGE:-ghcr.io/ttrpg-center/app:prod-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+    # Override PROD_APP_IMAGE with released digest from scripts/registry/build-images.py
     container_name: ttrpg-app-prod
     working_dir: /app
     env_file:

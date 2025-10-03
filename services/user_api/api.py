@@ -851,7 +851,7 @@ if __name__ == "__main__":
     config = get_environment_config()
     env_name = config.get("environment", "dev")
 
-    port_map = {"dev": 8002, "test": 8183, "prod": 8284}
+    port_map = {"dev": 8002, "test": 8181, "prod": 8284}
     port = port_map.get(env_name, 8002)
 
     uvicorn.run(

@@ -7,6 +7,7 @@ Tests all five admin service modules (ADM-001 through ADM-005)
 import pytest
 import asyncio
 import time
+import json
 from unittest.mock import patch, mock_open, MagicMock
 from pathlib import Path
 
@@ -100,6 +101,51 @@ class TestAdminIngestionService:
         # Should return empty list when no jobs exist
         assert len(jobs) >= 0
     
+    @pytest.mark.asyncio
+    async def test_list_jobs_discovers_manifest_paths(self, ingestion_service, tmp_path, monkeypatch):
+        """Jobs with manifests under env-specific artifacts paths should be returned"""
+        monkeypatch.setattr(ingestion_service, '_get_artifacts_path', lambda env: tmp_path)
+
+        # Root-level job directory under env/<env>/artifacts
+        root_job = tmp_path / 'selective_root_dev'
+        root_job.mkdir(parents=True)
+        root_manifest = {
+            'job_id': 'selective_root_dev',
+            'status': 'failed',
+            'created_at': time.time(),
+            'started_at': time.time(),
+            'completed_at': None,
+            'source_file': 'root.pdf',
+            'phases': ['A', 'B'],
+            'completed_phases': 1
+        }
+        (root_job / 'manifest.json').write_text(json.dumps(root_manifest), encoding='utf-8')
+
+        # Job directory under env/<env>/artifacts/ingest/<env>/
+        ingest_job = tmp_path / 'ingest' / 'dev' / 'selective_ingest_dev'
+        ingest_job.mkdir(parents=True)
+        ingest_manifest = {
+            'job_id': 'selective_ingest_dev',
+            'status': 'running',
+            'created_at': time.time(),
+            'started_at': time.time(),
+            'completed_at': None,
+            'source_file': 'ingest.pdf',
+            'phases': ['A', 'B', 'C'],
+            'completed_phases': 2
+        }
+        (ingest_job / 'manifest.json').write_text(json.dumps(ingest_manifest), encoding='utf-8')
+
+        jobs = await ingestion_service.list_jobs('dev')
+        returned_ids = {job['job_id'] for job in jobs}
+
+        assert 'selective_root_dev' in returned_ids
+        assert 'selective_ingest_dev' in returned_ids
+
+        recent = await ingestion_service.get_recent_jobs(limit=5)
+        fetched_recent_ids = {job['job_id'] for job in recent}
+        assert {'selective_root_dev', 'selective_ingest_dev'}.issubset(fetched_recent_ids)
+
     @pytest.mark.asyncio
     @patch('pathlib.Path.mkdir')
     @patch('builtins.open', new_callable=mock_open)

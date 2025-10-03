@@ -1,0 +1,78 @@
+{
+  "job_id": "manual_test",
+  "mode": "lightweight",
+  "lightweight": true,
+  "parts": [
+    {
+      "part_id": "manual_test-part-01",
+      "page_start": 1,
+      "page_end": 58,
+      "section_id": "pages-1-58",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-02",
+      "page_start": 59,
+      "page_end": 116,
+      "section_id": "pages-59-116",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-03",
+      "page_start": 117,
+      "page_end": 174,
+      "section_id": "pages-117-174",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-04",
+      "page_start": 175,
+      "page_end": 232,
+      "section_id": "pages-175-232",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-05",
+      "page_start": 233,
+      "page_end": 290,
+      "section_id": "pages-233-290",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-06",
+      "page_start": 291,
+      "page_end": 348,
+      "section_id": "pages-291-348",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-07",
+      "page_start": 349,
+      "page_end": 406,
+      "section_id": "pages-349-406",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-08",
+      "page_start": 407,
+      "page_end": 464,
+      "section_id": "pages-407-464",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-09",
+      "page_start": 465,
+      "page_end": 522,
+      "section_id": "pages-465-522",
+      "section_title": null
+    },
+    {
+      "part_id": "manual_test-part-10",
+      "page_start": 523,
+      "page_end": 578,
+      "section_id": "pages-523-578",
+      "section_title": null
+    }
+  ],
+  "section_catalog": []
+}

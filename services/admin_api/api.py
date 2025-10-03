@@ -32,6 +32,7 @@ from src_common.logging import get_logger
 from src_common.config import get_environment_config
 from src_common.auth_models import UserContext
 from src_common.security import bootstrap_app_security, record_audit_event, require_roles
+from src_common.admin_routes import admin_router
 
 from .models import *
 from .clients import ServiceClientFactory, TestRunnerClient, TestRunnerError, OrchestratorError
@@ -52,6 +53,17 @@ app = FastAPI(
 )
 
 bootstrap_app_security(app, service_name="admin_api")
+
+# Include admin routes
+app.include_router(admin_router)
+
+# Root redirect to admin dashboard
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+async def root():
+    """Redirect root to admin dashboard."""
+    return RedirectResponse(url="/admin", status_code=302)
 
 # Service configuration
 config = get_environment_config()
