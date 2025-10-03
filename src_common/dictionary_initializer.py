@@ -15,6 +15,7 @@ Outputs an artifact JSON for traceability.
 import json
 import os
 import time
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,17 @@ from .ttrpg_secrets import get_openai_client_config, _load_env_file
 
 
 logger = get_logger(__name__)
+
+
+def _compute_file_hash(path: Path) -> str:
+    try:
+        sha = hashlib.sha256()
+        with open(path, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(65536), b''):
+                sha.update(chunk)
+        return sha.hexdigest()
+    except Exception:
+        return ''
 
 
 @dataclass
@@ -139,6 +151,8 @@ def _call_openai_json(system_prompt: str, user_prompt: str) -> List[Dict[str, An
 
 def initialize_dictionary_from_source(pdf_path: Path, output_dir: Path, env: str = "dev", pages: int = 5) -> DictionaryInitResult:
     start = time.time()
+    job_id = f"dictionary_init_{pdf_path.stem}"
+    source_hash = _compute_file_hash(pdf_path)
 
     # Ensure .env is loaded for OPENAI (root-level .env)
     project_root = Path(__file__).resolve().parents[1]
@@ -173,48 +187,90 @@ def initialize_dictionary_from_source(pdf_path: Path, output_dir: Path, env: str
 
     entries_json = _call_openai_json(prompts["system"], prompts["user"]) if sample else []
 
-    # Normalize and upsert
-    loader = DictionaryLoader(env)
-    normalized: List[DictEntry] = []
-    for obj in entries_json:
-        try:
-            term = str(obj.get("term", "")).strip()
-            definition = str(obj.get("definition", "")).strip()
-            category = str(obj.get("category", "general")).strip().lower() or "general"
-            if not term or not definition:
-                continue
-            normalized.append(
-                DictEntry(
-                    term=term,
-                    definition=definition[:400],
-                    category=category,
-                    sources=[{"source": pdf_path.name, "method": "init", "page_hint": 1}],
-                )
-            )
-        except Exception:
-            continue
-
-    upserted = loader.upsert_entries(normalized) if normalized else 0
-
-    # Write artifact for audit
-    output_dir.mkdir(parents=True, exist_ok=True)
-    artifact = output_dir / "dictionary_init.json"
+    
+# Normalize and upsert
+loader = DictionaryLoader(env)
+normalized: List[DictEntry] = []
+for obj in entries_json:
     try:
-        with open(artifact, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "source": pdf_path.name,
-                    "toc_count": len(outline.entries or []),
-                    "entries_proposed": entries_json,
-                    "entries_upserted": upserted,
-                },
-                f,
-                indent=2,
-                ensure_ascii=False,
+        term = str(obj.get("term", "")).strip()
+        definition = str(obj.get("definition", "")).strip()
+        category = str(obj.get("category", "general")).strip().lower() or "general"
+        if not term or not definition:
+            continue
+        normalized.append(
+            DictEntry(
+                term=term,
+                definition=definition[:400],
+                category=category,
+                sources=[
+                    {
+                        "source": pdf_path.name,
+                        "method": "init",
+                        "page_hint": 1,
+                        "source_hash": source_hash,
+                        "environment": env,
+                        "job_id": job_id,
+                    }
+                ],
+                job_id=job_id,
+                source_hash=source_hash,
+                environment=env,
+                source_file=pdf_path.name,
             )
-    except Exception as e:
-        logger.warning(f"Failed to write dictionary init artifact: {e}")
+        )
+    except Exception:
+        continue
 
-    elapsed_ms = int((time.time() - start) * 1000)
-    logger.info(f"Dictionary initialized for {pdf_path.name}: upserted {upserted} terms in {elapsed_ms}ms")
-    return DictionaryInitResult(terms_upserted=upserted, elapsed_ms=elapsed_ms, artifact_file=artifact)
+upserted_count = 0
+term_results: List[Dict[str, Any]] = []
+verification_count = None
+
+if normalized:
+    upserted_count, term_results = loader.upsert_entries(
+        normalized,
+        job_id=job_id,
+        source_hash=source_hash,
+        source_file=pdf_path.name,
+        environment=env,
+    )
+
+verification_count = getattr(loader, "last_verification_count", None)
+if verification_count is not None:
+    logger.info(
+        "pass_a.mongo.verify_ok",
+        extra={
+            "job_id": job_id,
+            "source_hash": source_hash,
+            "environment": env,
+            "rows_written": upserted_count,
+            "verified_count": verification_count,
+        },
+    )
+
+# Write artifact for audit
+output_dir.mkdir(parents=True, exist_ok=True)
+artifact = output_dir / "dictionary_init.json"
+artifact_payload = {
+    "source": pdf_path.name,
+    "toc_count": len(outline.entries or []),
+    "entries_proposed": entries_json,
+    "entries_upserted": upserted_count,
+    "verification_count": verification_count,
+    "term_results": term_results,
+}
+try:
+    with open(artifact, "w", encoding="utf-8") as f:
+        json.dump(artifact_payload, f, indent=2, ensure_ascii=False)
+except Exception as e:
+    logger.warning(f"Failed to write dictionary init artifact: {e}")
+
+elapsed_ms = int((time.time() - start) * 1000)
+logger.info(
+    "Dictionary initialized for %s: upserted %s terms%s in %sms",
+    pdf_path.name,
+    upserted_count,
+    f" (verified {verification_count})" if verification_count is not None else "",
+    elapsed_ms,
+)
+return DictionaryInitResult(terms_upserted=upserted_count, elapsed_ms=elapsed_ms, artifact_file=artifact)

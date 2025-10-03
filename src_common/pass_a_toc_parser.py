@@ -202,6 +202,7 @@ class PassATocParser:
         lightweight = self.lightweight if lightweight is None else lightweight
         self.lightweight = lightweight
         mode = "lightweight" if lightweight else "standard"
+        source_hash = self._compute_file_hash(pdf_path) if pdf_path.exists() else None
 
         # Log to both container and job logs
         log_pass_start("A", f"ToC Parse & Dictionary Seeding ({mode} mode) - {pdf_path.name}", self.log_file_path)
@@ -265,7 +266,13 @@ class PassATocParser:
                         logger.info(f"Pass A: Generated passA.toc.json with {sections_count} sections")
 
                         # Extract dictionary entries from passA.toc.json
-                        dict_entries = self._extract_dictionary_from_toc_json(toc_json_path, pdf_path)
+                        dict_entries = self._extract_dictionary_from_toc_json(
+                            toc_json_path,
+                            pdf_path,
+                            source_hash=source_hash,
+                            job_id=self.job_id,
+                            environment=self.env,
+                        )
                         logger.info(f"Pass A: Extracted {len(dict_entries)} dictionary entries from passA.toc.json")
                     else:
                         logger.warning(f"Pass A: TOC extraction failed: {toc_result.error_message}, falling back to legacy")
@@ -298,7 +305,13 @@ class PassATocParser:
 
                 # Extract dictionary entries from legacy ToC structure
                 if sections_count > 0:
-                    dict_entries = self._extract_dictionary_from_toc(outline, pdf_path)
+                    dict_entries = self._extract_dictionary_from_toc(
+                            outline,
+                            pdf_path,
+                            source_hash=source_hash,
+                            job_id=self.job_id,
+                            environment=self.env,
+                        )
 
             # Common processing for both approaches
             upserted_count = 0
@@ -320,8 +333,39 @@ class PassATocParser:
                 try:
                     logger.debug(f"Pass A: Attempting to upsert {len(dict_entries)} dictionary entries to {self.dict_loader.backend} backend")
                     print(f"DEBUG: About to call upsert_entries with {len(dict_entries)} entries", flush=True)
-                    upserted_count, term_results = self.dict_loader.upsert_entries(dict_entries)
+                    upserted_count, term_results = self.dict_loader.upsert_entries(
+                        dict_entries,
+                        job_id=self.job_id,
+                        source_hash=source_hash,
+                        source_file=pdf_path.name,
+                        environment=self.env,
+                    )
                     print(f"DEBUG: upsert_entries returned upserted_count={upserted_count}, term_results type={type(term_results)}, len={len(term_results) if term_results else 'None'}", flush=True)
+                    verification_count = getattr(self.dict_loader, "last_verification_count", None)
+                    if verification_count is not None:
+                        log_to_job(
+                            f"Pass A dictionary: wrote {upserted_count} entries (verified {verification_count})",
+                            self.log_file_path,
+                            "info",
+                            "A",
+                        )
+                        logger.info(
+                            "pass_a.mongo.verify_ok",
+                            extra={
+                                "job_id": self.job_id,
+                                "source_hash": source_hash,
+                                "environment": self.env,
+                                "rows_written": upserted_count,
+                                "verified_count": verification_count,
+                            },
+                        )
+                    else:
+                        log_to_job(
+                            f"Pass A dictionary: wrote {upserted_count} entries",
+                            self.log_file_path,
+                            "info",
+                            "A",
+                        )
                     logger.info(f"Pass A: Successfully upserted {upserted_count}/{len(dict_entries)} dictionary entries to {self.dict_loader.backend} database")
                     logger.info(f"Pass A: Received {len(term_results)} term results for detailed logging")
 

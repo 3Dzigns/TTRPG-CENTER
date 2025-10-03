@@ -188,8 +188,16 @@ class PassExecutor:
 
         def _run():
             result = process_pass_e(job_path, job_id, self.env)
+            processed = 0
+            if hasattr(result, 'relationships_persisted'):
+                processed = result.relationships_persisted
+            elif hasattr(result, 'edges_created'):
+                processed = result.edges_created
             return {
-                "processed_count": result.entities_linked if hasattr(result, 'entities_linked') else 0,
+                "processed_count": processed,
+                "nodes_created": getattr(result, 'nodes_created', 0),
+                "neo4j_verified": getattr(result, 'verification_count', 0),
+                "neo4j_used": getattr(result, 'neo4j_used', False),
                 "artifact_count": len(result.artifacts) if hasattr(result, 'artifacts') else 0,
                 "duration_ms": result.processing_time_ms if hasattr(result, 'processing_time_ms') else 0,
                 "success": result.success if hasattr(result, 'success') else True,

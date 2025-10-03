@@ -68,6 +68,34 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+
+  neo4j:
+    image: neo4j:5
+    container_name: ttrpg-neo4j-dev
+    environment:
+      NEO4J_AUTH: neo4j/dev_password
+      NEO4J_dbms_default__database: ttrpg_dev
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ttrpg_dev_neo4j_data:/data
+      - ttrpg_dev_neo4j_logs:/logs
+    networks:
+      ttrpg-dev:
+        aliases:
+          - neo4j-dev
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p dev_password \"RETURN 1\""]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+
+
   ingest:
     image: ${DEV_INGEST_IMAGE:-ghcr.io/ttrpg-center/ingest:dev-placeholder@sha256:0000000000000000000000000000000000000000000000000000000000000000}
     # Override DEV_INGEST_IMAGE with released digest from scripts/registry/build-images.sh
@@ -96,6 +124,8 @@ services:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     ports:
       - "8003:8003"
@@ -128,6 +158,8 @@ services:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     ports:
       - "8006:8006"
@@ -292,4 +324,6 @@ volumes:
   ttrpg_dev_cache:
   ttrpg_dev_code:
   ttrpg_dev_ssl:
+  ttrpg_dev_neo4j_data:
+  ttrpg_dev_neo4j_logs:
 

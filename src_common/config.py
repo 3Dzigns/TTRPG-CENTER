@@ -149,6 +149,13 @@ class ConfigManager:
             "mongo_password": self.get_config("MONGO_PASSWORD"),
         })
 
+        config.update({
+            "neo4j_uri": self.get_config("NEO4J_URI"),
+            "neo4j_user": self.get_config("NEO4J_USER") or self.get_config("NEO4J_USERNAME"),
+            "neo4j_password": self.get_config("NEO4J_PASSWORD") or self.get_config("NEO4J_PASS"),
+            "neo4j_database": self.get_config("NEO4J_DB") or self.get_config("NEO4J_DATABASE"),
+        })
+
         # Validate all database configs are environment-specific
         for key, value in config.items():
             if value and isinstance(value, str):

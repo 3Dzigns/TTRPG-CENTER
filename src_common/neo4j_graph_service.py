@@ -57,50 +57,74 @@ class Neo4jGraphService:
     def __init__(self, env: str = "dev"):
         self.env = env
         self.driver: Optional[Driver] = None
-        
+        db_override = os.getenv("NEO4J_DB") or os.getenv("NEO4J_DATABASE")
+        self.database = (db_override.strip() if isinstance(db_override, str) and db_override.strip() else f"ttrpg_{self.env}")
+        self._enforce_environment_guard()
+
         # Initialize connection
         self._connect()
-        
+
         # Ensure constraints and indexes
         if self.driver:
             self._ensure_constraints_and_indexes()
-    
+
+    def _enforce_environment_guard(self) -> None:
+        """Ensure configured database matches environment scope."""
+        env_lower = (self.env or "").lower()
+        database_lower = (self.database or "").lower()
+        if env_lower and env_lower not in database_lower:
+            raise RuntimeError(
+                f"Neo4j database '{self.database}' is not scoped for environment '{self.env}'"
+            )
+
+    def _session(self) -> Session:
+        """Create a Neo4j session bound to the configured database."""
+        if not self.driver:
+            raise RuntimeError("Neo4j graph service is not connected")
+        return self.driver.session(database=self.database)
+
     def _connect(self) -> None:
         """Establish Neo4j connection"""
         try:
             neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-            neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-            neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
-            
+            neo4j_user = (
+                os.getenv("NEO4J_USER")
+                or os.getenv("NEO4J_USERNAME")
+                or "neo4j"
+            )
+            neo4j_password = (
+                os.getenv("NEO4J_PASSWORD")
+                or os.getenv("NEO4J_PASS")
+                or "password"
+            )
+
             if not neo4j_uri or not neo4j_user or not neo4j_password:
                 logger.warning("Neo4j credentials not configured, graph service disabled")
                 return
-            
-            # Create Neo4j driver
+
             self.driver = GraphDatabase.driver(
                 neo4j_uri,
                 auth=(neo4j_user, neo4j_password),
                 max_connection_lifetime=3600,  # 1 hour
                 max_connection_pool_size=50,
-                connection_acquisition_timeout=60
+                connection_acquisition_timeout=60,
             )
-            
-            # Test connection
-            with self.driver.session() as session:
+
+            with self._session() as session:
                 result = session.run("RETURN 1 AS test")
                 test_value = result.single()["test"]
                 if test_value != 1:
                     raise Exception("Connection test failed")
-            
-            logger.info(f"Neo4j graph service connected: {neo4j_uri}")
-            
+
+            logger.info(f"Neo4j graph service connected: {neo4j_uri} (db={self.database})")
+
         except (ServiceUnavailable, AuthError, ConfigurationError) as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
             self.driver = None
         except Exception as e:
             logger.error(f"Unexpected error connecting to Neo4j: {e}")
             self.driver = None
-    
+
     def _ensure_constraints_and_indexes(self) -> None:
         """Create necessary constraints and indexes"""
         if not self.driver:
@@ -125,7 +149,7 @@ class Neo4jGraphService:
         ]
         
         try:
-            with self.driver.session() as session:
+            with self._session() as session:
                 for query in constraints_and_indexes:
                     try:
                         session.run(query)
@@ -163,7 +187,7 @@ class Neo4jGraphService:
             RETURN n.id AS id
             """
             
-            with self.driver.session() as session:
+            with self._session() as session:
                 result = session.run(query, node.to_cypher_params())
                 record = result.single()
                 success = record is not None
@@ -201,7 +225,7 @@ class Neo4jGraphService:
             RETURN r
             """
             
-            with self.driver.session() as session:
+            with self._session() as session:
                 result = session.run(query, relationship.to_cypher_params())
                 record = result.single()
                 success = record is not None
@@ -236,7 +260,7 @@ class Neo4jGraphService:
             return False
         
         try:
-            with self.driver.session() as session:
+            with self._session() as session:
                 # Start transaction
                 tx = session.begin_transaction()
                 
@@ -378,7 +402,7 @@ class Neo4jGraphService:
             LIMIT 100
             """
             
-            with self.driver.session() as session:
+            with self._session() as session:
                 result = session.run(query, {"node_id": node_id})
                 
                 related_nodes = []
@@ -433,7 +457,7 @@ class Neo4jGraphService:
             LIMIT {limit}
             """
             
-            with self.driver.session() as session:
+            with self._session() as session:
                 try:
                     result = session.run(search_query, {"query": query})
                 except Exception:
@@ -474,7 +498,7 @@ class Neo4jGraphService:
             return {"error": "Neo4j not connected"}
         
         try:
-            with self.driver.session() as session:
+            with self._session() as session:
                 # Count nodes by label
                 node_counts = {}
                 labels_result = session.run("CALL db.labels()")
@@ -522,7 +546,7 @@ class Neo4jGraphService:
             if not self.driver:
                 return {"status": "disconnected", "error": "No Neo4j driver"}
             
-            with self.driver.session() as session:
+            with self._session() as session:
                 result = session.run("RETURN 1 AS test")
                 test_value = result.single()["test"]
                 

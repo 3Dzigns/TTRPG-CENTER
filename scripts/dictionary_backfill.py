@@ -76,20 +76,76 @@ def main(argv: List[str]) -> int:
             logger.warning(f"Chunk update failed for {cid}: {e}")
 
         # Build minimal EnrichedChunk to pass to extractor
-        e = EnrichedChunk(
-            chunk_id=cid,
-            original_content=content,
-            enhanced_content=content,
-            entities=enricher._extract_entities(content),
-            categories=cats,
-            complexity=enricher._assess_complexity(content, []),
-            confidence=0.8,
-        )
-        updates = enricher._extract_dictionary_updates(e)
-        if updates:
-            entries = [DictEntry(u.term, u.definition, u.category, [{"chunk_id": cid, "section": meta.get("section"), "page": meta.get("page")}]) for u in updates]
-            upserted += dict_loader.upsert_entries(entries)
+e = EnrichedChunk(
+    chunk_id=cid,
+    original_content=content,
+    enhanced_content=content,
+    entities=enricher._extract_entities(content),
+    categories=cats,
+    complexity=enricher._assess_complexity(content, []),
+    confidence=0.8,
+)
+updates = enricher._extract_dictionary_updates(e)
+if updates:
+    source_hash_ctx = (
+        meta.get("source_hash")
+        or meta.get("source_id")
+        or meta.get("document_id")
+        or cid
+    )
+    source_file_ctx = (
+        meta.get("source_file")
+        or meta.get("document_title")
+        or meta.get("source")
+        or meta.get("source_path")
+        or str(meta.get("document_id") or "unknown")
+    )
+    job_ctx = meta.get("job_id") or f"dict_backfill_{cid}"
 
+    entry_docs: List[DictEntry] = []
+    for update in updates:
+        term = str(getattr(update, "term", "") or "").strip()
+        definition = str(getattr(update, "definition", "") or "").strip()
+        category = str(getattr(update, "category", "general") or "general").strip().lower() or "general"
+        if not term or not definition:
+            continue
+
+        sources = [
+            {
+                "chunk_id": cid,
+                "section": meta.get("section"),
+                "page": meta.get("page"),
+                "source_hash": source_hash_ctx,
+                "environment": args.env,
+                "job_id": job_ctx,
+            }
+        ]
+
+        entry_docs.append(
+            DictEntry(
+                term=term,
+                definition=definition[:400],
+                category=category,
+                sources=sources,
+                job_id=job_ctx,
+                source_hash=source_hash_ctx,
+                environment=args.env,
+                source_file=source_file_ctx,
+                source_page=meta.get("page"),
+                document_id=meta.get("document_id"),
+                confidence=0.6,
+            )
+        )
+
+    if entry_docs:
+        count, _ = dict_loader.upsert_entries(
+            entry_docs,
+            job_id=job_ctx,
+            source_hash=source_hash_ctx,
+            source_file=source_file_ctx,
+            environment=args.env,
+        )
+        upserted += count
         processed += 1
         if processed % 200 == 0:
             logger.info(f"Processed {processed} docs, updated {updated}, dict upserts {upserted}")
