@@ -120,7 +120,7 @@ class PassCBypassValidator:
             self.logger.warning("Vector store not available - returning 0 chunk count")
             return 0
         try:
-            count = self._vector_store.count_documents_for_source(source_hash)
+            count = self._vector_store.count_documents_for_source(source_hash, self.env)
             self.logger.debug("Found %s chunks in vector store for source hash %s", count, source_hash)
             return count
         except Exception as e:

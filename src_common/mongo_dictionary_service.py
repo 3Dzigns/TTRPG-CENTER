@@ -6,7 +6,7 @@ Replaces AstraDB-based dictionary storage with containerized MongoDB
 
 import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
 from pymongo import MongoClient, IndexModel, ASCENDING, TEXT
@@ -36,18 +36,38 @@ class DictEntry:
     term: str
     definition: str
     category: str
-    sources: List[Dict[str, Any]]
+    sources: List[Dict[str, Any]] = field(default_factory=list)
+    job_id: Optional[str] = None
+    source_hash: Optional[str] = None
+    environment: Optional[str] = None
+    source_file: Optional[str] = None
+    source_page: Optional[int] = None
+    document_id: Optional[str] = None
+    confidence: Optional[float] = None
     
     def to_mongo_doc(self) -> Dict[str, Any]:
         """Convert to MongoDB document format"""
-        doc = asdict(self)
-        doc['_id'] = self.term.lower()  # Use lowercase term as ID for uniqueness
-        doc['term_original'] = self.term  # Preserve original casing
-        doc['term_normalized'] = self.term.lower()
-        doc['created_at'] = time.time()
-        doc['updated_at'] = time.time()
+        normalized_term = self._normalize_component(self.term)
+        doc: Dict[str, Any] = {
+            'term': self.term,
+            'term_original': self.term,
+            'term_normalized': normalized_term,
+            'definition': self.definition,
+            'category': self.category,
+            'sources': self.sources,
+            'job_id': self.job_id,
+            'source_hash': self.source_hash,
+            'environment': self.environment,
+            'source_file': self.source_file,
+            'source_page': self.source_page,
+            'document_id': self.document_id,
+            'confidence': self.confidence,
+            'created_at': time.time(),
+            'updated_at': time.time(),
+        }
+        doc['_id'] = self._build_document_id(normalized_term, self.source_hash)
         return doc
-    
+
     @classmethod
     def from_mongo_doc(cls, doc: Dict[str, Any]) -> 'DictEntry':
         """Create DictEntry from MongoDB document"""
@@ -55,8 +75,33 @@ class DictEntry:
             term=doc.get('term_original', doc.get('term', '')),
             definition=doc.get('definition', ''),
             category=doc.get('category', ''),
-            sources=doc.get('sources', [])
+            sources=doc.get('sources', []),
+            job_id=doc.get('job_id'),
+            source_hash=doc.get('source_hash'),
+            environment=doc.get('environment'),
+            source_file=doc.get('source_file'),
+            source_page=doc.get('source_page'),
+            document_id=doc.get('document_id'),
+            confidence=doc.get('confidence'),
         )
+
+    @staticmethod
+    def _normalize_component(value: Optional[str]) -> str:
+        if not value:
+            return ''
+        normalized = value.strip().lower()
+        normalized = normalized.replace('	', ' ')
+        normalized = re.sub(r"[^a-z0-9]+", "_", normalized)
+        normalized = re.sub(r"_+", "_", normalized)
+        return normalized.strip('_')
+
+    @classmethod
+    def _build_document_id(cls, normalized_term: str, source_hash: Optional[str]) -> str:
+        if source_hash:
+            normalized_hash = cls._normalize_component(source_hash)
+            if normalized_hash:
+                return f"{normalized_term}::{normalized_hash}"
+        return normalized_term
 
 
 class MongoDictionaryService:
@@ -124,6 +169,9 @@ class MongoDictionaryService:
             indexes = [
                 # Primary term lookup index (exact matches) - highest priority
                 IndexModel([("_id", ASCENDING)], name="primary_term_lookup"),
+
+                # Unique constraint per term + source hash
+                IndexModel([("term_normalized", ASCENDING), ("source_hash", ASCENDING)], name="term_source_unique", unique=True),
 
                 # Normalized term index for case-insensitive prefix matching
                 IndexModel([("term_normalized", ASCENDING)], name="term_normalized_index"),

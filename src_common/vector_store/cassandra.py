@@ -11,10 +11,12 @@ from typing import Any, Dict, Mapping, Optional, Sequence, List
 try:
     from cassandra.auth import PlainTextAuthProvider  # type: ignore
     from cassandra.cluster import Cluster  # type: ignore
-    from cassandra.query import SimpleStatement  # type: ignore
+    from cassandra.query import BatchStatement, ConsistencyLevel, SimpleStatement  # type: ignore
 except Exception as cassandra_import_error:  # pragma: no cover - environment specific
     PlainTextAuthProvider = None  # type: ignore[assignment]
     Cluster = None  # type: ignore[assignment]
+    BatchStatement = None  # type: ignore[assignment]
+    ConsistencyLevel = None  # type: ignore[assignment]
     SimpleStatement = None  # type: ignore[assignment]
     _CASSANDRA_IMPORT_ERROR = cassandra_import_error
 else:
@@ -30,7 +32,13 @@ os.environ.setdefault('CASS_DRIVER_NO_EXTENSIONS', '1')
 
 
 def _ensure_dependencies() -> None:
-    if Cluster is None or SimpleStatement is None or PlainTextAuthProvider is None:
+    if (
+        Cluster is None
+        or SimpleStatement is None
+        or BatchStatement is None
+        or ConsistencyLevel is None
+        or PlainTextAuthProvider is None
+    ):
         if '_CASSANDRA_IMPORT_ERROR' in globals() and _CASSANDRA_IMPORT_ERROR is not None:
             raise RuntimeError("Cassandra backend unavailable: cassandra-driver failed to import.") from _CASSANDRA_IMPORT_ERROR
         raise RuntimeError("Cassandra backend unavailable: cassandra-driver is not installed.")
@@ -41,13 +49,20 @@ class CassandraVectorStore(VectorStore):
     def __init__(self, env: str) -> None:
         super().__init__(env)
         _ensure_dependencies()
+
         self.contact_points = [cp.strip() for cp in os.getenv("CASSANDRA_CONTACT_POINTS", "127.0.0.1").split(",") if cp.strip()]
         self.port = int(os.getenv("CASSANDRA_PORT", "9042"))
-        self.keyspace = os.getenv("CASSANDRA_KEYSPACE", "ttrpg")
+        default_keyspace = f"ttrpg_{env.lower()}" if env else "ttrpg_dev"
+        self.keyspace = os.getenv("CASSANDRA_KEYSPACE", default_keyspace)
         self.table = os.getenv("CASSANDRA_TABLE", "chunks")
         self.username = os.getenv("CASSANDRA_USERNAME", "").strip() or None
         self.password = os.getenv("CASSANDRA_PASSWORD", "").strip() or None
         self.consistency = os.getenv("CASSANDRA_CONSISTENCY", "LOCAL_ONE").upper()
+        self._consistency_level = self._resolve_consistency_level(self.consistency)
+        self.write_batch_size = max(1, int(os.getenv("CASSANDRA_WRITE_BATCH_SIZE", "50")))
+        self.write_retries = max(1, int(os.getenv("CASSANDRA_WRITE_RETRIES", "3")))
+        self.write_retry_backoff = float(os.getenv("CASSANDRA_WRITE_RETRY_BACKOFF_SECONDS", "0.5"))
+        self.write_timeout = float(os.getenv("CASSANDRA_WRITE_TIMEOUT_SECONDS", "15"))
         self.vector_scan_limit = int(os.getenv("CASSANDRA_VECTOR_SCAN_LIMIT", "2000"))
 
         auth_provider = None
@@ -62,10 +77,26 @@ class CassandraVectorStore(VectorStore):
             control_connection_timeout=30
         )
         self.session = self.cluster.connect()
+        self._enforce_environment_guard()
         self._ensure_keyspace()
         self.session.set_keyspace(self.keyspace)
         self.ensure_schema()
         self._prepare_statements()
+
+    def _resolve_consistency_level(self, name: str) -> ConsistencyLevel:
+        try:
+            return getattr(ConsistencyLevel, name.upper())
+        except AttributeError:
+            logger.warning("Cassandra: unsupported consistency level '%s', defaulting to LOCAL_ONE", name)
+            return ConsistencyLevel.LOCAL_ONE
+
+    def _enforce_environment_guard(self) -> None:
+        env_lower = (self.env or "").lower()
+        keyspace_lower = (self.keyspace or "").lower()
+        if env_lower and env_lower not in keyspace_lower:
+            raise RuntimeError(
+                f"Cassandra keyspace '{self.keyspace}' is not scoped for environment '{self.env}'"
+            )
 
     @property
     def backend_name(self) -> str:
@@ -74,24 +105,44 @@ class CassandraVectorStore(VectorStore):
     def ensure_schema(self) -> None:
         create_table = f"""
             CREATE TABLE IF NOT EXISTS {self.table} (
-                chunk_id text PRIMARY KEY,
+                source_hash text,
                 environment text,
+                chunk_id text,
                 stage text,
                 content text,
                 payload text,
-                source_hash text,
                 source_file text,
                 embedding blob,
                 embedding_model text,
                 vector_id text,
                 updated_at timestamp,
-                loaded_at timestamp
-            )
+                loaded_at timestamp,
+                PRIMARY KEY ((source_hash, environment), chunk_id)
+            ) WITH CLUSTERING ORDER BY (chunk_id ASC)
         """
         self.session.execute(create_table)
-        self.session.execute(f"CREATE INDEX IF NOT EXISTS ON {self.table} (source_hash)")
-        self.session.execute(f"CREATE INDEX IF NOT EXISTS ON {self.table} (environment)")
         self.session.execute(f"CREATE INDEX IF NOT EXISTS ON {self.table} (stage)")
+        self.session.execute(f"CREATE INDEX IF NOT EXISTS ON {self.table} (source_file)")
+        self._verify_table_schema()
+
+    def _verify_table_schema(self) -> None:
+        try:
+            rows = self.session.execute(
+                "SELECT column_name, kind FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s",
+                (self.keyspace, self.table),
+            )
+            kinds = {row.column_name: row.kind for row in rows}
+            expected = {"source_hash": "partition_key", "environment": "partition_key", "chunk_id": "clustering"}
+            for column, expected_kind in expected.items():
+                actual = kinds.get(column)
+                if actual != expected_kind:
+                    raise RuntimeError(
+                        f"Cassandra table {self.keyspace}.{self.table} has unexpected primary key layout; column '{column}' is '{actual}', expected '{expected_kind}'"
+                    )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.warning("Cassandra: unable to verify schema for %s.%s: %s", self.keyspace, self.table, exc)
 
     # ------------------------------------------------------------------
     # Public API implementations
@@ -113,20 +164,26 @@ class CassandraVectorStore(VectorStore):
         return 0
 
     def delete_by_source_hash(self, source_hash: str) -> int:
-        chunk_ids = self._chunk_ids_for_source(source_hash)
-        deleted = 0
-        for chunk_id in chunk_ids:
-            self.session.execute(self.delete_stmt, (chunk_id,))
-            deleted += 1
-        return deleted
+        if not source_hash:
+            return 0
+        existing = self._chunk_ids_for_source(source_hash, self.env)
+        if existing:
+            self.session.execute(self.delete_partition_stmt, (source_hash, self.env))
+        return len(existing)
 
     def count_documents(self) -> int:
-        result = self.session.execute(f"SELECT COUNT(*) FROM {self.table}")
-        row = result.one()
+        statement = SimpleStatement(
+            f"SELECT COUNT(*) FROM {self.table} WHERE environment = %s ALLOW FILTERING"
+        )
+        row = self.session.execute(statement, (self.env,)).one()
         return int(row[0]) if row else 0
 
-    def count_documents_for_source(self, source_hash: str) -> int:
-        return len(self._chunk_ids_for_source(source_hash))
+    def count_documents_for_source(self, source_hash: str, environment: Optional[str] = None) -> int:
+        if not source_hash:
+            return 0
+        env = environment or self.env
+        row = self.session.execute(self.count_stmt, (source_hash, env)).one()
+        return int(row[0]) if row else 0
 
     def get_sources_with_chunk_counts(self) -> Dict[str, Any]:
         statement = SimpleStatement(
@@ -226,55 +283,102 @@ class CassandraVectorStore(VectorStore):
         self.insert_stmt = self.session.prepare(
             f"""
             INSERT INTO {self.table} (
-                chunk_id, environment, stage, content, payload, source_hash, source_file,
+                source_hash, environment, chunk_id, stage, content, payload, source_file,
                 embedding, embedding_model, vector_id, updated_at, loaded_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         self.delete_stmt = self.session.prepare(
-            f"DELETE FROM {self.table} WHERE chunk_id = ?"
+            f"DELETE FROM {self.table} WHERE source_hash = ? AND environment = ? AND chunk_id = ?"
+        )
+        self.delete_partition_stmt = self.session.prepare(
+            f"DELETE FROM {self.table} WHERE source_hash = ? AND environment = ?"
+        )
+        self.count_stmt = self.session.prepare(
+            f"SELECT COUNT(*) FROM {self.table} WHERE source_hash = ? AND environment = ?"
+        )
+        self.select_chunk_ids_stmt = self.session.prepare(
+            f"SELECT chunk_id FROM {self.table} WHERE source_hash = ? AND environment = ?"
         )
 
     def _write_documents(self, documents: Sequence[Mapping[str, Any]]) -> int:
-        written = 0
-        for doc in documents:
-            params = self._normalise_document(doc)
-            chunk_id = params[0]  # chunk_id is first parameter
-            stage = params[2]     # stage is third parameter
-            source_hash = params[5]  # source_hash is sixth parameter
+        if not documents:
+            return 0
 
-            logger.debug(f"Cassandra: Writing chunk_id={chunk_id} stage={stage} source_hash={source_hash} to {self.keyspace}.{self.table}")
-            self.session.execute(self.insert_stmt, params)
-            written += 1
-            logger.debug(f"Cassandra: Successfully wrote chunk {chunk_id}")
-        return written
+        params_list = [self._normalise_document(doc) for doc in documents]
+        total_written = 0
+        batches = [
+            params_list[index:index + self.write_batch_size]
+            for index in range(0, len(params_list), self.write_batch_size)
+        ]
+
+        for batch_index, batch_params in enumerate(batches, start=1):
+            attempt = 0
+            while attempt < self.write_retries:
+                batch = BatchStatement(consistency_level=self._consistency_level)
+                for params in batch_params:
+                    batch.add(self.insert_stmt, params)
+
+                try:
+                    self.session.execute(batch, timeout=self.write_timeout)
+                    total_written += len(batch_params)
+                    logger.debug("Cassandra: Batch %s persisted %s rows", batch_index, len(batch_params))
+                    break
+                except Exception as exc:
+                    attempt += 1
+                    logger.warning(
+                        "Cassandra: Batch %s failed on attempt %s/%s: %s",
+                        batch_index,
+                        attempt,
+                        self.write_retries,
+                        exc,
+                    )
+                    if attempt >= self.write_retries:
+                        raise
+                    time.sleep(self.write_retry_backoff * attempt)
+
+        logger.info(
+            "Cassandra: persisted %s rows across %s batch(es)",
+            total_written,
+            len(batches),
+        )
+        return total_written
 
     def _normalise_document(self, doc: Mapping[str, Any]) -> tuple[Any, ...]:
         chunk_id = str(doc.get("chunk_id") or doc.get("id") or doc.get("_id") or self._fallback_chunk_id())
         content = doc.get("content") or doc.get("text") or ""
-        stage = doc.get("stage") or "raw"
-        source_hash = (
-            doc.get("source_hash")
-            or doc.get("metadata", {}).get("source_hash")
-            or doc.get("metadata", {}).get("source_id")
-            or doc.get("source_id")
-            or "unknown"
-        )
-        source_file = doc.get("source_file") or doc.get("metadata", {}).get("source_file")
-        payload = json.dumps(dict(doc), ensure_ascii=False, default=self._json_default)
+        stage = doc.get("stage") or doc.get("metadata", {}).get("stage") or "vectorized"
+        metadata = dict(doc.get("metadata") or {})
+
+        source_hash = doc.get("source_hash") or metadata.get("source_hash") or metadata.get("source_id") or doc.get("source_id")
+        if not source_hash:
+            raise ValueError("Vector document missing source_hash")
+
+        environment = doc.get("environment") or metadata.get("environment") or self.env
+        metadata.setdefault("source_hash", source_hash)
+        metadata.setdefault("environment", environment)
+        if stage:
+            metadata.setdefault("stage", stage)
+
+        source_file = doc.get("source_file") or metadata.get("source_file")
+        payload_body = dict(doc)
+        payload_body["metadata"] = metadata
+        payload = json.dumps(payload_body, ensure_ascii=False, default=self._json_default)
+
         embedding_list = self._ensure_vector(doc.get("embedding"))
         embedding_blob = self._vector_to_blob(embedding_list) if embedding_list else None
         embedding_model = doc.get("embedding_model")
-        vector_id = doc.get("vector_id")
+        vector_id = doc.get("vector_id") or chunk_id
         updated_at = self._coerce_datetime(doc.get("updated_at"))
         loaded_at = self._coerce_datetime(doc.get("loaded_at"))
+
         return (
+            source_hash,
+            environment,
             chunk_id,
-            self.env,
             stage,
             content,
             payload,
-            source_hash,
             source_file,
             embedding_blob,
             embedding_model,
@@ -283,11 +387,9 @@ class CassandraVectorStore(VectorStore):
             loaded_at,
         )
 
-    def _chunk_ids_for_source(self, source_hash: str) -> List[str]:
-        statement = SimpleStatement(
-            f"SELECT chunk_id FROM {self.table} WHERE source_hash = %s ALLOW FILTERING"
-        )
-        rows = self.session.execute(statement, (source_hash,))
+    def _chunk_ids_for_source(self, source_hash: str, environment: Optional[str] = None) -> List[str]:
+        env = environment or self.env
+        rows = self.session.execute(self.select_chunk_ids_stmt, (source_hash, env))
         return [row.chunk_id for row in rows]
 
     @staticmethod

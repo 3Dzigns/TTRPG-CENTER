@@ -132,7 +132,7 @@ class AstraLoader:
         return self._load_chunks_to_collection(chunks)
 
     def validate_chunk_integrity(self, source_hash: str, expected_count: int) -> Dict[str, Any]:
-        actual = self.store.count_documents_for_source(source_hash)
+        actual = self.store.count_documents_for_source(source_hash, self.env)
         integrity_valid = actual == expected_count
         status = "validated" if integrity_valid else "mismatch"
         if integrity_valid:

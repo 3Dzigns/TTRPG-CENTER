@@ -104,16 +104,22 @@ class AstraVectorStore(VectorStore):
         collection = self.client.get_collection(self.collection_name)
         return int(collection.count_documents({}, upper_bound=10000))
 
-    def count_documents_for_source(self, source_hash: str) -> int:
+    def count_documents_for_source(self, source_hash: str, environment: Optional[str] = None) -> int:
         if self.client is None:
             return 0
         collection = self.client.get_collection(self.collection_name)
-        query = {
-            "$or": [
+        clauses = [
+            {"": [
                 {"metadata.source_hash": source_hash},
                 {"source_hash": source_hash},
-            ]
-        }
+            ]}
+        ]
+        if environment:
+            clauses.append({"": [
+                {"metadata.environment": environment},
+                {"environment": environment},
+            ]})
+        query = {"": clauses} if len(clauses) > 1 else clauses[0]
         return int(collection.count_documents(query, upper_bound=10000))
 
     def get_sources_with_chunk_counts(self) -> Dict[str, Any]:

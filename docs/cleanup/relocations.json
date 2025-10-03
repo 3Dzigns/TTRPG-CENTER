@@ -1,0 +1,228 @@
+{
+  "relocation_date": "20251003",
+  "total_relocations": 37,
+  "relocations": [
+    {
+      "source": "pytest.log",
+      "destination": "env\\dev\\logs\\historical\\pytest.log",
+      "reason": "log files",
+      "method": "mv"
+    },
+    {
+      "source": "pytest_ing.log",
+      "destination": "env\\dev\\logs\\historical\\pytest_ing.log",
+      "reason": "log files",
+      "method": "mv"
+    },
+    {
+      "source": "manual.log",
+      "destination": "env\\dev\\logs\\historical\\manual.log",
+      "reason": "log files",
+      "method": "mv"
+    },
+    {
+      "source": "build.log",
+      "destination": "env\\dev\\logs\\historical\\build.log",
+      "reason": "log files",
+      "method": "mv"
+    },
+    {
+      "source": "build-retry.log",
+      "destination": "env\\dev\\logs\\historical\\build-retry.log",
+      "reason": "log files",
+      "method": "mv"
+    },
+    {
+      "source": "test_pass_c_extraction.py",
+      "destination": "tests\\unit\\test_pass_c_extraction.py",
+      "reason": "test scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "test_bug_030_fix.py",
+      "destination": "tests\\unit\\test_bug_030_fix.py",
+      "reason": "test scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "test_job_log_observability.py",
+      "destination": "tests\\unit\\test_job_log_observability.py",
+      "reason": "test scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "container_test.pdf",
+      "destination": "quarantine\\20251003\\container_test.pdf",
+      "reason": "test PDFs",
+      "method": "mv"
+    },
+    {
+      "source": "container_test_final.pdf",
+      "destination": "quarantine\\20251003\\container_test_final.pdf",
+      "reason": "test PDFs",
+      "method": "mv"
+    },
+    {
+      "source": "final_test.pdf",
+      "destination": "quarantine\\20251003\\final_test.pdf",
+      "reason": "test PDFs",
+      "method": "mv"
+    },
+    {
+      "source": "final_test_complete.pdf",
+      "destination": "quarantine\\20251003\\final_test_complete.pdf",
+      "reason": "test PDFs",
+      "method": "mv"
+    },
+    {
+      "source": "auth.db",
+      "destination": "env\\dev\\data\\auth.db",
+      "reason": "database files",
+      "method": "mv"
+    },
+    {
+      "source": "patch_fallback.py",
+      "destination": "quarantine\\20251003\\patch_fallback.py",
+      "reason": "patch scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "patch_part_block.py",
+      "destination": "quarantine\\20251003\\patch_part_block.py",
+      "reason": "patch scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "patch_part_extra.py",
+      "destination": "quarantine\\20251003\\patch_part_extra.py",
+      "reason": "patch scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "patch_part_log_block.py",
+      "destination": "quarantine\\20251003\\patch_part_log_block.py",
+      "reason": "patch scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "patch_plan_block.py",
+      "destination": "quarantine\\20251003\\patch_plan_block.py",
+      "reason": "patch scripts",
+      "method": "git mv"
+    },
+    {
+      "source": "temp_page.html",
+      "destination": "quarantine\\20251003\\temp_page.html",
+      "reason": "temp HTML",
+      "method": "git mv"
+    },
+    {
+      "source": "test_admin_js.html",
+      "destination": "quarantine\\20251003\\test_admin_js.html",
+      "reason": "test HTML",
+      "method": "git mv"
+    },
+    {
+      "source": "code-analysis-report.md",
+      "destination": "docs\\analysis\\code-analysis-report.md",
+      "reason": "analysis reports",
+      "method": "git mv"
+    },
+    {
+      "source": "fr-001-002-analysis-report.md",
+      "destination": "docs\\analysis\\fr-001-002-analysis-report.md",
+      "reason": "analysis reports",
+      "method": "git mv"
+    },
+    {
+      "source": "FR-015_VALIDATION_SUMMARY.md",
+      "destination": "docs\\analysis\\FR-015_VALIDATION_SUMMARY.md",
+      "reason": "validation summaries",
+      "method": "git mv"
+    },
+    {
+      "source": "IMPLEMENTATION_ROADMAP.md",
+      "destination": "docs\\planning\\IMPLEMENTATION_ROADMAP.md",
+      "reason": "roadmaps",
+      "method": "git mv"
+    },
+    {
+      "source": "PROJECT_INDEX.md",
+      "destination": "docs\\PROJECT_INDEX.md",
+      "reason": "index files",
+      "method": "git mv"
+    },
+    {
+      "source": "FR-019-UI-Wireframe-Workflow.md",
+      "destination": "docs\\features\\FR-019-UI-Wireframe-Workflow.md",
+      "reason": "feature docs",
+      "method": "git mv"
+    },
+    {
+      "source": "Current_issue.md",
+      "destination": "docs\\bugs\\Current_issue.md",
+      "reason": "issue tracking",
+      "method": "git mv"
+    },
+    {
+      "source": "CLEANUP_SUMMARY_MVP_V2.md",
+      "destination": "docs\\cleanup\\CLEANUP_SUMMARY_MVP_V2.md",
+      "reason": "cleanup summaries",
+      "method": "git mv"
+    },
+    {
+      "source": "TEMP_view",
+      "destination": "quarantine\\20251003\\TEMP_view",
+      "reason": "temp files",
+      "method": "git mv"
+    },
+    {
+      "source": "security-report.json",
+      "destination": "env\\dev\\logs\\security\\security-report.json",
+      "reason": "security reports",
+      "method": "mv"
+    },
+    {
+      "source": "Test Uploads",
+      "destination": "env\\dev\\uploads\\test-fixtures",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": "tmp_test_job",
+      "destination": "quarantine\\20251003\\tmp_test_job",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": "tmp_overflow",
+      "destination": "quarantine\\20251003\\tmp_overflow",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": "manual_job",
+      "destination": "quarantine\\20251003\\manual_job",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": "manual_job_full",
+      "destination": "quarantine\\20251003\\manual_job_full",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": ";C",
+      "destination": "quarantine\\20251003\\unknown_C_dir",
+      "reason": "stray directory",
+      "method": "mv"
+    },
+    {
+      "source": "docker-data",
+      "destination": "quarantine\\20251003\\docker-data",
+      "reason": "stray directory",
+      "method": "mv"
+    }
+  ]
+}

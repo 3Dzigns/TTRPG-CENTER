@@ -450,3 +450,105 @@ All tasks are managed through the `.claude/tasks/` directory structure:
      - (Optional) `docker compose -f env/dev/docker-compose.yml exec app pytest tests/regression -q`
 5) `/sc:document` the root cause & prevention notes.
 6) `/sc:git` conventional commit `fix: <ticket> - <summary>` → push → open PR.
+
+---
+
+## Code Standards & Enforcement
+
+### Python Standards (v3.12+)
+- **Naming**: snake_case for functions/variables, PascalCase for classes, UPPER_CASE for constants
+- **Function Length**: Max 50 lines per function (exceptions for complex algorithms with comments)
+- **Docstrings**: Required for all public functions/classes (Google style)
+- **Type Hints**: Required for function signatures in new code
+- **Linting**: black (formatting), ruff (linting), mypy (type checking)
+- **Testing**: pytest with >80% coverage for new code
+
+### TypeScript/JavaScript Standards
+- **Naming**: camelCase for variables/functions, PascalCase for components/classes
+- **Strict Mode**: TypeScript strict mode enabled
+- **Linting**: ESLint with Airbnb config
+- **Testing**: Jest/Vitest with React Testing Library
+
+### Repository Paths Policy
+
+#### Allowed Top-Level Directories
+```
+env/          - Environment isolation (dev/test/prod)
+scripts/      - Maintenance and deployment scripts
+src_common/   - Shared Python libraries (env-agnostic)
+services/     - Microservices (ingest, orchestrator, admin_api, user_api)
+tests/        - Test suites (unit, functional, regression, security)
+docs/         - Documentation and analysis
+config/       - Configuration files (policies, prompts, flags)
+requirements/ - Dependency specifications
+features/     - Feature request tracking
+bugs/         - Bug tracking (deprecated, use docs/bugs)
+.github/      - CI/CD workflows
+artifacts/    - Ingestion job artifacts
+archives/     - Archived completed items
+web/          - Frontend applications (admin-ui, user-ui)
+templates/    - Jinja2 templates
+static/       - Static assets
+schemas/      - Data schemas
+certs/        - SSL certificates
+db_migrations/- Database migration scripts
+tools/        - Development tools and utilities
+```
+
+#### Path Rules
+1. **Environment Isolation**: All env-specific code, data, logs under `env/<env>/`
+2. **No Cross-Environment Access**: DEV never reads TEST/PROD; isolation enforced
+3. **Artifact Placement**: `artifacts/<env>/<job_id>/` for ingestion outputs
+4. **Test Organization**:
+   - Unit tests: `tests/unit/`
+   - Functional: `tests/functional/`
+   - Regression: `tests/regression/`
+   - Security: `tests/security/`
+5. **Log Files**: `env/<env>/logs/` with subdirectories (ingestion, security, maintenance)
+6. **Uploads**: `env/<env>/uploads/` for source PDFs
+
+### CI/CD Enforcement
+
+#### Pre-Commit Hooks
+- black (Python formatting)
+- ruff (Python linting)
+- mypy (type checking)
+- eslint (JS/TS linting)
+- Path linter (validates file locations)
+
+#### PR Gates
+- All tests pass (unit + functional)
+- Coverage ≥80% for changed files
+- No linting errors
+- Security scan (bandit) passes
+- Path policy validation passes
+
+#### Path Linter
+Run `python tools/path_lint.py` to validate:
+- No disallowed root directories
+- No cross-environment file access
+- Proper artifact/log placement
+- Test file organization
+
+```bash
+# Check path policy
+python tools/path_lint.py
+
+# Auto-fix violations (where safe)
+python tools/path_lint.py --fix
+```
+
+### Security Standards
+- **Secrets**: Never commit .env files, API keys, or credentials
+- **File Permissions**: .env files must be 0600 on POSIX
+- **Input Validation**: All user inputs sanitized
+- **SQL Injection**: Use parameterized queries only
+- **XSS Prevention**: Template auto-escaping enabled
+- **Dependency Scanning**: Weekly Dependabot updates
+
+### Documentation Standards
+- **README.md**: Project overview, setup, usage
+- **CHANGELOG.md**: All notable changes
+- **API Docs**: OpenAPI/Swagger for all endpoints
+- **Runbooks**: In `docs/` for operational procedures
+- **Architecture**: Diagrams in `docs/` (mermaid or draw.io)

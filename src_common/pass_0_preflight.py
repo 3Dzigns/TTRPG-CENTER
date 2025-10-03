@@ -336,7 +336,7 @@ def check_existing_ingestion(file_sha: str, page_count: int, env_root: Path) -> 
         vector_store = make_vector_store(env)
 
         # Check if this source_hash already has chunks in the database
-        chunk_count = vector_store.count_documents_for_source(file_sha)
+        chunk_count = vector_store.count_documents_for_source(file_sha, env)
 
         if chunk_count > 0:
             logger.info(f"Found existing ingestion: sha={file_sha[:12]}..., chunks={chunk_count}")

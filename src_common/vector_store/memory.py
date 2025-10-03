@@ -90,11 +90,16 @@ class MemoryVectorStore(VectorStore):
         with _lock:
             return len(self._bucket())
 
-    def count_documents_for_source(self, source_hash: str) -> int:
+    def count_documents_for_source(self, source_hash: str, environment: Optional[str] = None) -> int:
         if not source_hash:
             return 0
         with _lock:
-            return sum(1 for doc in self._bucket() if (doc.get("metadata") or {}).get("source_hash") == source_hash)
+            return sum(
+                1
+                for doc in self._bucket()
+                if (doc.get("metadata") or {}).get("source_hash") == source_hash
+                and (environment is None or (doc.get("metadata") or {}).get("environment") == environment)
+            )
 
     def get_sources_with_chunk_counts(self) -> Dict[str, Any]:
         with _lock:

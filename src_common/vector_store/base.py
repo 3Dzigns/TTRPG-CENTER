@@ -41,7 +41,7 @@ class VectorStore(ABC):
         """Return number of stored documents for the active environment."""
 
     @abstractmethod
-    def count_documents_for_source(self, source_hash: str) -> int:
+    def count_documents_for_source(self, source_hash: str, environment: Optional[str] = None) -> int:
         """Return number of documents stored for a specific source hash."""
 
     @abstractmethod
@@ -49,7 +49,8 @@ class VectorStore(ABC):
         """Return metadata about sources and their chunk counts."""
 
     @abstractmethod
-    def query(self,
+    def query(
+              self,
               vector: Optional[Sequence[float]],
               top_k: int = 5,
               filters: Optional[Mapping[str, Any]] = None) -> List[Dict[str, Any]]:

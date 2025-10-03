@@ -441,7 +441,7 @@ class TestAstraLoaderEnhancements:
 
         result = loader.validate_chunk_integrity("abcd1234", 150)
 
-        store.count_documents_for_source.assert_called_once_with("abcd1234")
+        store.count_documents_for_source.assert_called_once_with("abcd1234", loader.env)
         assert result["integrity_valid"] is True
         assert result["expected_count"] == 150
         assert result["actual_count"] == 150
