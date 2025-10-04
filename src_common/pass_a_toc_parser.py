@@ -883,7 +883,15 @@ class PassATocParser:
 
         return entries
 
-    def _extract_dictionary_from_toc(self, outline, pdf_path: Path) -> List[DictEntry]:
+    def _extract_dictionary_from_toc(
+        self,
+        outline,
+        pdf_path: Path,
+        *,
+        source_hash: Optional[str] = None,
+        job_id: Optional[str] = None,
+        environment: Optional[str] = None
+    ) -> List[DictEntry]:
         """
         Extract dictionary entries from ToC structure with organic category discovery.
 
