@@ -404,7 +404,9 @@ class DictionaryLoader:
             raise RuntimeError(
                 f"Mongo dictionary verification failed for source {source_hash} (job {job_id})"
             )
-        return count    def _deduplicate_entries(self, entries: List[DictEntry], source_hash: Optional[str] = None) -> List[DictEntry]:
+        return count
+
+    def _deduplicate_entries(self, entries: List[DictEntry], source_hash: Optional[str] = None) -> List[DictEntry]:
         """Deduplicate entries by normalized term (and source), keeping the last occurrence."""
         term_map: Dict[str, DictEntry] = {}
 
