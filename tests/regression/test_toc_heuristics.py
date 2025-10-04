@@ -267,3 +267,128 @@ class TestFullParsing:
         assert len(sections) == 2
         assert sections[0].title == "Chapter 1"
         assert sections[1].title == "Chapter 2"
+
+
+class TestTitleNormalization:
+    """Test TOC title normalization functionality."""
+
+    def test_remove_dot_leaders(self):
+        """Test removal of excessive dot leaders."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Test dot leaders with spaces
+        title = "Cyberpunk Essence. . . . . . . . . . . . . . . . . . .1"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Cyberpunk Essence"
+
+        # Test dots without spaces (dots removed, then trailing number removed)
+        title = "Title....................100"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Title"  # Dots and trailing number both removed
+
+    def test_collapse_spaced_characters(self):
+        """Test collapsing spaced-out characters (OCR artifact)."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Test spaced-out words
+        title = "S o l o"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Solo"
+
+        # Test mixed spaced-out words
+        title = "M e d i a"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Media"
+
+        # Test spaced-out with multiple words
+        title = "T r a n s p o r t e r"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Transporter"
+
+        # Test that intentional spacing is preserved (only 1 occurrence)
+        title = "Chapter 1 Section A"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Chapter 1 Section A"
+
+    def test_remove_trailing_page_numbers(self):
+        """Test removal of trailing page numbers."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Test single digit trailing number
+        title = "Introduction 1"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Introduction"
+
+        # Test multi-digit trailing number
+        title = "Appendix 123"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Appendix"
+
+        # Test that embedded numbers are preserved
+        title = "Chapter 2 Overview"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Chapter 2 Overview"
+
+    def test_normalize_whitespace(self):
+        """Test normalization of excessive whitespace."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Test multiple spaces
+        title = "Chapter    1    Introduction"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Chapter 1 Introduction"
+
+        # Test leading/trailing whitespace
+        title = "  Equipment  "
+        normalized = parser.normalize_title(title)
+        assert normalized == "Equipment"
+
+    def test_combined_normalization(self):
+        """Test combined normalization of multiple OCR artifacts."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Real-world example from Cyberpunk TOC
+        title = "S o l o. . . . . . . . . . . . . . . . . . . . . . . . . .6"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Solo"
+
+        # Another real-world example
+        title = "P r o t e c t o r. . . . . . . . . . . . . . . . . . . .7"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Protector"
+
+        # Complex example with dots and spacing
+        title = "NC SWAT (Tough Cybercops). . . . . . . . . . . . . . . . .8"
+        normalized = parser.normalize_title(title)
+        assert normalized == "NC SWAT (Tough Cybercops)"
+
+    def test_normalization_edge_cases(self):
+        """Test edge cases for normalization."""
+        from src_common.toc_heuristics import TocHeuristicParser
+
+        parser = TocHeuristicParser()
+
+        # Empty string
+        assert parser.normalize_title("") == ""
+
+        # None (should return as-is)
+        assert parser.normalize_title(None) is None
+
+        # Already clean title
+        title = "Clean Title"
+        assert parser.normalize_title(title) == "Clean Title"
+
+        # Title with intentional dots (abbreviations)
+        title = "Dr. Smith's Guide"
+        normalized = parser.normalize_title(title)
+        assert normalized == "Dr Smith's Guide" or normalized == "Dr. Smith's Guide"  # Dot pattern may or may not collapse

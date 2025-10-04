@@ -150,3 +150,81 @@ def test_pass_b_toc_overflow_fallback(pass_b_contract_setup, monkeypatch, tmp_pa
     assert result.split_performed is True
     plan_file = overflow_dir / result.split_plan_path
     assert plan_file.exists()
+
+
+def test_pass_b_deduplication_contract(pass_b_contract_setup, monkeypatch, tmp_path):
+    """Verify Pass B deduplicates identical page ranges and reports metrics.
+
+    NOTE: DummyPdfWriter generates identical content (b"FAKE-PDF-PART") for all parts,
+    so all parts will have the same checksum. This tests that deduplication works when
+    multiple sections map to identical PDF content.
+    """
+    module, splitter, pdf_path, _ = pass_b_contract_setup
+
+    # Create catalog with multiple sections (will all generate identical PDFs in test)
+    duplicate_catalog = [
+        {"section_id": "intro-1", "title": "Introduction", "page_start": 1, "page_end": 2, "level": 1},
+        {"section_id": "intro-2", "title": "Introduction Copy", "page_start": 1, "page_end": 2, "level": 1},
+        {"section_id": "chapter-1", "title": "Chapter 1", "page_start": 3, "page_end": 4, "level": 1},
+        {"section_id": "chapter-1-dup", "title": "Chapter 1 Duplicate", "page_start": 3, "page_end": 4, "level": 1},
+        {"section_id": "chapter-2", "title": "Chapter 2", "page_start": 5, "page_end": 6, "level": 1},
+    ]
+
+    monkeypatch.setattr(
+        module.LogicalSplitter,
+        "_load_toc_entries",
+        lambda self, _job_dir, _total_pages: duplicate_catalog,
+        raising=False,
+    )
+
+    dedupe_dir = tmp_path / "dedupe_job"
+    dedupe_dir.mkdir()
+
+    dedupe_splitter = module.LogicalSplitter(
+        job_id="job-dedupe",
+        env="dev",
+        job_log_file=dedupe_dir / "job.log",
+    )
+
+    result = dedupe_splitter.process(pdf_path, dedupe_dir)
+
+    # With DummyPdfWriter, all parts have identical content, so only 1 unique part is kept
+    assert len(result.parts) == 1, f"Expected 1 unique part (dummy PDF), got {len(result.parts)}"
+
+    # Verify split_index.json contains skipped_duplicates
+    split_index_path = dedupe_dir / "pass_b" / "split_index.json"
+    assert split_index_path.exists(), "split_index.json should exist"
+
+    split_index_data = json.loads(split_index_path.read_text())
+    assert "skipped_duplicates" in split_index_data, "split_index should track skipped duplicates"
+
+    skipped = split_index_data["skipped_duplicates"]
+    assert len(skipped) == 4, f"Expected 4 skipped duplicates, got {len(skipped)}"
+
+    # Verify each skipped duplicate has required fields
+    for dup in skipped:
+        assert "part_id" in dup
+        assert "duplicates_of" in dup
+        assert "checksum_sha256" in dup
+        assert "section_id" in dup
+        assert "page_start" in dup
+        assert "page_end" in dup
+        assert dup["duplicates_of"] == "job-dedupe-part-01"  # All duplicates point to first part
+
+    # Verify split_summary.json contains deduplication metrics
+    summary_path = dedupe_dir / "pass_b" / "split_summary.json"
+    assert summary_path.exists(), "split_summary.json should exist"
+
+    summary_data = json.loads(summary_path.read_text())
+    assert "deduplication" in summary_data, "Summary should include deduplication stats"
+
+    dedupe_stats = summary_data["deduplication"]
+    assert dedupe_stats["total_parts_generated"] == 5
+    assert dedupe_stats["unique_parts"] == 1
+    assert dedupe_stats["duplicate_parts_skipped"] == 4
+    assert dedupe_stats["deduplication_rate_percent"] == 80.0  # 4/5 * 100
+
+    # Verify duplicate PDF files were deleted (should only have 1 PDF)
+    parts_dir = dedupe_dir / "pass_b" / "parts"
+    pdf_files = list(parts_dir.glob("*.pdf"))
+    assert len(pdf_files) == 1, f"Expected 1 PDF file after deduplication, found {len(pdf_files)}"

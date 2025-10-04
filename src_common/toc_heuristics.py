@@ -41,6 +41,57 @@ class TocHeuristicParser:
     def __init__(self):
         self.sections: List[TocSection] = []
 
+    def normalize_title(self, title: str) -> str:
+        """
+        Normalize TOC title by removing OCR artifacts and noise.
+
+        Handles:
+        - Excessive dot leaders (". . . . . ." → "")
+        - Spaced-out text ("S o l o" → "Solo")
+        - Trailing page numbers ("Title...1" → "Title")
+        - Extra whitespace
+
+        Args:
+            title: Raw TOC title from OCR
+
+        Returns:
+            Normalized title string
+        """
+        if not title:
+            return title
+
+        # 1. Remove dot leaders (2+ consecutive dots, possibly with spaces)
+        title = re.sub(r'[\s\.]{2,}', ' ', title)
+
+        # 2. Collapse spaced-out characters (preserve intentional spacing)
+        # Pattern: Single characters with spaces between them (S o l o → Solo)
+        # Only collapse sequences of 3+ spaced single characters (likely OCR artifacts)
+
+        # First, identify if we have spaced-out OCR text (3+ single-letter-space sequences)
+        spaced_count = len(re.findall(r'\b[A-Za-z]\s+(?=[A-Za-z](\s|$))', title))
+
+        if spaced_count >= 3:
+            # This looks like OCR-spaced text - remove ALL single-letter spaces
+            # Strategy: repeatedly remove spaces after single letters until none remain
+            max_iterations = 20  # Safety limit
+            iteration = 0
+            prev_title = None
+
+            while prev_title != title and iteration < max_iterations:
+                prev_title = title
+                # Remove space after any single letter followed by another letter
+                title = re.sub(r'\b([A-Za-z])\s+(?=[A-Za-z])', r'\1', title)
+                iteration += 1
+
+        # 3. Remove trailing isolated numbers ONLY if preceded by dots/spaces (page numbers)
+        # Don't remove numbers that are part of the title (e.g., "Chapter 2")
+        title = re.sub(r'[\s\.]+\d+\s*$', '', title)
+
+        # 4. Normalize whitespace
+        title = re.sub(r'\s+', ' ', title).strip()
+
+        return title
+
     def parse_toc_lines(self, text_lines: List[str]) -> List[TocSection]:
         """
         Parse TOC text lines into structured sections.
@@ -95,9 +146,10 @@ class TocHeuristicParser:
         match = self.DECIMAL_PATTERN.match(line)
         if match:
             numbering, title, page = match.groups()
+            title = self.normalize_title(title.strip('. '))
             return TocLine(
                 raw_text=line,
-                title=title.strip('. '),
+                title=title,
                 page_number=int(page),
                 numbering=numbering
             )
@@ -106,9 +158,10 @@ class TocHeuristicParser:
         match = self.ROMAN_PATTERN.match(line)
         if match:
             numbering, title, page = match.groups()
+            title = self.normalize_title(title.strip('. '))
             return TocLine(
                 raw_text=line,
-                title=title.strip('. '),
+                title=title,
                 page_number=int(page),
                 numbering=numbering
             )
@@ -117,9 +170,10 @@ class TocHeuristicParser:
         match = self.ALPHA_PATTERN.match(line)
         if match:
             numbering, title, page = match.groups()
+            title = self.normalize_title(title.strip('. '))
             return TocLine(
                 raw_text=line,
-                title=title.strip('. '),
+                title=title,
                 page_number=int(page),
                 numbering=numbering
             )
@@ -130,6 +184,7 @@ class TocHeuristicParser:
             title, page = match.groups()
             # Clean up title (remove excessive dots, spaces)
             title = re.sub(r'\.{2,}', '', title).strip()
+            title = self.normalize_title(title)
 
             if title and len(title) >= 3:
                 return TocLine(

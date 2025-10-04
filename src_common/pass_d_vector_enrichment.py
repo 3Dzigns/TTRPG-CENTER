@@ -385,13 +385,34 @@ class VectorEnricher:
         return documents
 
     def _load_source_metadata(self, job_dir: Path) -> SourceMetadata:
+        """
+        Load source metadata required for Cassandra persistence.
+
+        Searches multiple manifest locations and field names for backward compatibility:
+        - Main manifest (manifest.json)
+        - Pass A manifest (unified_v1: job_dir/{job_id}_pass_a_manifest.json)
+        - Pass A manifest (legacy: job_dir/pass_a/{job_id}_pass_a_manifest.json)
+
+        Returns:
+            SourceMetadata with source_hash, source_file, environment, job_id
+
+        Raises:
+            RuntimeError: If required metadata cannot be located
+        """
         manifest_candidates = [
             job_dir / "manifest.json",
-            job_dir / "pass_a" / f"{self.job_id}_pass_a_manifest.json",
+            job_dir / f"{self.job_id}_pass_a_manifest.json",  # unified_v1 location
+            job_dir / "pass_a" / f"{self.job_id}_pass_a_manifest.json",  # legacy location
         ]
+
+        # Track which files were checked for better error reporting
+        checked_paths = []
+
         for candidate in manifest_candidates:
+            checked_paths.append(str(candidate))
             if not candidate.exists():
                 continue
+
             try:
                 with candidate.open("r", encoding="utf-8") as handle:
                     manifest = json.load(handle)
@@ -399,23 +420,37 @@ class VectorEnricher:
                 logger.debug("Pass D: unable to parse manifest %s: %s", candidate, exc)
                 continue
 
+            # Try multiple field names for source_hash (Pass 0 uses file_sha, Pass A uses source_hash)
             source_hash = (
                 manifest.get("source_info", {}).get("source_hash")
+                or manifest.get("pass_0_result", {}).get("file_sha")  # unified_v1 field name
                 or manifest.get("pass_0_result", {}).get("source_hash")
                 or manifest.get("source_hash")
             )
+
+            # Try multiple field names for source_file
             source_file = (
                 manifest.get("source_file")
                 or manifest.get("source")
                 or manifest.get("source_path")
                 or manifest.get("pdf_path")
             )
+
             environment = manifest.get("environment") or self.env
 
             if isinstance(source_file, list) and source_file:
                 source_file = source_file[0]
 
             if source_hash and source_file:
+                logger.info(
+                    "pass_d_metadata_loaded",
+                    extra={
+                        "manifest_path": str(candidate),
+                        "source_hash": source_hash[:16],
+                        "source_file": source_file,
+                        "environment": environment,
+                    },
+                )
                 return SourceMetadata(
                     source_hash=str(source_hash),
                     source_file=str(source_file),
@@ -423,7 +458,17 @@ class VectorEnricher:
                     job_id=self.job_id,
                 )
 
-        raise RuntimeError("Pass D: Unable to determine source metadata for Cassandra persistence")
+        # Enhanced error message with actionable details
+        error_msg = (
+            f"Pass D: Unable to determine source metadata for Cassandra persistence. "
+            f"Checked paths: {', '.join(checked_paths)}. "
+            f"Required fields: source_hash (or pass_0_result.file_sha) and source_file (or source_path)"
+        )
+        logger.error(
+            "pass_d_metadata_missing",
+            extra={"checked_paths": checked_paths, "job_id": self.job_id},
+        )
+        raise RuntimeError(error_msg)
 
 
 def process_pass_d(job_dir: Path, job_id: str, env: str, job_log_file: Optional[Path] = None) -> PassDResult:

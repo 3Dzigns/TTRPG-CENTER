@@ -339,6 +339,159 @@ class LogicalSplitter:
                 return section
         return None
 
+    def _validate_toc_catalog(self, catalog: List[Dict[str, Any]], total_pages: int) -> List[Dict[str, Any]]:
+        """
+        Validate TOC catalog and filter invalid entries.
+
+        Rejection criteria:
+        - page_start <= 0 (invalid page number)
+        - page_start > total_pages (out of range)
+        - page_end < page_start (invalid range)
+        - Section span > 80% of document (likely parsing error)
+
+        Args:
+            catalog: Raw TOC catalog from Pass A
+            total_pages: Total page count of source PDF
+
+        Returns:
+            Filtered catalog with only valid sections
+        """
+        valid_catalog = []
+        invalid_count = 0
+        invalid_reasons = {
+            'page_zero_or_negative': 0,
+            'page_out_of_range': 0,
+            'invalid_span': 0,
+            'oversized_section': 0,
+        }
+
+        for section in catalog:
+            start = section.get('page_start', 0)
+            end = section.get('page_end', 0)
+
+            # Skip invalid page numbers (page 0 or negative)
+            if start <= 0:
+                invalid_count += 1
+                invalid_reasons['page_zero_or_negative'] += 1
+                continue
+
+            # Skip pages beyond document range
+            if start > total_pages:
+                invalid_count += 1
+                invalid_reasons['page_out_of_range'] += 1
+                continue
+
+            # Skip invalid spans (end before start)
+            if end < start:
+                invalid_count += 1
+                invalid_reasons['invalid_span'] += 1
+                continue
+
+            # Skip sections spanning > 80% of document (likely TOC parsing errors)
+            span = end - start + 1
+            if span > total_pages * 0.8:
+                invalid_count += 1
+                invalid_reasons['oversized_section'] += 1
+                logger.warning(
+                    "pass_b_oversized_section_filtered",
+                    extra={
+                        "job_id": self.job_id,
+                        "section_id": section.get('section_id'),
+                        "title": section.get('title', '')[:50],
+                        "span": span,
+                        "total_pages": total_pages,
+                        "span_percent": round(span / total_pages * 100, 1),
+                    }
+                )
+                continue
+
+            valid_catalog.append(section)
+
+        if invalid_count > 0:
+            logger.warning(
+                "pass_b_toc_validation_filtered",
+                extra={
+                    "job_id": self.job_id,
+                    "total_sections": len(catalog),
+                    "valid_sections": len(valid_catalog),
+                    "invalid_sections": invalid_count,
+                    "invalid_reasons": invalid_reasons,
+                }
+            )
+            self._log_job(
+                f"Pass B: TOC validation filtered {invalid_count} invalid sections "
+                f"({len(valid_catalog)}/{len(catalog)} remain) - "
+                f"reasons: {invalid_reasons}"
+            )
+
+        # If < 5 valid sections remain, suppress TOC entirely (fallback to page-based)
+        if len(valid_catalog) > 0 and len(valid_catalog) < 5:
+            logger.warning(
+                "pass_b_toc_insufficient_sections",
+                extra={
+                    "job_id": self.job_id,
+                    "valid_sections": len(valid_catalog),
+                    "threshold": 5,
+                }
+            )
+            self._log_job(
+                f"Pass B: Only {len(valid_catalog)} valid TOC sections (threshold: 5), "
+                "falling back to page-based splitting"
+            )
+            return []
+
+        return valid_catalog
+
+    def _deduplicate_toc_sections(self, sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Remove duplicate sections with identical page ranges.
+
+        Keeps first occurrence, discards subsequent duplicates.
+
+        Args:
+            sections: TOC sections to deduplicate
+
+        Returns:
+            Deduplicated sections
+        """
+        seen_ranges = set()
+        unique_sections = []
+        duplicate_count = 0
+
+        for section in sections:
+            range_key = (section['page_start'], section['page_end'])
+            if range_key not in seen_ranges:
+                seen_ranges.add(range_key)
+                unique_sections.append(section)
+            else:
+                duplicate_count += 1
+                logger.debug(
+                    "pass_b_duplicate_toc_section",
+                    extra={
+                        "job_id": self.job_id,
+                        "section_id": section.get('section_id'),
+                        "title": section.get('title', '')[:50],
+                        "pages": f"{section['page_start']}-{section['page_end']}",
+                    }
+                )
+
+        if duplicate_count > 0:
+            logger.info(
+                "pass_b_toc_deduplication",
+                extra={
+                    "job_id": self.job_id,
+                    "total_sections": len(sections),
+                    "unique_sections": len(unique_sections),
+                    "duplicates_removed": duplicate_count,
+                }
+            )
+            self._log_job(
+                f"Pass B: Removed {duplicate_count} duplicate TOC sections "
+                f"({len(unique_sections)}/{len(sections)} unique)"
+            )
+
+        return unique_sections
+
     def _determine_part_count(self, total_pages: int) -> int:
         """Compute the number of parts needed to satisfy page constraints."""
         if total_pages <= 0:
@@ -758,7 +911,12 @@ class LogicalSplitter:
             f"lightweight={lightweight}"
         )
 
-        self.section_catalog = self._load_toc_entries(job_dir, total_pages)
+        # Load and validate TOC entries
+        raw_catalog = self._load_toc_entries(job_dir, total_pages)
+
+        # Apply validation and deduplication
+        validated_catalog = self._validate_toc_catalog(raw_catalog, total_pages)
+        self.section_catalog = self._deduplicate_toc_sections(validated_catalog)
         self.section_titles = [entry["title"] for entry in self.section_catalog]
 
         parts: List[SplitPart] = []
@@ -766,6 +924,7 @@ class LogicalSplitter:
         split_plan: List[Dict[str, Any]] = []
         plan_path: Optional[Path] = None
         parts_jsonl: List[Dict[str, Any]] = []  # For passB.parts.jsonl
+        skipped_parts: List[Dict[str, Any]] = []  # Track deduplicated parts (initialized for all branches)
 
         # NEW STRATEGY: TOC-first splitting
         # If TOC is available, use structure-based splitting regardless of file size
@@ -810,8 +969,10 @@ class LogicalSplitter:
                 },
             )
 
-            # Process each TOC-based range
+            # Process each TOC-based range with deduplication tracking
             part_index = 0
+            seen_checksums: Dict[str, str] = {}  # checksum -> canonical part_id
+
             for page_range in page_ranges:
                 part_number = part_index + 1
                 part_start_page = page_range["page_start"]
@@ -878,6 +1039,50 @@ class LogicalSplitter:
 
                 # Use source document ID if available, otherwise fall back to job_id
                 doc_id_for_part = self.source_doc_id if self.source_doc_id else self.job_id
+
+                # DEDUPLICATION CHECK: Skip if we've seen this checksum before
+                if checksum in seen_checksums:
+                    canonical_part_id = seen_checksums[checksum]
+
+                    # Record skipped duplicate for observability
+                    skipped_parts.append({
+                        "part_id": f"{self.job_id}-part-{part_number:02d}",
+                        "section_id": section_id,
+                        "section_title": section_title,
+                        "page_start": part_start_page,
+                        "page_end": aligned_end,
+                        "duplicates_of": canonical_part_id,
+                        "checksum_sha256": checksum,
+                        "reason": "duplicate_checksum",
+                    })
+
+                    # Delete the duplicate PDF file to save disk space
+                    part_path.unlink()
+
+                    # Log the skip
+                    logger.info(
+                        "pass_b_duplicate_skipped",
+                        extra={
+                            "job_id": self.job_id,
+                            "part_id": f"{self.job_id}-part-{part_number:02d}",
+                            "canonical_part": canonical_part_id,
+                            "checksum": checksum[:16],
+                            "section_id": section_id,
+                            "pages": f"{part_start_page}-{aligned_end}",
+                        }
+                    )
+                    self._log_job(
+                        f"Pass B: Skipped duplicate part {part_number} (checksum {checksum[:16]}... "
+                        f"matches {canonical_part_id}, section={section_id}, pages {part_start_page}-{aligned_end})"
+                    )
+
+                    # Increment index but don't add to parts list
+                    part_index += 1
+                    continue
+
+                # Record this as canonical for this checksum
+                canonical_part_id = f"{self.job_id}-part-{part_number:02d}"
+                seen_checksums[checksum] = canonical_part_id
 
                 part_meta = SplitPart(
                     doc_id=doc_id_for_part,
@@ -1182,39 +1387,52 @@ class LogicalSplitter:
 
         split_index_path = pass_dir / "split_index.json"
         with split_index_path.open("w", encoding="utf-8") as handle:
-            json.dump(
-                {
-                    "job_id": self.job_id,
-                    "split_performed": split_performed,
-                    "total_pages": total_pages,
-                    "threshold_mb": self.threshold_mb,
-                    "mode": mode,
-                    "lightweight": lightweight,
-                    "parts": [asdict(part) for part in parts],
-                },
-                handle,
-                indent=2,
-            )
+            index_data = {
+                "job_id": self.job_id,
+                "split_performed": split_performed,
+                "total_pages": total_pages,
+                "threshold_mb": self.threshold_mb,
+                "mode": mode,
+                "lightweight": lightweight,
+                "parts": [asdict(part) for part in parts],
+            }
+            # Include skipped duplicates for observability (if any were found)
+            if skipped_parts:
+                index_data["skipped_duplicates"] = skipped_parts
+
+            json.dump(index_data, handle, indent=2)
         artifacts.append(split_index_path.relative_to(job_dir).as_posix())
 
         summary_path = pass_dir / "split_summary.json"
         with summary_path.open("w", encoding="utf-8") as handle:
-            json.dump(
-                {
-                    "job_id": self.job_id,
-                    "env": self.env,
-                    "split_performed": split_performed,
-                    "total_pages": total_pages,
-                    "file_size_bytes": file_size,
-                    "threshold_mb": self.threshold_mb,
-                    "parts_created": len(parts),
-                    "mode": mode,
-                    "lightweight": lightweight,
-                    "generated_at": iso_timestamp(),
-                },
-                handle,
-                indent=2,
-            )
+            total_parts_generated = len(parts) + len(skipped_parts)
+            unique_parts = len(parts)
+            duplicate_parts_skipped = len(skipped_parts)
+            deduplication_rate = (duplicate_parts_skipped / total_parts_generated * 100) if total_parts_generated > 0 else 0.0
+
+            summary_data = {
+                "job_id": self.job_id,
+                "env": self.env,
+                "split_performed": split_performed,
+                "total_pages": total_pages,
+                "file_size_bytes": file_size,
+                "threshold_mb": self.threshold_mb,
+                "parts_created": unique_parts,
+                "mode": mode,
+                "lightweight": lightweight,
+                "generated_at": iso_timestamp(),
+            }
+
+            # Add deduplication statistics if any duplicates were found
+            if duplicate_parts_skipped > 0:
+                summary_data["deduplication"] = {
+                    "total_parts_generated": total_parts_generated,
+                    "unique_parts": unique_parts,
+                    "duplicate_parts_skipped": duplicate_parts_skipped,
+                    "deduplication_rate_percent": round(deduplication_rate, 2),
+                }
+
+            json.dump(summary_data, handle, indent=2)
         artifacts.append(summary_path.relative_to(job_dir).as_posix())
 
         if split_plan:
@@ -1254,23 +1472,49 @@ class LogicalSplitter:
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         duration_seconds = duration_ms / 1000
 
+        # Calculate deduplication metrics for logging
+        total_generated = len(parts) + len(skipped_parts)
+        duplicates_skipped = len(skipped_parts)
+        dedupe_rate = (duplicates_skipped / total_generated * 100) if total_generated > 0 else 0.0
+
         logger.info(
             "pass_b_split_complete",
             extra={
                 "job_id": self.job_id,
                 "split_performed": split_performed,
                 "parts": len(parts),
+                "duplicates_skipped": duplicates_skipped,
+                "deduplication_rate": round(dedupe_rate, 2),
                 "duration_ms": duration_ms,
                 "mode": mode,
             },
         )
+
+        # Log deduplication summary if any duplicates were found
+        if duplicates_skipped > 0:
+            self._log_job(
+                f"Pass B: Deduplication summary - {total_generated} parts generated, "
+                f"{len(parts)} unique, {duplicates_skipped} duplicates skipped ({dedupe_rate:.1f}% reduction)"
+            )
+            logger.info(
+                "pass_b_deduplication_summary",
+                extra={
+                    "job_id": self.job_id,
+                    "total_generated": total_generated,
+                    "unique_parts": len(parts),
+                    "duplicates_skipped": duplicates_skipped,
+                    "deduplication_rate_percent": round(dedupe_rate, 2),
+                    "estimated_runtime_savings_hours": round((duplicates_skipped * 120) / 3600, 2),  # Assuming 120s per part
+                }
+            )
 
         # Pass complete logging
         stats = {
             "split_performed": split_performed,
             "parts": len(parts),
             "total_pages": total_pages,
-            "sections": len(self.section_catalog)
+            "sections": len(self.section_catalog),
+            "duplicates_skipped": duplicates_skipped,
         }
         log_pass_complete("B", duration_seconds, stats, self.job_log_file)
 
