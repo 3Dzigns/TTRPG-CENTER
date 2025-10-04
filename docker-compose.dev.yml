@@ -74,7 +74,7 @@ services:
     container_name: ttrpg-neo4j-dev
     environment:
       NEO4J_AUTH: neo4j/dev_password
-      NEO4J_dbms_default__database: ttrpg_dev
+      NEO4J_dbms_default__database: ttrpgdev
       NEO4J_PLUGINS: '["apoc"]'
     ports:
       - "7474:7474"
@@ -87,7 +87,7 @@ services:
         aliases:
           - neo4j-dev
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p dev_password \"RETURN 1\""]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p dev_password -d ttrpgdev \"RETURN 1\""]
       interval: 20s
       timeout: 10s
       retries: 10
