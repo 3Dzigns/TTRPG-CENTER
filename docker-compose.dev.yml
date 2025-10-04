@@ -108,6 +108,7 @@ services:
       SERVICE_NAME: ingest
       PORT: "8003"
       TZ: "America/Chicago"
+      PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./env/dev/data:/app/env/dev/data
       - ./env/dev/logs:/app/env/dev/logs
