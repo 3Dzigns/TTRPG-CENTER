@@ -726,163 +726,163 @@ class PassATocParser:
         # No ToC-based category found
         return ("general", "default")
 
-    
-def _extract_dictionary_from_toc_json(
-    self,
-    toc_json_path: Path,
-    pdf_path: Path,
-    *,
-    source_hash: Optional[str],
-    job_id: str,
-    environment: str,
-) -> List[DictEntry]:
-    """Extract dictionary entries from passA.toc.json structure."""
-    import json
+    def _extract_dictionary_from_toc_json(
+        self,
+        toc_json_path: Path,
+        pdf_path: Path,
+        *,
+        source_hash: Optional[str],
+        job_id: str,
+        environment: str,
+    ) -> List[DictEntry]:
+        """Extract dictionary entries from passA.toc.json structure."""
+        import json
 
-    resolved_hash = source_hash or (self._compute_file_hash(pdf_path) if pdf_path.exists() else None)
+        resolved_hash = source_hash or (self._compute_file_hash(pdf_path) if pdf_path.exists() else None)
 
-    with open(toc_json_path, "r", encoding="utf-8") as handle:
-        toc_data = json.load(handle)
+        with open(toc_json_path, "r", encoding="utf-8") as handle:
+            toc_data = json.load(handle)
 
-    entries: List[DictEntry] = []
-    document_title = self._get_document_title(pdf_path)
-    document_id = self._generate_document_id(pdf_path)
+        entries: List[DictEntry] = []
+        document_title = self._get_document_title(pdf_path)
+        document_id = self._generate_document_id(pdf_path)
 
-    sections = toc_data.get("sections", [])
-    logger.info("Pass A: Starting dictionary extraction from %s TOC sections (passA.toc.json)", len(sections))
-    logger.info("Pass A: Document title: '%s', Document ID: %s", document_title, document_id)
+        sections = toc_data.get("sections", [])
+        logger.info("Pass A: Starting dictionary extraction from %s TOC sections (passA.toc.json)", len(sections))
+        logger.info("Pass A: Document title: '%s', Document ID: %s", document_title, document_id)
 
-    category_map = self._discover_categories_from_json_sections(sections)
-    logger.info("Pass A: Discovered %s organic categories from TOC structure", len(category_map))
-    for cat_name, cat_info in category_map.items():
+        category_map = self._discover_categories_from_json_sections(sections)
+        logger.info("Pass A: Discovered %s organic categories from TOC structure", len(category_map))
+        for cat_name, cat_info in category_map.items():
+            logger.info(
+                "  Category: '%s' from '%s' (level %s, %s entries)",
+                cat_name,
+                cat_info['source_title'],
+                cat_info['level'],
+                cat_info['entry_count'],
+            )
+
+        spell_patterns = ["spell", "magic", "incantation", "enchantment"]
+        feat_patterns = ["feat", "ability", "talent", "skill"]
+        class_patterns = ["class", "archetype", "prestige", "profession"]
+        equipment_patterns = ["weapon", "armor", "item", "equipment", "gear"]
+        rule_patterns = ["rule", "mechanic", "system", "combat", "action"]
+
+        processed_count = 0
+        extracted_count = 0
+        category_assignments = {"organic": 0, "pattern": 0, "general": 0}
+
+        for section in sections:
+            processed_count += 1
+            raw_title = section["title"].strip()
+            title = self._sanitize_title(raw_title)
+
+            logger.debug(
+                "Pass A: Section[%s] raw='%s' -> sanitized='%s' page=%s level=%s",
+                processed_count,
+                raw_title,
+                title,
+                section.get("start_page"),
+                section.get("level"),
+            )
+
+            if not title or len(title) < 3:
+                logger.debug("Pass A: Section[%s] SKIPPED - too short or empty", processed_count)
+                continue
+
+            letters = re.findall(r"[A-Za-z]", title)
+            nonspace = re.findall(r"\S", title)
+            if len(letters) < 3 or (len(nonspace) > 0 and (len(letters) / max(1, len(nonspace))) < 0.5):
+                logger.debug("Pass A: Section[%s] SKIPPED - insufficient letter content", processed_count)
+                continue
+
+            title_lower = title.lower()
+            category = "general"
+            category_source = "default"
+            definition = f"Section from {document_title} table of contents"
+
+            category, category_source = self._assign_category_from_json_section(section, category_map)
+
+            if category == "general" and category_source == "default":
+                if any(pattern in title_lower for pattern in spell_patterns):
+                    category = "spells"
+                    category_source = "pattern"
+                    definition = f"Spell or magical ability described in {document_title} (ToC reference)"
+                elif any(pattern in title_lower for pattern in feat_patterns):
+                    category = "feats"
+                    category_source = "pattern"
+                    definition = f"Character feat or ability from {document_title} (ToC reference)"
+                elif any(pattern in title_lower for pattern in class_patterns):
+                    category = "classes"
+                    category_source = "pattern"
+                    definition = f"Character class or archetype from {document_title} (ToC reference)"
+                elif any(pattern in title_lower for pattern in equipment_patterns):
+                    category = "equipment"
+                    category_source = "pattern"
+                    definition = f"Equipment or gear from {document_title} (ToC reference)"
+                elif any(pattern in title_lower for pattern in rule_patterns):
+                    category = "mechanics"
+                    category_source = "pattern"
+                    definition = f"Game rule or mechanic from {document_title} (ToC reference)"
+
+            if category_source == "organic":
+                category_assignments["organic"] += 1
+            elif category_source == "pattern":
+                category_assignments["pattern"] += 1
+            else:
+                category_assignments["general"] += 1
+
+            source_metadata = {
+                "system": document_title,
+                "document_id": document_id,
+                "method": "toc_parse",
+                "page_reference": "TOC",
+                "original_page": section.get("start_page"),
+                "level": section.get("level"),
+                "category_source": category_source,
+                "pass": "A",
+                "source_hash": resolved_hash,
+                "environment": environment,
+                "job_id": job_id,
+            }
+
+            dict_entry = DictEntry(
+                term=title,
+                category=category,
+                definition=definition,
+                sources=[source_metadata],
+                job_id=job_id,
+                source_hash=resolved_hash,
+                environment=environment,
+                source_file=pdf_path.name,
+                source_page=section.get("start_page"),
+                document_id=document_id,
+                confidence=0.8 if category_source in ["organic", "pattern"] else 0.5,
+            )
+
+            entries.append(dict_entry)
+            extracted_count += 1
+            logger.debug(
+                "Pass A: Section[%s] EXTRACTED - category='%s' (%s)",
+                processed_count,
+                category,
+                category_source,
+            )
+
         logger.info(
-            "  Category: '%s' from '%s' (level %s, %s entries)",
-            cat_name,
-            cat_info['source_title'],
-            cat_info['level'],
-            cat_info['entry_count'],
-        )
-
-    spell_patterns = ["spell", "magic", "incantation", "enchantment"]
-    feat_patterns = ["feat", "ability", "talent", "skill"]
-    class_patterns = ["class", "archetype", "prestige", "profession"]
-    equipment_patterns = ["weapon", "armor", "item", "equipment", "gear"]
-    rule_patterns = ["rule", "mechanic", "system", "combat", "action"]
-
-    processed_count = 0
-    extracted_count = 0
-    category_assignments = {"organic": 0, "pattern": 0, "general": 0}
-
-    for section in sections:
-        processed_count += 1
-        raw_title = section["title"].strip()
-        title = self._sanitize_title(raw_title)
-
-        logger.debug(
-            "Pass A: Section[%s] raw='%s' -> sanitized='%s' page=%s level=%s",
+            "Pass A: Dictionary extraction complete - processed %s sections, extracted %s entries",
             processed_count,
-            raw_title,
-            title,
-            section.get("start_page"),
-            section.get("level"),
+            extracted_count,
+        )
+        logger.info(
+            "Pass A: Category assignments - organic: %s, pattern: %s, general: %s",
+            category_assignments['organic'],
+            category_assignments['pattern'],
+            category_assignments['general'],
         )
 
-        if not title or len(title) < 3:
-            logger.debug("Pass A: Section[%s] SKIPPED - too short or empty", processed_count)
-            continue
+        return entries
 
-        letters = re.findall(r"[A-Za-z]", title)
-        nonspace = re.findall(r"\S", title)
-        if len(letters) < 3 or (len(nonspace) > 0 and (len(letters) / max(1, len(nonspace))) < 0.5):
-            logger.debug("Pass A: Section[%s] SKIPPED - insufficient letter content", processed_count)
-            continue
-
-        title_lower = title.lower()
-        category = "general"
-        category_source = "default"
-        definition = f"Section from {document_title} table of contents"
-
-        category, category_source = self._assign_category_from_json_section(section, category_map)
-
-        if category == "general" and category_source == "default":
-            if any(pattern in title_lower for pattern in spell_patterns):
-                category = "spells"
-                category_source = "pattern"
-                definition = f"Spell or magical ability described in {document_title} (ToC reference)"
-            elif any(pattern in title_lower for pattern in feat_patterns):
-                category = "feats"
-                category_source = "pattern"
-                definition = f"Character feat or ability from {document_title} (ToC reference)"
-            elif any(pattern in title_lower for pattern in class_patterns):
-                category = "classes"
-                category_source = "pattern"
-                definition = f"Character class or archetype from {document_title} (ToC reference)"
-            elif any(pattern in title_lower for pattern in equipment_patterns):
-                category = "equipment"
-                category_source = "pattern"
-                definition = f"Equipment or gear from {document_title} (ToC reference)"
-            elif any(pattern in title_lower for pattern in rule_patterns):
-                category = "mechanics"
-                category_source = "pattern"
-                definition = f"Game rule or mechanic from {document_title} (ToC reference)"
-
-        if category_source == "organic":
-            category_assignments["organic"] += 1
-        elif category_source == "pattern":
-            category_assignments["pattern"] += 1
-        else:
-            category_assignments["general"] += 1
-
-        source_metadata = {
-            "system": document_title,
-            "document_id": document_id,
-            "method": "toc_parse",
-            "page_reference": "TOC",
-            "original_page": section.get("start_page"),
-            "level": section.get("level"),
-            "category_source": category_source,
-            "pass": "A",
-            "source_hash": resolved_hash,
-            "environment": environment,
-            "job_id": job_id,
-        }
-
-        dict_entry = DictEntry(
-            term=title,
-            category=category,
-            definition=definition,
-            sources=[source_metadata],
-            job_id=job_id,
-            source_hash=resolved_hash,
-            environment=environment,
-            source_file=pdf_path.name,
-            source_page=section.get("start_page"),
-            document_id=document_id,
-            confidence=0.8 if category_source in ["organic", "pattern"] else 0.5,
-        )
-
-        entries.append(dict_entry)
-        extracted_count += 1
-        logger.debug(
-            "Pass A: Section[%s] EXTRACTED - category='%s' (%s)",
-            processed_count,
-            category,
-            category_source,
-        )
-
-    logger.info(
-        "Pass A: Dictionary extraction complete - processed %s sections, extracted %s entries",
-        processed_count,
-        extracted_count,
-    )
-    logger.info(
-        "Pass A: Category assignments - organic: %s, pattern: %s, general: %s",
-        category_assignments['organic'],
-        category_assignments['pattern'],
-        category_assignments['general'],
-    )
-
-    return entries
     def _extract_dictionary_from_toc(self, outline, pdf_path: Path) -> List[DictEntry]:
         """
         Extract dictionary entries from ToC structure with organic category discovery.
