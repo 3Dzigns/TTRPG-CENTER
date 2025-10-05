@@ -350,18 +350,35 @@ class CassandraVectorStore(VectorStore):
         stage = doc.get("stage") or doc.get("metadata", {}).get("stage") or "vectorized"
         metadata = dict(doc.get("metadata") or {})
 
-        source_hash = doc.get("source_hash") or metadata.get("source_hash") or metadata.get("source_id") or doc.get("source_id")
+        doc_id = doc.get("doc_id") or metadata.get("doc_id") or doc.get("document_id")
+        if not doc_id:
+            raise ValueError("Vector document missing doc_id")
+
+        source_hash = (
+            doc.get("source_hash")
+            or metadata.get("source_hash")
+            or metadata.get("source_id")
+            or doc.get("source_id")
+        )
         if not source_hash:
             raise ValueError("Vector document missing source_hash")
 
         environment = doc.get("environment") or metadata.get("environment") or self.env
+        if not environment:
+            raise ValueError("Vector document missing environment")
+
+        metadata.setdefault("doc_id", doc_id)
         metadata.setdefault("source_hash", source_hash)
         metadata.setdefault("environment", environment)
         if stage:
             metadata.setdefault("stage", stage)
 
         source_file = doc.get("source_file") or metadata.get("source_file")
+        if source_file:
+            metadata.setdefault("source_file", source_file)
+
         payload_body = dict(doc)
+        payload_body.setdefault("doc_id", doc_id)
         payload_body["metadata"] = metadata
         payload = json.dumps(payload_body, ensure_ascii=False, default=self._json_default)
 
@@ -370,7 +387,7 @@ class CassandraVectorStore(VectorStore):
         embedding_model = doc.get("embedding_model")
         vector_id = doc.get("vector_id") or chunk_id
         updated_at = self._coerce_datetime(doc.get("updated_at"))
-        loaded_at = self._coerce_datetime(doc.get("loaded_at"))
+        loaded_at = self._coerce_datetime(doc.get("loaded_at")) or updated_at or datetime.utcnow()
 
         return (
             source_hash,
@@ -457,28 +474,28 @@ class CassandraVectorStore(VectorStore):
         return True
 
 
-@staticmethod
-def _lexical_score(query: str, text: str, metadata: Mapping[str, Any]) -> float:
-    if not query or not text:
-        return 0.0
-    tokens_q = set(re.findall(r"\w+", query.lower()))
-    tokens_t = set(re.findall(r"\w+", text.lower()))
-    if not tokens_q or not tokens_t:
-        return 0.0
-    overlap = len(tokens_q & tokens_t) / max(1, len(tokens_q))
-    boost = 0.0
-    q_lower = query.lower()
-    t_lower = text.lower()
-    if "spells per day" in q_lower and "spells per day" in t_lower:
-        boost += 2.0
-    if "dodge" in q_lower and "dodge" in t_lower:
-        boost += 1.5
-    if "paladin" in q_lower and "paladin" in t_lower:
-        boost += 1.0
-    chunk_type = metadata.get("chunk_type") or metadata.get("type")
-    if chunk_type and str(chunk_type).lower() in {"table", "list", "table_row"}:
-        boost += 0.5
-    return overlap + boost
+    @staticmethod
+    def _lexical_score(query: str, text: str, metadata: Mapping[str, Any]) -> float:
+        if not query or not text:
+            return 0.0
+        tokens_q = set(re.findall(r"\w+", query.lower()))
+        tokens_t = set(re.findall(r"\w+", text.lower()))
+        if not tokens_q or not tokens_t:
+            return 0.0
+        overlap = len(tokens_q & tokens_t) / max(1, len(tokens_q))
+        boost = 0.0
+        q_lower = query.lower()
+        t_lower = text.lower()
+        if "spells per day" in q_lower and "spells per day" in t_lower:
+            boost += 2.0
+        if "dodge" in q_lower and "dodge" in t_lower:
+            boost += 1.5
+        if "paladin" in q_lower and "paladin" in t_lower:
+            boost += 1.0
+        chunk_type = metadata.get("chunk_type") or metadata.get("type")
+        if chunk_type and str(chunk_type).lower() in {"table", "list", "table_row"}:
+            boost += 0.5
+        return overlap + boost
 
     @staticmethod
     def _coerce_datetime(value: Any) -> Optional[datetime]:

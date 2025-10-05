@@ -368,6 +368,7 @@ class VectorEnricher:
 
             documents.append(
                 {
+                    "doc_id": record.doc_id,
                     "chunk_id": record.chunk_id,
                     "content": record.content,
                     "metadata": metadata,
