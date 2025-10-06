@@ -31,6 +31,24 @@ logger = get_logger(__name__)
 os.environ.setdefault('CASS_DRIVER_NO_EXTENSIONS', '1')
 
 
+def _json_default_serializer(obj: Any) -> Any:
+    """
+    JSON serialization helper for datetime and other non-standard types.
+
+    Used as the 'default' parameter for json.dumps() to handle
+    datetime objects and other types that aren't natively JSON-serializable.
+
+    Args:
+        obj: Object to serialize
+
+    Returns:
+        JSON-serializable representation of obj
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return str(obj)
+
+
 def _ensure_dependencies() -> None:
     if (
         Cluster is None
@@ -74,7 +92,9 @@ class CassandraVectorStore(VectorStore):
             port=self.port,
             auth_provider=auth_provider,
             connect_timeout=30,
-            control_connection_timeout=30
+            control_connection_timeout=30,
+            idle_heartbeat_interval=30,
+            idle_heartbeat_timeout=30
         )
         self.session = self.cluster.connect()
         self._enforce_environment_guard()
@@ -380,7 +400,7 @@ class CassandraVectorStore(VectorStore):
         payload_body = dict(doc)
         payload_body.setdefault("doc_id", doc_id)
         payload_body["metadata"] = metadata
-        payload = json.dumps(payload_body, ensure_ascii=False, default=self._json_default)
+        payload = json.dumps(payload_body, ensure_ascii=False, default=_json_default_serializer)
 
         embedding_list = self._ensure_vector(doc.get("embedding"))
         embedding_blob = self._vector_to_blob(embedding_list) if embedding_list else None
@@ -516,12 +536,6 @@ class CassandraVectorStore(VectorStore):
         if isinstance(value, (int, float)):
             return float(value)
         return time.time()
-
-    @staticmethod
-    def _json_default(obj: Any) -> Any:
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return str(obj)
 
     @staticmethod
     def _fallback_chunk_id() -> str:

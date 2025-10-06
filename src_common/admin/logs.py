@@ -443,6 +443,29 @@ class AdminLogService:
             logger.error(f"Error getting job status for {job_id}: {e}")
             return {"status": "error", "error": str(e)}
 
+    async def get_job_manifest(self, job_id: str, environment: str) -> Dict[str, Any]:
+        """Get job manifest with complete pass results from artifacts directory"""
+        try:
+            artifacts_dir = Path("env") / environment / "artifacts" / job_id
+            manifest_path = artifacts_dir / "manifest.json"
+
+            if not manifest_path.exists():
+                return {"status": "not_found", "error": f"Manifest not found for job {job_id}"}
+
+            import json
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest_data = json.load(f)
+
+            return {
+                "status": "success",
+                "manifest": manifest_data,
+                "artifacts_path": str(artifacts_dir)
+            }
+
+        except Exception as e:
+            logger.error(f"Error reading manifest for {job_id}: {e}")
+            return {"status": "error", "error": str(e)}
+
     async def export_logs(self, environment: Optional[str] = None) -> bytes:
         """Export logs as ZIP file"""
         try:

@@ -2586,6 +2586,30 @@ async def get_ingestion_job_status_restful(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@admin_router.get("/api/admin/ingestion/jobs/{job_id}/manifest")
+async def get_ingestion_job_manifest(
+    job_id: str,
+    env: str = Query("dev", description="Environment (dev/test/prod)")
+):
+    """Get ingestion job manifest with complete pass results
+
+    This endpoint reads the manifest.json from the artifacts directory and provides
+    complete visibility into all pipeline passes (0, A-G) including:
+    - Pass C: Chunks extracted
+    - Pass D: Vectors persisted, rows written
+    - Pass E: Graph nodes/edges created
+    - Pass F: Artifacts indexed
+    - Pass G: HGRN validation results
+
+    This resolves the observability gap where pass details beyond Pass B were not visible.
+    """
+    try:
+        return await log_service.get_job_manifest(job_id, env)
+    except Exception as e:
+        logger.error(f"Error getting job manifest for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @admin_router.get("/api/admin/logs/download")
 async def download_log_file(
     job_id: str = Query(...),
@@ -2702,6 +2726,117 @@ async def get_sources_health_status(environment: str):
 
     except Exception as e:
         logger.error(f"Error getting sources health for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/neo4j/stats/{environment}")
+async def get_neo4j_stats(environment: str, job_id: Optional[str] = Query(None)):
+    """Get Neo4j graph statistics for environment or specific job
+
+    Returns node and relationship counts by type, providing visibility into Pass E graph building results.
+    """
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Get node counts by label
+            if job_id:
+                node_query = """
+                    MATCH (n)
+                    WHERE n.job_id = $job_id
+                    RETURN labels(n)[0] AS type, count(n) AS count
+                    ORDER BY count DESC
+                """
+                node_result = session.run(node_query, job_id=job_id)
+            else:
+                node_query = """
+                    MATCH (n)
+                    RETURN labels(n)[0] AS type, count(n) AS count
+                    ORDER BY count DESC
+                """
+                node_result = session.run(node_query)
+
+            nodes = [{"type": record["type"], "count": record["count"]} for record in node_result]
+
+            # Get relationship counts by type
+            if job_id:
+                rel_query = """
+                    MATCH ()-[r]->()
+                    WHERE startNode(r).job_id IS NOT NULL AND startNode(r).job_id = $job_id
+                    RETURN type(r) AS type, count(r) AS count
+                    ORDER BY count DESC
+                """
+                rel_result = session.run(rel_query, job_id=job_id)
+            else:
+                rel_query = """
+                    MATCH ()-[r]->()
+                    RETURN type(r) AS type, count(r) AS count
+                    ORDER BY count DESC
+                """
+                rel_result = session.run(rel_query)
+
+            relationships = [{"type": record["type"], "count": record["count"]} for record in rel_result]
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "environment": environment,
+            "job_id": job_id,
+            "nodes": nodes,
+            "relationships": relationships,
+            "total_nodes": sum(n["count"] for n in nodes),
+            "total_relationships": sum(r["count"] for r in relationships),
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting Neo4j stats for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/hgrn/report/{job_id}")
+async def get_hgrn_report(job_id: str, env: str = Query("dev")):
+    """Get HGRN validation report for a specific job
+
+    Returns Pass G validation results including recommendations, priorities, and quality metrics.
+    """
+    try:
+        manifest_response = await log_service.get_job_manifest(job_id, env)
+
+        if manifest_response.get("status") != "success":
+            raise HTTPException(status_code=404, detail=manifest_response.get("error", "Manifest not found"))
+
+        manifest = manifest_response.get("manifest", {})
+        pass_g_result = manifest.get("pass_g_result", {})
+
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "environment": env,
+            "hgrn_success": pass_g_result.get("hgrn_success", False),
+            "recommendations_count": pass_g_result.get("recommendations_count", 0),
+            "high_priority_count": pass_g_result.get("high_priority_count", 0),
+            "report_exists": pass_g_result.get("report_exists", False),
+            "pass_g_complete": pass_g_result.get("success", False),
+            "timestamp": time.time()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting HGRN report for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

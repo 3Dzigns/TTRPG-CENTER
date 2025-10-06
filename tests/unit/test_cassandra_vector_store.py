@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 
 from src_common.pass_d_vector_enrichment import SourceMetadata, VectorEnricher, VectorRecord
-from src_common.vector_store.cassandra import CassandraVectorStore
+from src_common.vector_store.cassandra import CassandraVectorStore, _json_default_serializer
 
 
 def _make_store(env: str = "dev") -> CassandraVectorStore:
@@ -71,14 +71,83 @@ def test_normalise_document_missing_doc_id_raises():
         store._normalise_document(document)
 
 
-def test_helpers_exposed_on_cassandra_vector_store():
-    assert hasattr(CassandraVectorStore, "_json_default")
-    iso = CassandraVectorStore._json_default(datetime(2025, 10, 4, 11, 40, 0))
-    assert iso == "2025-10-04T11:40:00"
+def test_json_default_serializer_datetime():
+    """Test that _json_default_serializer correctly handles datetime objects"""
+    dt = datetime(2025, 10, 4, 11, 40, 0)
+    result = _json_default_serializer(dt)
+    assert result == "2025-10-04T11:40:00"
+    assert isinstance(result, str)
 
+
+def test_json_default_serializer_with_microseconds():
+    """Test datetime serialization includes microseconds in ISO format"""
+    dt = datetime(2025, 10, 4, 11, 40, 30, 123456)
+    result = _json_default_serializer(dt)
+    assert result == "2025-10-04T11:40:30.123456"
+    assert "T" in result  # ISO 8601 format
+
+
+def test_json_default_serializer_fallback():
+    """Test that non-datetime objects fallback to str() conversion"""
+    # Integer
+    assert _json_default_serializer(42) == "42"
+
+    # Float
+    assert _json_default_serializer(3.14) == "3.14"
+
+    # Dict
+    result = _json_default_serializer({"key": "value"})
+    assert "key" in result
+    assert isinstance(result, str)
+
+    # List
+    result = _json_default_serializer([1, 2, 3])
+    assert "[" in result
+
+
+def test_helpers_exposed_on_cassandra_vector_store():
+    """Test that helper methods are available on CassandraVectorStore"""
     chunk_id = CassandraVectorStore._fallback_chunk_id()
     assert isinstance(chunk_id, str)
     assert chunk_id.startswith("chunk_")
+
+
+def test_normalise_document_no_attribute_error_on_datetime():
+    """
+    Critical test for BUG-035: Verify that normalizing a document with datetime
+    in metadata doesn't raise AttributeError on _json_default
+    """
+    store = _make_store()
+    timestamp = datetime.utcnow()
+
+    document = {
+        "doc_id": "test_doc_123",
+        "chunk_id": "chunk_456",
+        "content": "Test content with datetime",
+        "metadata": {
+            "source_hash": "abc123",
+            "environment": "dev",
+            "doc_id": "test_doc_123",
+            "created_at": timestamp,  # This triggers JSON serialization
+            "processed_at": datetime(2025, 10, 5, 12, 0, 0),
+        },
+        "embedding": [0.1, 0.2, 0.3],
+        "source_file": "test.pdf",
+        "environment": "dev",
+    }
+
+    # This should NOT raise AttributeError: 'CassandraVectorStore' object has no attribute '_json_default'
+    result = store._normalise_document(document)
+
+    # Verify the result is valid
+    assert result is not None
+    assert len(result) == 12  # Tuple with 12 elements
+
+    # Verify JSON payload was serialized correctly
+    payload = result[5]  # payload is at index 5
+    payload_obj = json.loads(payload)
+    assert payload_obj["metadata"]["created_at"] == timestamp.isoformat()
+    assert payload_obj["metadata"]["processed_at"] == "2025-10-05T12:00:00"
 
 
 def test_build_vector_documents_includes_identity_and_metadata():
