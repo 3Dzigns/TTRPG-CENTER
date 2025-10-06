@@ -1243,6 +1243,16 @@ async def admin_dictionary_page(request: Request):
     }
     return templates.TemplateResponse("admin/dictionary.html", context)
 
+@admin_router.get("/admin/vector-store", response_class=HTMLResponse)
+async def admin_vector_store_page(request: Request):
+    """Render the Vector Store Management page."""
+    context = {
+        "request": request,
+        "title": "Vector Store Management",
+        "active_nav": "vector-store",
+    }
+    return templates.TemplateResponse("admin/vector_store.html", context)
+
 @admin_router.get("/admin/testing", response_class=HTMLResponse)
 async def admin_testing_page(request: Request):
     context = {
@@ -2806,6 +2816,539 @@ async def get_neo4j_stats(environment: str, job_id: Optional[str] = Query(None))
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@admin_router.get("/api/admin/neo4j/nodes/{environment}")
+async def get_neo4j_nodes(
+    environment: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    label: Optional[str] = Query(None),
+    source_file: Optional[str] = Query(None),
+    job_id: Optional[str] = Query(None),
+    sort_by: str = Query("created_at_desc")
+):
+    """Get paginated list of Neo4j nodes with filtering and sorting."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Build WHERE clause
+            where_clauses = []
+            params = {}
+
+            if label:
+                where_clauses.append(f"'{label}' IN labels(n)")
+            if source_file:
+                where_clauses.append("n.source_file = $source_file")
+                params["source_file"] = source_file
+            if job_id:
+                where_clauses.append("n.job_id = $job_id")
+                params["job_id"] = job_id
+
+            where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+            # Count total
+            count_query = f"MATCH (n) {where_str} RETURN count(n) AS total"
+            total = session.run(count_query, params).single()["total"]
+
+            # Determine sort field
+            sort_field = "n.created_at"
+            sort_order = "DESC"
+            if sort_by == "created_at_asc":
+                sort_order = "ASC"
+            elif sort_by == "updated_at_desc":
+                sort_field = "n.updated_at"
+            elif sort_by == "updated_at_asc":
+                sort_field = "n.updated_at"
+                sort_order = "ASC"
+            elif sort_by == "id_asc":
+                sort_field = "n.id"
+                sort_order = "ASC"
+            elif sort_by == "id_desc":
+                sort_field = "n.id"
+
+            # Fetch paginated nodes
+            skip = (page - 1) * limit
+            nodes_query = f"""
+                MATCH (n)
+                {where_str}
+                RETURN n.id AS id, labels(n) AS labels,
+                       n.source_file AS source_file, n.job_id AS job_id,
+                       n.term AS term, n.chunk_id AS chunk_id,
+                       n.content_preview AS content_preview,
+                       n.page_number AS page_number,
+                       n.created_at AS created_at,
+                       n.updated_at AS updated_at
+                ORDER BY {sort_field} {sort_order}
+                SKIP {skip} LIMIT {limit}
+            """
+
+            result = session.run(nodes_query, params)
+            nodes = []
+            for record in result:
+                nodes.append({
+                    "id": record["id"],
+                    "labels": record["labels"],
+                    "source_file": record["source_file"],
+                    "job_id": record["job_id"],
+                    "term": record["term"],
+                    "chunk_id": record["chunk_id"],
+                    "content_preview": record["content_preview"],
+                    "page_number": record["page_number"],
+                    "created_at": record["created_at"],
+                    "updated_at": record["updated_at"]
+                })
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "nodes": nodes,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting Neo4j nodes for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/neo4j/node/{environment}/{node_id:path}")
+async def get_neo4j_node_detail(environment: str, node_id: str):
+    """Get detailed information about a single Neo4j node including relationships."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Get node properties
+            node_query = "MATCH (n {id: $node_id}) RETURN n, labels(n) AS labels"
+            node_result = session.run(node_query, node_id=node_id).single()
+
+            if not node_result:
+                raise HTTPException(status_code=404, detail="Node not found")
+
+            node = dict(node_result["n"])
+            node["labels"] = node_result["labels"]
+
+            # Get incoming relationships
+            incoming_query = """
+                MATCH (source)-[r]->(n {id: $node_id})
+                RETURN type(r) AS type, count(r) AS count
+            """
+            incoming = [{"type": rec["type"], "count": rec["count"]}
+                       for rec in session.run(incoming_query, node_id=node_id)]
+
+            # Get outgoing relationships
+            outgoing_query = """
+                MATCH (n {id: $node_id})-[r]->(target)
+                RETURN type(r) AS type, count(r) AS count
+            """
+            outgoing = [{"type": rec["type"], "count": rec["count"]}
+                       for rec in session.run(outgoing_query, node_id=node_id)]
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "node": node,
+            "relationships": {
+                "incoming": incoming,
+                "outgoing": outgoing,
+                "total_incoming": sum(r["count"] for r in incoming),
+                "total_outgoing": sum(r["count"] for r in outgoing)
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Neo4j node detail for {node_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/neo4j/relationships/{environment}")
+async def get_neo4j_relationships(
+    environment: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    rel_type: Optional[str] = Query(None),
+    source_file: Optional[str] = Query(None),
+    job_id: Optional[str] = Query(None)
+):
+    """Get paginated list of Neo4j relationships with filtering."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Build WHERE clause
+            where_clauses = []
+            params = {}
+
+            if rel_type:
+                type_filter = f":{rel_type}"
+            else:
+                type_filter = ""
+
+            if source_file:
+                where_clauses.append("r.source_file = $source_file")
+                params["source_file"] = source_file
+            if job_id:
+                where_clauses.append("r.job_id = $job_id")
+                params["job_id"] = job_id
+
+            where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+            # Count total
+            count_query = f"MATCH ()-[r{type_filter}]->() {where_str} RETURN count(r) AS total"
+            total = session.run(count_query, params).single()["total"]
+
+            # Fetch paginated relationships
+            skip = (page - 1) * limit
+            rels_query = f"""
+                MATCH (source)-[r{type_filter}]->(target)
+                {where_str}
+                RETURN source.id AS source_id, labels(source)[0] AS source_label,
+                       source.term AS source_term, source.chunk_id AS source_chunk_id,
+                       type(r) AS rel_type,
+                       r.term AS rel_term, r.created_at AS rel_created_at,
+                       target.id AS target_id, labels(target)[0] AS target_label,
+                       target.term AS target_term, target.chunk_id AS target_chunk_id
+                ORDER BY r.created_at DESC
+                SKIP {skip} LIMIT {limit}
+            """
+
+            result = session.run(rels_query, params)
+            relationships = []
+            for record in result:
+                relationships.append({
+                    "source": {
+                        "id": record["source_id"],
+                        "label": record["source_label"],
+                        "term": record["source_term"],
+                        "chunk_id": record["source_chunk_id"]
+                    },
+                    "relationship": {
+                        "type": record["rel_type"],
+                        "term": record["rel_term"],
+                        "created_at": record["rel_created_at"]
+                    },
+                    "target": {
+                        "id": record["target_id"],
+                        "label": record["target_label"],
+                        "term": record["target_term"],
+                        "chunk_id": record["target_chunk_id"]
+                    }
+                })
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "relationships": relationships,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting Neo4j relationships for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/neo4j/related/{environment}/{node_id:path}")
+async def get_neo4j_related_nodes(
+    environment: str,
+    node_id: str,
+    max_depth: int = Query(2, ge=1, le=5)
+):
+    """Get nodes related to a specific node by traversing relationships."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Get related nodes
+            query = f"""
+                MATCH (start {{id: $node_id}})
+                MATCH path = (start)-[*1..{max_depth}]-(related)
+                WHERE related.id <> start.id
+                RETURN DISTINCT related.id AS id, labels(related) AS labels,
+                       related.term AS term, related.chunk_id AS chunk_id,
+                       related.source_file AS source_file,
+                       related.content_preview AS content_preview,
+                       length(path) AS distance
+                ORDER BY distance ASC
+                LIMIT 100
+            """
+
+            result = session.run(query, node_id=node_id)
+            related_nodes = []
+            for record in result:
+                related_nodes.append({
+                    "id": record["id"],
+                    "labels": record["labels"],
+                    "term": record["term"],
+                    "chunk_id": record["chunk_id"],
+                    "source_file": record["source_file"],
+                    "content_preview": record["content_preview"],
+                    "distance": record["distance"]
+                })
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "node_id": node_id,
+            "max_depth": max_depth,
+            "related_nodes": related_nodes,
+            "count": len(related_nodes)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting related nodes for {node_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/neo4j/graph-data/{environment}")
+async def get_neo4j_graph_visualization_data(
+    environment: str,
+    job_id: Optional[str] = Query(None),
+    source_file: Optional[str] = Query(None),
+    limit: int = Query(100, ge=10, le=500)
+):
+    """Get graph data for visualization in vis-network format."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Build WHERE clause for filtering
+            where_clauses = []
+            params = {"limit": limit}
+
+            if job_id:
+                where_clauses.append("n.job_id = $job_id")
+                params["job_id"] = job_id
+            if source_file:
+                where_clauses.append("n.source_file = $source_file")
+                params["source_file"] = source_file
+
+            where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+            # Get nodes
+            nodes_query = f"""
+                MATCH (n)
+                {where_str}
+                RETURN n.id AS id, labels(n) AS labels,
+                       n.term AS term, n.chunk_id AS chunk_id,
+                       n.content_preview AS content_preview
+                LIMIT $limit
+            """
+
+            nodes_result = session.run(nodes_query, params)
+            nodes = []
+            node_ids = set()
+
+            for record in nodes_result:
+                node_id = record["id"]
+                node_ids.add(node_id)
+                labels = record["labels"]
+                primary_label = labels[0] if labels else "Unknown"
+
+                # Determine display label
+                if primary_label == "Term":
+                    label = record["term"] or node_id[:20]
+                elif primary_label == "Chunk":
+                    preview = record["content_preview"] or ""
+                    label = preview[:30] + "..." if len(preview) > 30 else preview
+                    if not label:
+                        label = record["chunk_id"] or node_id[:20]
+                else:
+                    label = node_id[:20]
+
+                nodes.append({
+                    "id": node_id,
+                    "label": label,
+                    "group": primary_label,
+                    "title": f"{primary_label}: {node_id}"  # Tooltip
+                })
+
+            # Get relationships between these nodes
+            if node_ids:
+                edges_query = """
+                    MATCH (source)-[r]->(target)
+                    WHERE source.id IN $node_ids AND target.id IN $node_ids
+                    RETURN source.id AS from, target.id AS to, type(r) AS type
+                """
+
+                edges_result = session.run(edges_query, node_ids=list(node_ids))
+                edges = []
+
+                for record in edges_result:
+                    edges.append({
+                        "from": record["from"],
+                        "to": record["to"],
+                        "label": record["type"],
+                        "arrows": "to"
+                    })
+            else:
+                edges = []
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "nodes": nodes,
+            "edges": edges,
+            "node_count": len(nodes),
+            "edge_count": len(edges)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting graph visualization data for {environment}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/api/admin/neo4j/query/{environment}")
+async def execute_neo4j_query(environment: str, request: Request):
+    """Execute a read-only Cypher query for advanced analysis."""
+    try:
+        if environment not in ['dev', 'test', 'prod']:
+            raise HTTPException(status_code=400, detail="Invalid environment")
+
+        body = await request.json()
+        query = body.get("query", "").strip()
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        # Validate query is read-only (only MATCH, RETURN, WITH, WHERE, ORDER BY, LIMIT, SKIP)
+        query_upper = query.upper()
+        forbidden_keywords = ["CREATE", "DELETE", "REMOVE", "SET", "MERGE", "DETACH", "DROP"]
+
+        for keyword in forbidden_keywords:
+            if keyword in query_upper:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Write operations not allowed. Forbidden keyword: {keyword}"
+                )
+
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", f"bolt://neo4j-{environment}:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", f"{environment}_password")
+        neo4j_database = os.getenv("NEO4J_DB", f"ttrpg{environment}")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session(database=neo4j_database) as session:
+            # Execute with timeout
+            result = session.run(query)
+
+            # Convert to JSON-serializable format
+            records = []
+            keys = result.keys()
+
+            for record in result:
+                row = {}
+                for key in keys:
+                    value = record[key]
+                    # Handle Neo4j types
+                    if hasattr(value, "__dict__"):
+                        row[key] = dict(value)
+                    elif isinstance(value, list):
+                        row[key] = [dict(v) if hasattr(v, "__dict__") else v for v in value]
+                    else:
+                        row[key] = value
+                records.append(row)
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "query": query,
+            "columns": keys,
+            "records": records,
+            "count": len(records)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing Neo4j query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/admin/neo4j-graph")
+async def neo4j_graph_page(request: Request):
+    """Neo4j Graph Explorer page."""
+    return templates.TemplateResponse(
+        "admin/neo4j_graph.html",
+        {"request": request, "active_nav": "neo4j-graph"}
+    )
+
+
 @admin_router.get("/api/admin/hgrn/report/{job_id}")
 async def get_hgrn_report(job_id: str, env: str = Query("dev")):
     """Get HGRN validation report for a specific job
@@ -3684,6 +4227,348 @@ async def persona_management_page(request: Request):
         logger.error(f"Error rendering persona management page: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# -------------------------
+# Vector Store Management API Endpoints
+# -------------------------
+
+@admin_router.get("/api/admin/vector-store/stats/{environment}")
+async def get_vector_store_stats(environment: str):
+    """Get vector store statistics for environment."""
+    try:
+        vector_store = make_vector_store(environment, backend="cassandra")
+
+        # Query all chunks to calculate stats (Note: ALLOW FILTERING needed for non-partition key queries)
+        query = f"SELECT COUNT(*) as total FROM {vector_store.keyspace}.chunks WHERE environment = %s ALLOW FILTERING"
+        row = vector_store.session.execute(query, (environment,)).one()
+        total_chunks = row.total if row else 0
+
+        # Count unique sources (fetch all and count in Python due to Cassandra DISTINCT limitations)
+        query = f"SELECT source_hash FROM {vector_store.keyspace}.chunks WHERE environment = %s ALLOW FILTERING"
+        source_rows = vector_store.session.execute(query, (environment,))
+        unique_sources = len(set(row.source_hash for row in source_rows))
+
+        # Count embeddings (fetch all and count in Python, Cassandra doesn't support IS NOT NULL in WHERE)
+        query = f"SELECT embedding FROM {vector_store.keyspace}.chunks WHERE environment = %s ALLOW FILTERING"
+        embedding_rows = vector_store.session.execute(query, (environment,))
+        embedding_count = sum(1 for row in embedding_rows if row.embedding is not None)
+
+        return {
+            "status": "success",
+            "stats": {
+                "total_chunks": total_chunks,
+                "unique_sources": unique_sources,
+                "embedding_count": embedding_count,
+                "total_size_estimate": total_chunks * 2048  # Rough estimate
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting vector store stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/vector-store/records/{environment}")
+async def get_vector_store_records(
+    environment: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    source_file: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
+    sort_by: str = Query("updated_at_desc")
+):
+    """Get paginated vector store records with filtering and sorting."""
+    try:
+        vector_store = make_vector_store(environment, backend="cassandra")
+
+        # Build query with filters
+        where_clauses = [f"environment = '{environment}'"]
+
+        if source_file:
+            where_clauses.append(f"source_file = '{source_file}'")
+        if stage:
+            where_clauses.append(f"stage = '{stage}'")
+
+        where_str = " AND ".join(where_clauses) if where_clauses else ""
+
+        # Note: Cassandra doesn't support OFFSET, so we'll fetch all and paginate in memory
+        # For production, consider using paging state
+        query = f"SELECT * FROM {vector_store.keyspace}.chunks WHERE {where_str} ALLOW FILTERING"
+        rows = list(vector_store.session.execute(query))
+
+        # Sort results
+        if sort_by == "updated_at_desc":
+            rows.sort(key=lambda r: r.updated_at or 0, reverse=True)
+        elif sort_by == "updated_at_asc":
+            rows.sort(key=lambda r: r.updated_at or 0)
+        elif sort_by == "chunk_id_asc":
+            rows.sort(key=lambda r: r.chunk_id)
+        elif sort_by == "chunk_id_desc":
+            rows.sort(key=lambda r: r.chunk_id, reverse=True)
+        elif sort_by == "source_file_asc":
+            rows.sort(key=lambda r: r.source_file or "")
+
+        # Paginate
+        total = len(rows)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        page_rows = rows[start_idx:end_idx]
+
+        # Convert to JSON-serializable format (exclude binary embedding from list view)
+        records = []
+        for row in page_rows:
+            records.append({
+                "chunk_id": row.chunk_id,
+                "source_hash": row.source_hash,
+                "environment": row.environment,
+                "source_file": row.source_file,
+                "stage": row.stage,
+                "content": row.content[:200] + "..." if row.content and len(row.content) > 200 else row.content,
+                "content_full": row.content,
+                "vector_id": row.vector_id,
+                "embedding_model": row.embedding_model,
+                "has_embedding": row.embedding is not None,
+                "embedding_size": len(row.embedding) if row.embedding else 0,  # Size in bytes instead of binary data
+                "payload": row.payload,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "loaded_at": row.loaded_at.isoformat() if row.loaded_at else None,
+            })
+
+        return {
+            "status": "success",
+            "records": records,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting vector store records: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/api/admin/vector-store/record/{environment}/{source_hash}/{chunk_id}")
+async def get_vector_store_record(environment: str, source_hash: str, chunk_id: str):
+    """Get single vector store record by primary key."""
+    try:
+        vector_store = make_vector_store(environment, backend="cassandra")
+
+        query = f"""
+            SELECT * FROM {vector_store.keyspace}.chunks
+            WHERE source_hash = %s AND environment = %s AND chunk_id = %s
+        """
+        row = vector_store.session.execute(query, (source_hash, environment, chunk_id)).one()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Record not found")
+
+        # Convert embedding to base64 for JSON transport if present
+        embedding_b64 = None
+        if row.embedding:
+            import base64
+            embedding_b64 = base64.b64encode(row.embedding).decode('utf-8')
+
+        return {
+            "status": "success",
+            "record": {
+                "chunk_id": row.chunk_id,
+                "source_hash": row.source_hash,
+                "environment": row.environment,
+                "source_file": row.source_file,
+                "stage": row.stage,
+                "content": row.content,
+                "vector_id": row.vector_id,
+                "embedding_model": row.embedding_model,
+                "embedding_b64": embedding_b64,
+                "has_embedding": row.embedding is not None,
+                "embedding_size": len(row.embedding) if row.embedding else 0,
+                "payload": row.payload,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "loaded_at": row.loaded_at.isoformat() if row.loaded_at else None,
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting vector store record: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class VectorStoreRecordCreate(BaseModel):
+    chunk_id: str
+    source_hash: str
+    environment: str
+    source_file: str
+    stage: str
+    content: str
+    vector_id: Optional[str] = None
+    embedding_model: Optional[str] = None
+    embedding: Optional[str] = None  # JSON string of float array
+    payload: Optional[str] = None  # JSON string
+
+
+@admin_router.post("/api/admin/vector-store/records")
+async def create_vector_store_record(record: VectorStoreRecordCreate):
+    """Create new vector store record."""
+    try:
+        vector_store = make_vector_store(record.environment, backend="cassandra")
+
+        # Parse embedding if provided
+        embedding_bytes = None
+        if record.embedding:
+            import json
+            embedding_array = json.loads(record.embedding)
+            # Convert to bytes format expected by Cassandra
+            import struct
+            embedding_bytes = struct.pack(f'{len(embedding_array)}f', *embedding_array)
+
+        # Insert record
+        query = f"""
+            INSERT INTO {vector_store.keyspace}.chunks (
+                source_hash, environment, chunk_id, stage, content, payload,
+                source_file, embedding, embedding_model, vector_id, updated_at, loaded_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        from datetime import datetime
+        now = datetime.utcnow()
+
+        vector_store.session.execute(query, (
+            record.source_hash,
+            record.environment,
+            record.chunk_id,
+            record.stage,
+            record.content,
+            record.payload,
+            record.source_file,
+            embedding_bytes,
+            record.embedding_model,
+            record.vector_id,
+            now,
+            now
+        ))
+
+        return {
+            "status": "success",
+            "message": "Record created successfully",
+            "chunk_id": record.chunk_id
+        }
+    except Exception as e:
+        logger.error(f"Error creating vector store record: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.put("/api/admin/vector-store/record/{environment}/{source_hash}/{chunk_id}")
+async def update_vector_store_record(
+    environment: str,
+    source_hash: str,
+    chunk_id: str,
+    record: VectorStoreRecordCreate
+):
+    """Update existing vector store record."""
+    try:
+        vector_store = make_vector_store(environment, backend="cassandra")
+
+        # Parse embedding if provided
+        embedding_bytes = None
+        if record.embedding:
+            import json
+            embedding_array = json.loads(record.embedding)
+            import struct
+            embedding_bytes = struct.pack(f'{len(embedding_array)}f', *embedding_array)
+
+        # Update record
+        query = f"""
+            UPDATE {vector_store.keyspace}.chunks
+            SET stage = %s, content = %s, payload = %s, source_file = %s,
+                embedding = %s, embedding_model = %s, vector_id = %s, updated_at = %s
+            WHERE source_hash = %s AND environment = %s AND chunk_id = %s
+        """
+
+        from datetime import datetime
+        now = datetime.utcnow()
+
+        vector_store.session.execute(query, (
+            record.stage,
+            record.content,
+            record.payload,
+            record.source_file,
+            embedding_bytes,
+            record.embedding_model,
+            record.vector_id,
+            now,
+            source_hash,
+            environment,
+            chunk_id
+        ))
+
+        return {
+            "status": "success",
+            "message": "Record updated successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error updating vector store record: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.delete("/api/admin/vector-store/record/{environment}/{source_hash}/{chunk_id}")
+async def delete_vector_store_record(environment: str, source_hash: str, chunk_id: str):
+    """Delete vector store record."""
+    try:
+        vector_store = make_vector_store(environment, backend="cassandra")
+
+        query = f"""
+            DELETE FROM {vector_store.keyspace}.chunks
+            WHERE source_hash = %s AND environment = %s AND chunk_id = %s
+        """
+
+        vector_store.session.execute(query, (source_hash, environment, chunk_id))
+
+        return {
+            "status": "success",
+            "message": "Record deleted successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error deleting vector store record: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BulkDeleteRequest(BaseModel):
+    environment: str
+    records: List[dict]  # List of {source_hash, chunk_id}
+
+
+@admin_router.post("/api/admin/vector-store/bulk-delete")
+async def bulk_delete_vector_store_records(request: BulkDeleteRequest):
+    """Bulk delete vector store records."""
+    try:
+        vector_store = make_vector_store(request.environment, backend="cassandra")
+
+        deleted_count = 0
+        for record in request.records:
+            query = f"""
+                DELETE FROM {vector_store.keyspace}.chunks
+                WHERE source_hash = %s AND environment = %s AND chunk_id = %s
+            """
+            vector_store.session.execute(query, (
+                record["source_hash"],
+                request.environment,
+                record["chunk_id"]
+            ))
+            deleted_count += 1
+
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} records",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        logger.error(f"Error bulk deleting records: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------
+# Persona Management API Endpoints
+# -------------------------
 
 @admin_router.get("/admin/api/personas/metrics")
 async def get_persona_metrics(days_back: int = 7):

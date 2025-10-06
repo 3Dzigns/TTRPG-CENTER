@@ -1,0 +1,958 @@
+{% extends "base.html" %}
+
+{% block title %}Vector Store Management - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Vector Store Management</h1>
+        <div class="mt-1">
+            <span class="text-muted small me-3">
+                <i class="bi bi-database me-1"></i>
+                Backend:
+                <span id="vs-backend-status" class="badge bg-success">Cassandra</span>
+            </span>
+            <span class="text-muted small me-3" id="vs-connection-status">
+                <i class="bi bi-wifi me-1"></i>
+                <span class="badge bg-secondary">Checking...</span>
+            </span>
+            <span class="text-muted small">
+                <i class="bi bi-server me-1"></i>
+                Environment:
+                <select class="btn btn-sm btn-outline-secondary" id="environment-selector" onchange="loadVectorStore()">
+                    <option value="dev" selected>Development</option>
+                    <option value="test">Testing</option>
+                    <option value="prod">Production</option>
+                </select>
+            </span>
+        </div>
+    </div>
+    <div class="btn-group" role="group">
+        <button class="btn btn-admin" onclick="createRecord()">
+            <i class="bi bi-plus-circle me-1"></i>Add Record
+        </button>
+        <button class="btn btn-outline-primary" onclick="refreshVectorStore()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-danger dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-trash me-1"></i>Bulk Actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item text-danger" href="#" onclick="bulkDeleteRecords()">
+                    <i class="bi bi-trash me-1"></i>Delete Selected
+                </a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Vector Store Statistics -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-primary" id="total-chunks">--</div>
+                <div class="metric-label">Total Chunks</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-success" id="unique-sources">--</div>
+                <div class="metric-label">Unique Sources</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-info" id="total-size">--</div>
+                <div class="metric-label">Total Size</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-warning" id="embedding-count">--</div>
+                <div class="metric-label">Embeddings</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Search and Filter -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="search-content" placeholder="Search content..." onkeyup="filterRecords()">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="source-filter" onchange="filterRecords()">
+                    <option value="">All Sources</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" id="stage-filter" onchange="filterRecords()">
+                    <option value="">All Stages</option>
+                    <option value="pass_d">Pass D</option>
+                    <option value="pass_e">Pass E</option>
+                    <option value="pass_f">Pass F</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="sort-by" onchange="sortRecords()">
+                    <option value="updated_at_desc">Latest Updated</option>
+                    <option value="updated_at_asc">Oldest Updated</option>
+                    <option value="chunk_id_asc">Chunk ID (A-Z)</option>
+                    <option value="chunk_id_desc">Chunk ID (Z-A)</option>
+                    <option value="source_file_asc">Source (A-Z)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Vector Store Records Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-database me-2"></i>Vector Store Records</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="selectAllRecords()" id="select-all-btn">
+                <i class="bi bi-check-square me-1"></i>Select All
+            </button>
+            <button class="btn btn-outline-danger" onclick="deleteSelectedRecords()" id="delete-selected-btn" style="display: none;">
+                <i class="bi bi-trash me-1"></i>Delete Selected
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="records-empty" class="text-center text-muted py-4" style="display:none;">
+            <i class="bi bi-database display-4 mb-2"></i>
+            <p>No vector store records found.</p>
+            <small>Vector embeddings will appear here after ingestion.</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover" id="records-table">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">
+                            <input type="checkbox" id="select-all-checkbox" onchange="toggleAllRecords(this.checked)">
+                        </th>
+                        <th style="width: 150px;">Chunk ID</th>
+                        <th>Content Preview</th>
+                        <th style="width: 180px;">Source File</th>
+                        <th style="width: 80px;">Stage</th>
+                        <th style="width: 100px;">Vector</th>
+                        <th style="width: 120px;">Updated</th>
+                        <th style="width: 140px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="text-muted small" id="pagination-info">
+                Showing 0-0 of 0 records
+            </div>
+            <nav>
+                <ul class="pagination pagination-sm mb-0" id="pagination-controls">
+                    <!-- Pagination will be dynamically generated -->
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+<!-- View Record Modal -->
+<div class="modal fade" id="viewRecordModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-eye me-2"></i>Vector Store Record Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Tabs for different sections -->
+                <ul class="nav nav-tabs mb-3" id="recordDetailTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="chunk-data-tab" data-bs-toggle="tab" data-bs-target="#chunk-data-pane" type="button">
+                            <i class="bi bi-file-text me-1"></i>Chunk Data
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="vector-data-tab" data-bs-toggle="tab" data-bs-target="#vector-data-pane" type="button">
+                            <i class="bi bi-vector-pen me-1"></i>Vector Data
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="metadata-tab" data-bs-toggle="tab" data-bs-target="#metadata-pane" type="button">
+                            <i class="bi bi-tags me-1"></i>Metadata
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="recordDetailTabContent">
+                    <!-- Chunk Data Tab -->
+                    <div class="tab-pane fade show active" id="chunk-data-pane" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Chunk ID</label>
+                                <input type="text" class="form-control" id="view-chunk-id" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Source Hash</label>
+                                <input type="text" class="form-control" id="view-source-hash" readonly>
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Source File</label>
+                                <input type="text" class="form-control" id="view-source-file" readonly>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label fw-bold">Stage</label>
+                                <input type="text" class="form-control" id="view-stage" readonly>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label fw-bold">Environment</label>
+                                <input type="text" class="form-control" id="view-environment" readonly>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Content</label>
+                            <textarea class="form-control" id="view-content" rows="10" readonly></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Vector Data Tab -->
+                    <div class="tab-pane fade" id="vector-data-pane" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Vector ID</label>
+                                <input type="text" class="form-control" id="view-vector-id" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Embedding Model</label>
+                                <input type="text" class="form-control" id="view-embedding-model" readonly>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Embedding Vector</label>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Vector Dimensions:</strong> <span id="view-vector-dimensions">--</span>
+                            </div>
+                            <textarea class="form-control font-monospace small" id="view-embedding" rows="12" readonly></textarea>
+                            <div class="form-text">First 50 dimensions shown for readability</div>
+                        </div>
+                    </div>
+
+                    <!-- Metadata Tab -->
+                    <div class="tab-pane fade" id="metadata-pane" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Loaded At</label>
+                                <input type="text" class="form-control" id="view-loaded-at" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Updated At</label>
+                                <input type="text" class="form-control" id="view-updated-at" readonly>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Payload (JSON Metadata)</label>
+                            <pre class="border p-3 bg-light" id="view-payload" style="max-height: 400px; overflow-y: auto;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="editRecordFromView()">
+                    <i class="bi bi-pencil me-1"></i>Edit
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Record Modal -->
+<div class="modal fade" id="recordModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="recordModalTitle">Create Vector Store Record</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="recordForm">
+                    <input type="hidden" id="edit-mode" value="create">
+                    <input type="hidden" id="original-chunk-id" value="">
+                    <input type="hidden" id="original-source-hash" value="">
+
+                    <h6 class="border-bottom pb-2 mb-3">Chunk Data</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-chunk-id" class="form-label">Chunk ID *</label>
+                            <input type="text" class="form-control" id="edit-chunk-id" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-source-hash" class="form-label">Source Hash *</label>
+                            <input type="text" class="form-control" id="edit-source-hash" required>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-source-file" class="form-label">Source File *</label>
+                            <input type="text" class="form-control" id="edit-source-file" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="edit-stage" class="form-label">Stage *</label>
+                            <select class="form-select" id="edit-stage" required>
+                                <option value="pass_d">Pass D</option>
+                                <option value="pass_e">Pass E</option>
+                                <option value="pass_f">Pass F</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="edit-environment" class="form-label">Environment *</label>
+                            <select class="form-select" id="edit-environment" required>
+                                <option value="dev">Development</option>
+                                <option value="test">Testing</option>
+                                <option value="prod">Production</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-content" class="form-label">Content *</label>
+                        <textarea class="form-control" id="edit-content" rows="6" required></textarea>
+                    </div>
+
+                    <h6 class="border-bottom pb-2 mb-3 mt-4">Vector Data</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-vector-id" class="form-label">Vector ID</label>
+                            <input type="text" class="form-control" id="edit-vector-id">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-embedding-model" class="form-label">Embedding Model</label>
+                            <input type="text" class="form-control" id="edit-embedding-model" placeholder="e.g., text-embedding-3-small">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-embedding" class="form-label">Embedding Vector (JSON array)</label>
+                        <textarea class="form-control font-monospace small" id="edit-embedding" rows="4" placeholder="[0.123, -0.456, ...]"></textarea>
+                        <div class="form-text">Paste embedding as JSON array. Leave empty to generate automatically.</div>
+                    </div>
+
+                    <h6 class="border-bottom pb-2 mb-3 mt-4">Metadata</h6>
+                    <div class="mb-3">
+                        <label for="edit-payload" class="form-label">Payload (JSON)</label>
+                        <textarea class="form-control font-monospace small" id="edit-payload" rows="6" placeholder='{"key": "value"}'></textarea>
+                        <div class="form-text">Additional metadata as JSON object</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-admin" onclick="saveRecord()">
+                    <i class="bi bi-save me-1"></i>Save Record
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.metric-label {
+    color: var(--admin-secondary);
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    background: rgba(248, 250, 252, 0.8);
+}
+
+.stage-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.stage-pass_d { background: #dcfce7; color: #166534; }
+.stage-pass_e { background: #dbeafe; color: #1e40af; }
+.stage-pass_f { background: #fef3c7; color: #92400e; }
+
+.content-preview {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Vector Store Management JavaScript
+let currentPage = 1;
+let totalPages = 1;
+let selectedRecords = new Set();
+let allRecords = [];
+let filteredRecords = [];
+let currentEnvironment = 'dev';
+let currentViewRecord = null;
+
+// Initialize vector store management
+document.addEventListener('DOMContentLoaded', function() {
+    currentEnvironment = document.getElementById('environment-selector').value;
+    refreshVectorStore();
+    checkBackendStatus();
+});
+
+async function refreshVectorStore() {
+    AdminUtils.showToast('Refreshing vector store...', 'info');
+    await Promise.all([
+        loadVectorStoreStats(),
+        loadVectorStoreRecords(),
+        checkBackendStatus()
+    ]);
+    AdminUtils.showToast('Vector store refreshed', 'success');
+}
+
+async function checkBackendStatus() {
+    const statusElement = document.getElementById('vs-connection-status');
+
+    try {
+        // Check Cassandra connection via vector store stats endpoint
+        const response = await fetch(`/api/admin/vector-store/stats/${currentEnvironment}`);
+
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                statusElement.innerHTML = `
+                    <i class="bi bi-wifi me-1"></i>
+                    <span class="badge bg-success">Connected</span>
+                `;
+            } else {
+                statusElement.innerHTML = `
+                    <i class="bi bi-wifi-off me-1"></i>
+                    <span class="badge bg-warning">Degraded</span>
+                `;
+            }
+
+            // Update backend status indicator
+            const backendElement = document.getElementById('vs-backend-status');
+            if (backendElement) {
+                backendElement.className = 'badge bg-success';
+                backendElement.textContent = 'Cassandra';
+            }
+
+        } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+    } catch (error) {
+        console.error('Cassandra health check failed:', error);
+
+        statusElement.innerHTML = `
+            <i class="bi bi-wifi-off me-1"></i>
+            <span class="badge bg-danger">Error</span>
+        `;
+
+        const backendElement = document.getElementById('vs-backend-status');
+        if (backendElement) {
+            backendElement.className = 'badge bg-danger';
+            backendElement.textContent = 'Cassandra Error';
+        }
+    }
+}
+
+async function loadVectorStoreStats() {
+    try {
+        const response = await fetch(`/api/admin/vector-store/stats/${currentEnvironment}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const stats = data.stats;
+
+        document.getElementById('total-chunks').textContent = stats.total_chunks.toLocaleString();
+        document.getElementById('unique-sources').textContent = stats.unique_sources.toLocaleString();
+        document.getElementById('embedding-count').textContent = stats.embedding_count.toLocaleString();
+        document.getElementById('total-size').textContent = AdminUtils.formatBytes(stats.total_size_estimate);
+
+        console.log('Vector store stats loaded:', stats);
+
+    } catch (error) {
+        console.error('Failed to load vector store stats:', error);
+        AdminUtils.showToast('Failed to load statistics', 'danger');
+
+        document.getElementById('total-chunks').textContent = 'Error';
+        document.getElementById('unique-sources').textContent = 'Error';
+        document.getElementById('embedding-count').textContent = 'Error';
+        document.getElementById('total-size').textContent = 'Error';
+    }
+}
+
+async function loadVectorStoreRecords() {
+    try {
+        const sourceFilter = document.getElementById('source-filter').value;
+        const stageFilter = document.getElementById('stage-filter').value;
+        const sortBy = document.getElementById('sort-by').value;
+
+        const params = new URLSearchParams({
+            page: currentPage,
+            limit: 25
+        });
+
+        if (sourceFilter) params.set('source_file', sourceFilter);
+        if (stageFilter) params.set('stage', stageFilter);
+        if (sortBy) params.set('sort_by', sortBy);
+
+        const response = await fetch(`/api/admin/vector-store/records/${currentEnvironment}?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        allRecords = data.records || [];
+        filteredRecords = [...allRecords];
+
+        // Populate source filter options
+        populateSourceFilter();
+
+        updateRecordsDisplay();
+
+        console.log(`Loaded ${allRecords.length} records from Cassandra`);
+
+    } catch (error) {
+        console.error('Failed to load vector store records:', error);
+        AdminUtils.showToast('Failed to load records', 'danger');
+
+        allRecords = [];
+        filteredRecords = [];
+        updateRecordsDisplay();
+    }
+}
+
+function populateSourceFilter() {
+    const sourceFilter = document.getElementById('source-filter');
+    const currentValue = sourceFilter.value;
+
+    // Get unique sources from all records
+    const sources = [...new Set(allRecords.map(r => r.source_file).filter(Boolean))];
+
+    // Rebuild options
+    sourceFilter.innerHTML = '<option value="">All Sources</option>';
+    sources.sort().forEach(source => {
+        const option = document.createElement('option');
+        option.value = source;
+        option.textContent = source;
+        if (source === currentValue) {
+            option.selected = true;
+        }
+        sourceFilter.appendChild(option);
+    });
+}
+
+function updateRecordsDisplay() {
+    const tbody = document.querySelector('#records-table tbody');
+    const empty = document.getElementById('records-empty');
+
+    tbody.innerHTML = '';
+    selectedRecords.clear();
+
+    if (filteredRecords.length === 0) {
+        empty.style.display = 'block';
+        updatePagination(0, 0);
+        return;
+    }
+
+    empty.style.display = 'none';
+
+    filteredRecords.forEach(record => {
+        const tr = document.createElement('tr');
+        const stageClass = `stage-${record.stage}`;
+
+        tr.innerHTML = `
+            <td><input type="checkbox" class="record-checkbox" value="${record.chunk_id}" data-source-hash="${record.source_hash}" onchange="toggleRecordSelection('${record.chunk_id}', '${record.source_hash}', this.checked)"></td>
+            <td>
+                <code class="small">${record.chunk_id}</code>
+            </td>
+            <td>
+                <div class="content-preview" title="${escapeHtml(record.content_full || '')}">
+                    ${escapeHtml(record.content || '')}
+                </div>
+            </td>
+            <td>
+                <small>${record.source_file || 'N/A'}</small>
+            </td>
+            <td><span class="badge stage-badge ${stageClass}">${record.stage || 'N/A'}</span></td>
+            <td>
+                ${record.has_embedding ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i></span>' : '<span class="badge bg-secondary">None</span>'}
+            </td>
+            <td><small>${AdminUtils.formatTimestamp(new Date(record.updated_at).getTime() / 1000)}</small></td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info btn-sm" onclick='viewRecord(${JSON.stringify(record)})' title="View Details">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick='editRecord(${JSON.stringify(record)})' title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteRecord('${record.chunk_id}', '${record.source_hash}')" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    updatePagination(1, filteredRecords.length);
+    updateBulkActions();
+}
+
+function updatePagination(start, end) {
+    const info = document.getElementById('pagination-info');
+    info.textContent = `Showing ${start}-${end} of ${filteredRecords.length} records`;
+
+    // For now, pagination is handled server-side
+    // Could be enhanced with client-side pagination if needed
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function filterRecords() {
+    // Trigger reload with filters
+    currentPage = 1;
+    loadVectorStoreRecords();
+}
+
+function sortRecords() {
+    // Trigger reload with new sort
+    currentPage = 1;
+    loadVectorStoreRecords();
+}
+
+function toggleRecordSelection(chunkId, sourceHash, checked) {
+    const key = `${sourceHash}:${chunkId}`;
+    if (checked) {
+        selectedRecords.add(key);
+    } else {
+        selectedRecords.delete(key);
+    }
+    updateBulkActions();
+}
+
+function toggleAllRecords(checked) {
+    const checkboxes = document.querySelectorAll('.record-checkbox');
+    selectedRecords.clear();
+
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            const key = `${cb.dataset.sourceHash}:${cb.value}`;
+            selectedRecords.add(key);
+        }
+    });
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const deleteBtn = document.getElementById('delete-selected-btn');
+    const selectAllBtn = document.getElementById('select-all-btn');
+
+    if (selectedRecords.size > 0) {
+        deleteBtn.style.display = 'inline-block';
+        selectAllBtn.textContent = 'Clear Selection';
+        selectAllBtn.onclick = clearSelection;
+    } else {
+        deleteBtn.style.display = 'none';
+        selectAllBtn.textContent = 'Select All';
+        selectAllBtn.onclick = selectAllRecords;
+    }
+}
+
+function selectAllRecords() {
+    document.getElementById('select-all-checkbox').checked = true;
+    toggleAllRecords(true);
+}
+
+function clearSelection() {
+    document.getElementById('select-all-checkbox').checked = false;
+    toggleAllRecords(false);
+}
+
+// View record details
+function viewRecord(record) {
+    currentViewRecord = record;
+
+    // Populate chunk data tab
+    document.getElementById('view-chunk-id').value = record.chunk_id || '';
+    document.getElementById('view-source-hash').value = record.source_hash || '';
+    document.getElementById('view-source-file').value = record.source_file || '';
+    document.getElementById('view-stage').value = record.stage || '';
+    document.getElementById('view-environment').value = record.environment || '';
+    document.getElementById('view-content').value = record.content_full || record.content || '';
+
+    // Populate vector data tab
+    document.getElementById('view-vector-id').value = record.vector_id || 'N/A';
+    document.getElementById('view-embedding-model').value = record.embedding_model || 'N/A';
+
+    if (record.embedding && record.has_embedding) {
+        try {
+            // Convert bytes to float array representation
+            const embeddingDisplay = '[Binary data - ' + (record.embedding.length || 0) + ' bytes]';
+            document.getElementById('view-embedding').value = embeddingDisplay;
+            document.getElementById('view-vector-dimensions').textContent = 'Binary format';
+        } catch (e) {
+            document.getElementById('view-embedding').value = 'Error displaying embedding';
+            document.getElementById('view-vector-dimensions').textContent = 'Error';
+        }
+    } else {
+        document.getElementById('view-embedding').value = 'No embedding data';
+        document.getElementById('view-vector-dimensions').textContent = 'N/A';
+    }
+
+    // Populate metadata tab
+    document.getElementById('view-loaded-at').value = record.loaded_at ? new Date(record.loaded_at).toLocaleString() : 'N/A';
+    document.getElementById('view-updated-at').value = record.updated_at ? new Date(record.updated_at).toLocaleString() : 'N/A';
+
+    try {
+        const payloadJson = record.payload ? JSON.stringify(JSON.parse(record.payload), null, 2) : 'No metadata';
+        document.getElementById('view-payload').textContent = payloadJson;
+    } catch (e) {
+        document.getElementById('view-payload').textContent = record.payload || 'No metadata';
+    }
+
+    // Show modal
+    new bootstrap.Modal(document.getElementById('viewRecordModal')).show();
+}
+
+function editRecordFromView() {
+    bootstrap.Modal.getInstance(document.getElementById('viewRecordModal')).hide();
+    editRecord(currentViewRecord);
+}
+
+// Edit record
+function editRecord(record) {
+    document.getElementById('recordModalTitle').textContent = 'Edit Vector Store Record';
+    document.getElementById('edit-mode').value = 'edit';
+    document.getElementById('original-chunk-id').value = record.chunk_id;
+    document.getElementById('original-source-hash').value = record.source_hash;
+
+    // Populate form
+    document.getElementById('edit-chunk-id').value = record.chunk_id || '';
+    document.getElementById('edit-chunk-id').disabled = true; // Primary key can't change
+    document.getElementById('edit-source-hash').value = record.source_hash || '';
+    document.getElementById('edit-source-hash').disabled = true; // Primary key can't change
+    document.getElementById('edit-environment').value = record.environment || currentEnvironment;
+    document.getElementById('edit-environment').disabled = true; // Primary key can't change
+    document.getElementById('edit-source-file').value = record.source_file || '';
+    document.getElementById('edit-stage').value = record.stage || 'pass_d';
+    document.getElementById('edit-content').value = record.content_full || record.content || '';
+    document.getElementById('edit-vector-id').value = record.vector_id || '';
+    document.getElementById('edit-embedding-model').value = record.embedding_model || '';
+    document.getElementById('edit-embedding').value = ''; // Don't populate binary embedding
+    document.getElementById('edit-payload').value = record.payload || '';
+
+    new bootstrap.Modal(document.getElementById('recordModal')).show();
+}
+
+// Create new record
+function createRecord() {
+    document.getElementById('recordModalTitle').textContent = 'Create Vector Store Record';
+    document.getElementById('recordForm').reset();
+    document.getElementById('edit-mode').value = 'create';
+
+    // Enable all fields for create
+    document.getElementById('edit-chunk-id').disabled = false;
+    document.getElementById('edit-source-hash').disabled = false;
+    document.getElementById('edit-environment').disabled = false;
+    document.getElementById('edit-environment').value = currentEnvironment;
+
+    new bootstrap.Modal(document.getElementById('recordModal')).show();
+}
+
+// Save record (create or update)
+async function saveRecord() {
+    const form = document.getElementById('recordForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const mode = document.getElementById('edit-mode').value;
+    const isEdit = mode === 'edit';
+
+    const recordData = {
+        chunk_id: document.getElementById('edit-chunk-id').value,
+        source_hash: document.getElementById('edit-source-hash').value,
+        environment: document.getElementById('edit-environment').value,
+        source_file: document.getElementById('edit-source-file').value,
+        stage: document.getElementById('edit-stage').value,
+        content: document.getElementById('edit-content').value,
+        vector_id: document.getElementById('edit-vector-id').value,
+        embedding_model: document.getElementById('edit-embedding-model').value,
+        embedding: document.getElementById('edit-embedding').value,
+        payload: document.getElementById('edit-payload').value
+    };
+
+    try {
+        AdminUtils.showToast(isEdit ? 'Updating record...' : 'Creating record...', 'info');
+
+        let response;
+        if (isEdit) {
+            const originalSourceHash = document.getElementById('original-source-hash').value;
+            const originalChunkId = document.getElementById('original-chunk-id').value;
+
+            response = await fetch(`/api/admin/vector-store/record/${currentEnvironment}/${encodeURIComponent(originalSourceHash)}/${encodeURIComponent(originalChunkId)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(recordData)
+            });
+        } else {
+            response = await fetch('/api/admin/vector-store/records', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(recordData)
+            });
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        AdminUtils.showToast(isEdit ? 'Record updated successfully' : 'Record created successfully', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('recordModal')).hide();
+
+        // Refresh the list
+        await loadVectorStoreRecords();
+        await loadVectorStoreStats();
+
+    } catch (error) {
+        console.error('Failed to save record:', error);
+        AdminUtils.showToast(`Failed to save record: ${error.message}`, 'danger');
+    }
+}
+
+// Delete single record
+async function deleteRecord(chunkId, sourceHash) {
+    if (!confirm(`Delete record "${chunkId}"?`)) return;
+
+    try {
+        AdminUtils.showToast('Deleting record...', 'info');
+
+        const response = await fetch(`/api/admin/vector-store/record/${currentEnvironment}/${encodeURIComponent(sourceHash)}/${encodeURIComponent(chunkId)}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        AdminUtils.showToast('Record deleted successfully', 'success');
+        await loadVectorStoreRecords();
+        await loadVectorStoreStats();
+
+    } catch (error) {
+        console.error('Failed to delete record:', error);
+        AdminUtils.showToast('Failed to delete record', 'danger');
+    }
+}
+
+// Bulk delete selected records
+async function deleteSelectedRecords() {
+    if (selectedRecords.size === 0) return;
+
+    if (!confirm(`Delete ${selectedRecords.size} selected record(s)?`)) return;
+
+    try {
+        AdminUtils.showToast('Deleting records...', 'info');
+
+        const recordsToDelete = Array.from(selectedRecords).map(key => {
+            const [source_hash, chunk_id] = key.split(':');
+            return { source_hash, chunk_id };
+        });
+
+        const response = await fetch('/api/admin/vector-store/bulk-delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                environment: currentEnvironment,
+                records: recordsToDelete
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        AdminUtils.showToast(`Deleted ${result.deleted_count} records`, 'success');
+
+        selectedRecords.clear();
+        await loadVectorStoreRecords();
+        await loadVectorStoreStats();
+
+    } catch (error) {
+        console.error('Failed to bulk delete records:', error);
+        AdminUtils.showToast('Failed to delete records', 'danger');
+    }
+}
+
+function bulkDeleteRecords() {
+    deleteSelectedRecords();
+}
+
+// Environment selector change handler
+function loadVectorStore() {
+    currentEnvironment = document.getElementById('environment-selector').value;
+    currentPage = 1;
+    refreshVectorStore();
+}
+</script>
+{% endblock %}

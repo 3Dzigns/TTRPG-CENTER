@@ -1,0 +1,1035 @@
+{% extends "base.html" %}
+
+{% block title %}Neo4j Graph Explorer - TTRPG Center Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Neo4j Graph Explorer</h1>
+        <p class="text-muted small mb-0">
+            <i class="bi bi-diagram-3 me-1"></i>
+            Explore document graph structure, nodes, and relationships
+        </p>
+    </div>
+    <div class="btn-group" role="group">
+        <select class="form-select" id="environment-selector" onchange="switchEnvironment(this.value)">
+            <option value="dev" selected>Development</option>
+            <option value="test">Testing</option>
+            <option value="prod">Production</option>
+        </select>
+        <button class="btn btn-outline-primary" onclick="refreshCurrentTab()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Statistics Dashboard -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-primary" id="total-nodes">--</div>
+                <div class="metric-label">Total Nodes</div>
+                <div class="text-muted small mt-1">
+                    <span id="chunk-nodes">--</span> Chunks • <span id="term-nodes">--</span> Terms
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-success" id="total-relationships">--</div>
+                <div class="metric-label">Total Relationships</div>
+                <div class="text-muted small mt-1" id="rel-breakdown">--</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-info" id="total-sources">--</div>
+                <div class="metric-label">Sources in Graph</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="metric-value text-warning" id="total-jobs">--</div>
+                <div class="metric-label">Jobs in Graph</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tab Navigation -->
+<ul class="nav nav-tabs mb-4" id="graphTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="nodes-tab" data-bs-toggle="tab" data-bs-target="#nodes-pane" type="button" role="tab">
+            <i class="bi bi-circle me-1"></i>Nodes
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="relationships-tab" data-bs-toggle="tab" data-bs-target="#relationships-pane" type="button" role="tab">
+            <i class="bi bi-arrow-left-right me-1"></i>Relationships
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="visualization-tab" data-bs-toggle="tab" data-bs-target="#visualization-pane" type="button" role="tab">
+            <i class="bi bi-diagram-3 me-1"></i>Visualization
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="query-tab" data-bs-toggle="tab" data-bs-target="#query-pane" type="button" role="tab">
+            <i class="bi bi-code-slash me-1"></i>Query Builder
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="graphTabContent">
+    <!-- Nodes Tab -->
+    <div class="tab-pane fade show active" id="nodes-pane" role="tabpanel">
+        <!-- Filters -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-3">
+                        <select class="form-select" id="node-label-filter" onchange="filterNodes()">
+                            <option value="">All Node Types</option>
+                            <option value="Chunk">Chunks</option>
+                            <option value="Term">Terms</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="node-source-filter" onchange="filterNodes()">
+                            <option value="">All Sources</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="node-job-filter" onchange="filterNodes()">
+                            <option value="">All Jobs</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="node-sort" onchange="filterNodes()">
+                            <option value="created_at_desc">Newest First</option>
+                            <option value="created_at_asc">Oldest First</option>
+                            <option value="id_asc">ID (A-Z)</option>
+                            <option value="id_desc">ID (Z-A)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nodes Table -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-circle me-2"></i>Graph Nodes</h5>
+            </div>
+            <div class="card-body">
+                <div id="nodes-loading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2">Loading nodes...</p>
+                </div>
+                <div id="nodes-empty" class="text-center text-muted py-4" style="display:none;">
+                    <i class="bi bi-circle display-4 mb-2"></i>
+                    <p>No nodes found.</p>
+                </div>
+                <div class="table-responsive" id="nodes-table-container" style="display:none;">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Node ID</th>
+                                <th>Type</th>
+                                <th>Details</th>
+                                <th>Source File</th>
+                                <th>Page</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nodes-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <div class="text-muted small" id="nodes-pagination-info">Showing 0-0 of 0 nodes</div>
+                    <nav>
+                        <ul class="pagination pagination-sm mb-0" id="nodes-pagination-controls"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Relationships Tab -->
+    <div class="tab-pane fade" id="relationships-pane" role="tabpanel">
+        <!-- Filters -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <select class="form-select" id="rel-type-filter" onchange="filterRelationships()">
+                            <option value="">All Relationship Types</option>
+                            <option value="MENTIONS">MENTIONS</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="rel-source-filter" onchange="filterRelationships()">
+                            <option value="">All Sources</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="rel-job-filter" onchange="filterRelationships()">
+                            <option value="">All Jobs</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Relationships Table -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>Graph Relationships</h5>
+            </div>
+            <div class="card-body">
+                <div id="rels-loading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2">Loading relationships...</p>
+                </div>
+                <div id="rels-empty" class="text-center text-muted py-4" style="display:none;">
+                    <i class="bi bi-arrow-left-right display-4 mb-2"></i>
+                    <p>No relationships found.</p>
+                </div>
+                <div class="table-responsive" id="rels-table-container" style="display:none;">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Source Node</th>
+                                <th>Relationship</th>
+                                <th>Target Node</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rels-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <div class="text-muted small" id="rels-pagination-info">Showing 0-0 of 0 relationships</div>
+                    <nav>
+                        <ul class="pagination pagination-sm mb-0" id="rels-pagination-controls"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visualization Tab -->
+    <div class="tab-pane fade" id="visualization-pane" role="tabpanel">
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-3">
+                        <select class="form-select" id="viz-job-filter">
+                            <option value="">All Jobs</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="viz-source-filter">
+                            <option value="">All Sources</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label mb-0 me-2">Node Limit:</label>
+                        <input type="range" class="form-range" id="viz-limit" min="25" max="500" value="100" step="25">
+                        <span id="viz-limit-value">100</span> nodes
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-primary w-100" onclick="loadVisualization()">
+                            <i class="bi bi-diagram-3 me-1"></i>Load Graph
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-diagram-3 me-2"></i>Graph Visualization
+                    <span class="badge bg-secondary ms-2" id="viz-node-count">0 nodes</span>
+                    <span class="badge bg-success ms-1" id="viz-edge-count">0 edges</span>
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div id="graph-container" style="height: 600px; border: 1px solid #e2e8f0;"></div>
+            </div>
+            <div class="card-footer">
+                <small class="text-muted">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span class="badge" style="background: #5DADE2;">■</span> Chunk Nodes •
+                    <span class="badge" style="background: #52BE80;">■</span> Term Nodes •
+                    Click nodes for details • Drag to rearrange
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Query Builder Tab -->
+    <div class="tab-pane fade" id="query-pane" role="tabpanel">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-code-slash me-2"></i>Custom Cypher Query</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Query Templates</label>
+                    <select class="form-select" id="query-template" onchange="loadQueryTemplate(this.value)">
+                        <option value="">Select a template...</option>
+                        <option value="all_chunks">All chunks for a source file</option>
+                        <option value="term_mentions">Terms mentioned in chunks</option>
+                        <option value="most_connected">Most connected terms</option>
+                        <option value="document_hierarchy">Document hierarchy</option>
+                        <option value="custom">Custom query</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cypher Query (Read-Only)</label>
+                    <textarea class="form-control font-monospace" id="cypher-query" rows="8" placeholder="MATCH (n) RETURN n LIMIT 10"></textarea>
+                    <small class="text-muted">Only SELECT/MATCH/RETURN queries are allowed for safety.</small>
+                </div>
+                <button class="btn btn-primary" onclick="executeQuery()">
+                    <i class="bi bi-play-fill me-1"></i>Execute Query
+                </button>
+                <button class="btn btn-outline-secondary" onclick="clearQuery()">
+                    <i class="bi bi-x me-1"></i>Clear
+                </button>
+            </div>
+        </div>
+
+        <div class="card" id="query-results-card" style="display:none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-table me-2"></i>Query Results</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="exportQueryResults()">
+                    <i class="bi bi-download me-1"></i>Export JSON
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-success" id="query-success" style="display:none;"></div>
+                <div class="alert alert-danger" id="query-error" style="display:none;"></div>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead id="query-results-head"></thead>
+                        <tbody id="query-results-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Node Detail Modal -->
+<div class="modal fade" id="nodeDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Node Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="node-detail-content">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Relationship Detail Modal -->
+<div class="modal fade" id="relationshipDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Relationship Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="rel-detail-content">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>
+<style>
+    #graph-container {
+        background: #f8fafc;
+    }
+    .font-monospace {
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+    }
+    .node-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .node-badge-chunk { background: #EBF5FB; color: #21618C; }
+    .node-badge-term { background: #E8F8F5; color: #117864; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Global state
+let currentEnvironment = 'dev';
+let currentPage = {
+    nodes: 1,
+    relationships: 1
+};
+let currentFilters = {
+    nodes: { label: '', source_file: '', job_id: '', sort_by: 'created_at_desc' },
+    relationships: { rel_type: '', source_file: '', job_id: '' }
+};
+let graphNetwork = null;
+let queryResults = [];
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    loadStatistics();
+    loadNodes();
+
+    // Tab change listeners
+    document.getElementById('relationships-tab').addEventListener('shown.bs.tab', function() {
+        loadRelationships();
+    });
+});
+
+// === Statistics ===
+async function loadStatistics() {
+    try {
+        const response = await fetch(`/api/admin/neo4j/stats/${currentEnvironment}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            document.getElementById('total-nodes').textContent = data.total_nodes.toLocaleString();
+            document.getElementById('total-relationships').textContent = data.total_relationships.toLocaleString();
+
+            // Node breakdown
+            const chunkCount = data.nodes.find(n => n.type === 'Chunk')?.count || 0;
+            const termCount = data.nodes.find(n => n.type === 'Term')?.count || 0;
+            document.getElementById('chunk-nodes').textContent = chunkCount.toLocaleString();
+            document.getElementById('term-nodes').textContent = termCount.toLocaleString();
+
+            // Relationship breakdown
+            const relBreakdown = data.relationships.map(r => `${r.type}: ${r.count}`).join(' • ');
+            document.getElementById('rel-breakdown').textContent = relBreakdown || 'None';
+
+            // Get unique sources and jobs (approximate from node query)
+            const nodesResponse = await fetch(`/api/admin/neo4j/nodes/${currentEnvironment}?limit=1000`);
+            const nodesData = await nodesResponse.json();
+            if (nodesData.status === 'success') {
+                const sources = new Set(nodesData.nodes.map(n => n.source_file).filter(s => s));
+                const jobs = new Set(nodesData.nodes.map(n => n.job_id).filter(j => j));
+                document.getElementById('total-sources').textContent = sources.size;
+                document.getElementById('total-jobs').textContent = jobs.size;
+
+                // Populate filter dropdowns
+                populateSourceFilters(Array.from(sources));
+                populateJobFilters(Array.from(jobs));
+            }
+        }
+    } catch (error) {
+        console.error('Error loading statistics:', error);
+        AdminUtils.showToast('Failed to load statistics', 'error');
+    }
+}
+
+function populateSourceFilters(sources) {
+    const nodeSourceFilter = document.getElementById('node-source-filter');
+    const relSourceFilter = document.getElementById('rel-source-filter');
+    const vizSourceFilter = document.getElementById('viz-source-filter');
+
+    [nodeSourceFilter, relSourceFilter, vizSourceFilter].forEach(filter => {
+        filter.innerHTML = '<option value="">All Sources</option>';
+        sources.forEach(source => {
+            const option = document.createElement('option');
+            option.value = source;
+            option.textContent = source;
+            filter.appendChild(option);
+        });
+    });
+}
+
+function populateJobFilters(jobs) {
+    const nodeJobFilter = document.getElementById('node-job-filter');
+    const relJobFilter = document.getElementById('rel-job-filter');
+    const vizJobFilter = document.getElementById('viz-job-filter');
+
+    [nodeJobFilter, relJobFilter, vizJobFilter].forEach(filter => {
+        filter.innerHTML = '<option value="">All Jobs</option>';
+        jobs.forEach(job => {
+            const option = document.createElement('option');
+            option.value = job;
+            option.textContent = job;
+            filter.appendChild(option);
+        });
+    });
+}
+
+// === Nodes Tab ===
+async function loadNodes() {
+    showLoading('nodes');
+
+    const params = new URLSearchParams({
+        page: currentPage.nodes,
+        limit: 25,
+        ...currentFilters.nodes
+    });
+
+    // Remove empty filters
+    for (const [key, value] of params.entries()) {
+        if (!value) params.delete(key);
+    }
+
+    try {
+        const response = await fetch(`/api/admin/neo4j/nodes/${currentEnvironment}?${params.toString()}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            displayNodes(data.nodes);
+            updateNodesPagination(data.pagination);
+        } else {
+            showEmpty('nodes');
+        }
+    } catch (error) {
+        console.error('Error loading nodes:', error);
+        showEmpty('nodes');
+        AdminUtils.showToast('Failed to load nodes', 'error');
+    }
+}
+
+function displayNodes(nodes) {
+    const tbody = document.getElementById('nodes-table-body');
+    tbody.innerHTML = '';
+
+    if (nodes.length === 0) {
+        showEmpty('nodes');
+        return;
+    }
+
+    nodes.forEach(node => {
+        const row = document.createElement('tr');
+        const primaryLabel = node.labels[0] || 'Unknown';
+        const badgeClass = primaryLabel === 'Chunk' ? 'node-badge-chunk' : 'node-badge-term';
+
+        let details = '--';
+        if (primaryLabel === 'Term' && node.term) {
+            details = `<strong>${node.term}</strong>`;
+        } else if (primaryLabel === 'Chunk' && node.content_preview) {
+            details = AdminUtils.truncate(node.content_preview, 60);
+        } else if (node.chunk_id) {
+            details = node.chunk_id;
+        }
+
+        row.innerHTML = `
+            <td><code class="small">${AdminUtils.truncate(node.id, 40)}</code></td>
+            <td><span class="node-badge ${badgeClass}">${primaryLabel}</span></td>
+            <td>${details}</td>
+            <td>${node.source_file || '--'}</td>
+            <td>${node.page_number || '--'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="viewNodeDetail('${node.id.replace(/'/g, "\\'")}')">
+                    <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-info" onclick="viewRelatedNodes('${node.id.replace(/'/g, "\\'")}')">
+                    <i class="bi bi-diagram-3"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    hideLoading('nodes');
+    document.getElementById('nodes-table-container').style.display = 'block';
+}
+
+function updateNodesPagination(pagination) {
+    document.getElementById('nodes-pagination-info').textContent =
+        `Showing ${(pagination.page - 1) * pagination.limit + 1}-${Math.min(pagination.page * pagination.limit, pagination.total)} of ${pagination.total} nodes`;
+
+    const controls = document.getElementById('nodes-pagination-controls');
+    controls.innerHTML = '';
+
+    if (pagination.total_pages <= 1) return;
+
+    for (let i = 1; i <= pagination.total_pages; i++) {
+        if (i === 1 || i === pagination.total_pages || (i >= pagination.page - 2 && i <= pagination.page + 2)) {
+            const li = document.createElement('li');
+            li.className = `page-item ${i === pagination.page ? 'active' : ''}`;
+            li.innerHTML = `<a class="page-link" href="#" onclick="goToNodesPage(${i}); return false;">${i}</a>`;
+            controls.appendChild(li);
+        } else if (i === pagination.page - 3 || i === pagination.page + 3) {
+            const li = document.createElement('li');
+            li.className = 'page-item disabled';
+            li.innerHTML = '<span class="page-link">...</span>';
+            controls.appendChild(li);
+        }
+    }
+}
+
+function goToNodesPage(page) {
+    currentPage.nodes = page;
+    loadNodes();
+}
+
+function filterNodes() {
+    currentFilters.nodes.label = document.getElementById('node-label-filter').value;
+    currentFilters.nodes.source_file = document.getElementById('node-source-filter').value;
+    currentFilters.nodes.job_id = document.getElementById('node-job-filter').value;
+    currentFilters.nodes.sort_by = document.getElementById('node-sort').value;
+    currentPage.nodes = 1;
+    loadNodes();
+}
+
+// === Relationships Tab ===
+async function loadRelationships() {
+    showLoading('rels');
+
+    const params = new URLSearchParams({
+        page: currentPage.relationships,
+        limit: 25,
+        ...currentFilters.relationships
+    });
+
+    for (const [key, value] of params.entries()) {
+        if (!value) params.delete(key);
+    }
+
+    try {
+        const response = await fetch(`/api/admin/neo4j/relationships/${currentEnvironment}?${params.toString()}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            displayRelationships(data.relationships);
+            updateRelsPagination(data.pagination);
+        } else {
+            showEmpty('rels');
+        }
+    } catch (error) {
+        console.error('Error loading relationships:', error);
+        showEmpty('rels');
+        AdminUtils.showToast('Failed to load relationships', 'error');
+    }
+}
+
+function displayRelationships(relationships) {
+    const tbody = document.getElementById('rels-table-body');
+    tbody.innerHTML = '';
+
+    if (relationships.length === 0) {
+        showEmpty('rels');
+        return;
+    }
+
+    relationships.forEach(rel => {
+        const row = document.createElement('tr');
+
+        const sourceLabel = rel.source.term || rel.source.chunk_id || AdminUtils.truncate(rel.source.id, 20);
+        const targetLabel = rel.target.term || rel.target.chunk_id || AdminUtils.truncate(rel.target.id, 20);
+        const sourceBadge = rel.source.label === 'Term' ? 'node-badge-term' : 'node-badge-chunk';
+        const targetBadge = rel.target.label === 'Term' ? 'node-badge-term' : 'node-badge-chunk';
+
+        row.innerHTML = `
+            <td>
+                <span class="node-badge ${sourceBadge}">${rel.source.label}</span><br>
+                <small>${sourceLabel}</small>
+            </td>
+            <td class="text-center">
+                <i class="bi bi-arrow-right text-primary"></i><br>
+                <span class="badge bg-secondary">${rel.relationship.type}</span>
+            </td>
+            <td>
+                <span class="node-badge ${targetBadge}">${rel.target.label}</span><br>
+                <small>${targetLabel}</small>
+            </td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="viewNodeDetail('${rel.source.id.replace(/'/g, "\\'")}')">
+                    View Source
+                </button>
+                <button class="btn btn-sm btn-outline-info" onclick="viewNodeDetail('${rel.target.id.replace(/'/g, "\\'")}')">
+                    View Target
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    hideLoading('rels');
+    document.getElementById('rels-table-container').style.display = 'block';
+}
+
+function updateRelsPagination(pagination) {
+    document.getElementById('rels-pagination-info').textContent =
+        `Showing ${(pagination.page - 1) * pagination.limit + 1}-${Math.min(pagination.page * pagination.limit, pagination.total)} of ${pagination.total} relationships`;
+
+    const controls = document.getElementById('rels-pagination-controls');
+    controls.innerHTML = '';
+
+    if (pagination.total_pages <= 1) return;
+
+    for (let i = 1; i <= pagination.total_pages; i++) {
+        if (i === 1 || i === pagination.total_pages || (i >= pagination.page - 2 && i <= pagination.page + 2)) {
+            const li = document.createElement('li');
+            li.className = `page-item ${i === pagination.page ? 'active' : ''}`;
+            li.innerHTML = `<a class="page-link" href="#" onclick="goToRelsPage(${i}); return false;">${i}</a>`;
+            controls.appendChild(li);
+        } else if (i === pagination.page - 3 || i === pagination.page + 3) {
+            const li = document.createElement('li');
+            li.className = 'page-item disabled';
+            li.innerHTML = '<span class="page-link">...</span>';
+            controls.appendChild(li);
+        }
+    }
+}
+
+function goToRelsPage(page) {
+    currentPage.relationships = page;
+    loadRelationships();
+}
+
+function filterRelationships() {
+    currentFilters.relationships.rel_type = document.getElementById('rel-type-filter').value;
+    currentFilters.relationships.source_file = document.getElementById('rel-source-filter').value;
+    currentFilters.relationships.job_id = document.getElementById('rel-job-filter').value;
+    currentPage.relationships = 1;
+    loadRelationships();
+}
+
+// === Visualization Tab ===
+document.getElementById('viz-limit').addEventListener('input', function() {
+    document.getElementById('viz-limit-value').textContent = this.value;
+});
+
+async function loadVisualization() {
+    const jobId = document.getElementById('viz-job-filter').value;
+    const sourceFile = document.getElementById('viz-source-filter').value;
+    const limit = document.getElementById('viz-limit').value;
+
+    const params = new URLSearchParams({ limit });
+    if (jobId) params.set('job_id', jobId);
+    if (sourceFile) params.set('source_file', sourceFile);
+
+    try {
+        const response = await fetch(`/api/admin/neo4j/graph-data/${currentEnvironment}?${params.toString()}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            renderGraph(data.nodes, data.edges);
+            document.getElementById('viz-node-count').textContent = `${data.node_count} nodes`;
+            document.getElementById('viz-edge-count').textContent = `${data.edge_count} edges`;
+        } else {
+            AdminUtils.showToast('Failed to load graph data', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading visualization:', error);
+        AdminUtils.showToast('Failed to load graph visualization', 'error');
+    }
+}
+
+function renderGraph(nodes, edges) {
+    const container = document.getElementById('graph-container');
+
+    // Configure node appearance based on group
+    const nodesDataset = new vis.DataSet(nodes.map(node => ({
+        ...node,
+        color: node.group === 'Chunk' ? '#5DADE2' : '#52BE80',
+        font: { size: 12, color: '#1f2937' },
+        shape: node.group === 'Term' ? 'box' : 'ellipse'
+    })));
+
+    const edgesDataset = new vis.DataSet(edges.map(edge => ({
+        ...edge,
+        color: { color: '#94A3B8' },
+        font: { size: 10, color: '#64748b', align: 'top' }
+    })));
+
+    const data = { nodes: nodesDataset, edges: edgesDataset };
+
+    const options = {
+        nodes: {
+            borderWidth: 2,
+            borderWidthSelected: 3,
+            size: 25,
+            shadow: true
+        },
+        edges: {
+            width: 2,
+            shadow: true,
+            smooth: {
+                type: 'cubicBezier',
+                forceDirection: 'horizontal'
+            }
+        },
+        physics: {
+            enabled: true,
+            barnesHut: {
+                gravitationalConstant: -8000,
+                centralGravity: 0.3,
+                springLength: 120,
+                springConstant: 0.04
+            },
+            stabilization: {
+                iterations: 150
+            }
+        },
+        interaction: {
+            hover: true,
+            tooltipDelay: 100,
+            hideEdgesOnDrag: true
+        }
+    };
+
+    if (graphNetwork) {
+        graphNetwork.destroy();
+    }
+
+    graphNetwork = new vis.Network(container, data, options);
+
+    // Node click event
+    graphNetwork.on('click', function(params) {
+        if (params.nodes.length > 0) {
+            const nodeId = params.nodes[0];
+            viewNodeDetail(nodeId);
+        }
+    });
+}
+
+// === Node Detail Modal ===
+async function viewNodeDetail(nodeId) {
+    const modal = new bootstrap.Modal(document.getElementById('nodeDetailModal'));
+    const content = document.getElementById('node-detail-content');
+    content.innerHTML = '<div class="spinner-border text-primary" role="status"></div>';
+    modal.show();
+
+    try {
+        const response = await fetch(`/api/admin/neo4j/node/${currentEnvironment}/${encodeURIComponent(nodeId)}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            const node = data.node;
+            const rels = data.relationships;
+
+            let html = '<h6>Node Properties</h6><table class="table table-sm">';
+            for (const [key, value] of Object.entries(node)) {
+                if (key === 'labels') {
+                    html += `<tr><td><strong>${key}</strong></td><td>${value.join(', ')}</td></tr>`;
+                } else if (typeof value === 'string' || typeof value === 'number') {
+                    html += `<tr><td><strong>${key}</strong></td><td>${value}</td></tr>`;
+                } else if (value) {
+                    html += `<tr><td><strong>${key}</strong></td><td>${JSON.stringify(value)}</td></tr>`;
+                }
+            }
+            html += '</table>';
+
+            html += '<h6 class="mt-3">Relationships</h6>';
+            html += `<p class="text-muted">Incoming: ${rels.total_incoming} • Outgoing: ${rels.total_outgoing}</p>`;
+
+            if (rels.incoming.length > 0) {
+                html += '<strong>Incoming:</strong><ul>';
+                rels.incoming.forEach(r => {
+                    html += `<li>${r.type} (${r.count})</li>`;
+                });
+                html += '</ul>';
+            }
+
+            if (rels.outgoing.length > 0) {
+                html += '<strong>Outgoing:</strong><ul>';
+                rels.outgoing.forEach(r => {
+                    html += `<li>${r.type} (${r.count})</li>`;
+                });
+                html += '</ul>';
+            }
+
+            content.innerHTML = html;
+        } else {
+            content.innerHTML = '<div class="alert alert-danger">Failed to load node details</div>';
+        }
+    } catch (error) {
+        console.error('Error loading node detail:', error);
+        content.innerHTML = '<div class="alert alert-danger">Error loading node details</div>';
+    }
+}
+
+async function viewRelatedNodes(nodeId) {
+    try {
+        const response = await fetch(`/api/admin/neo4j/related/${currentEnvironment}/${encodeURIComponent(nodeId)}?max_depth=2`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            AdminUtils.showToast(`Found ${data.count} related nodes`, 'success');
+            // Could render in modal or visualizaton
+        }
+    } catch (error) {
+        console.error('Error loading related nodes:', error);
+        AdminUtils.showToast('Failed to load related nodes', 'error');
+    }
+}
+
+// === Query Builder ===
+function loadQueryTemplate(templateId) {
+    const textarea = document.getElementById('cypher-query');
+    const templates = {
+        'all_chunks': `MATCH (c:Chunk {source_file: 'your-source-file.pdf'})
+RETURN c.chunk_id, c.content_preview, c.page_number
+ORDER BY c.page_number
+LIMIT 50`,
+        'term_mentions': `MATCH (t:Term)-[r:MENTIONS]->(c:Chunk)
+WHERE t.term = 'your-term-here'
+RETURN t.term, c.chunk_id, c.content_preview, c.page_number
+ORDER BY c.page_number`,
+        'most_connected': `MATCH (t:Term)-[r:MENTIONS]->()
+RETURN t.term, t.category, count(r) AS mentions
+ORDER BY mentions DESC
+LIMIT 20`,
+        'document_hierarchy': `MATCH (c:Chunk)
+RETURN c.source_file, c.doc_id, c.part_id, c.section_id, count(c) AS chunks
+ORDER BY c.source_file, c.doc_id`
+    };
+
+    if (templates[templateId]) {
+        textarea.value = templates[templateId];
+    }
+}
+
+async function executeQuery() {
+    const query = document.getElementById('cypher-query').value.trim();
+    if (!query) {
+        AdminUtils.showToast('Please enter a query', 'warning');
+        return;
+    }
+
+    document.getElementById('query-success').style.display = 'none';
+    document.getElementById('query-error').style.display = 'none';
+
+    try {
+        const response = await fetch(`/api/admin/neo4j/query/${currentEnvironment}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            queryResults = data.records;
+            displayQueryResults(data.columns, data.records, data.count);
+            document.getElementById('query-success').textContent = `Query executed successfully. Found ${data.count} records.`;
+            document.getElementById('query-success').style.display = 'block';
+        } else {
+            document.getElementById('query-error').textContent = data.detail || 'Query failed';
+            document.getElementById('query-error').style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error executing query:', error);
+        document.getElementById('query-error').textContent = 'Error executing query';
+        document.getElementById('query-error').style.display = 'block';
+    }
+}
+
+function displayQueryResults(columns, records, count) {
+    document.getElementById('query-results-card').style.display = 'block';
+
+    const thead = document.getElementById('query-results-head');
+    const tbody = document.getElementById('query-results-body');
+
+    thead.innerHTML = '<tr>' + columns.map(col => `<th>${col}</th>`).join('') + '</tr>';
+
+    tbody.innerHTML = '';
+    records.slice(0, 100).forEach(record => {
+        const row = document.createElement('tr');
+        columns.forEach(col => {
+            const cell = document.createElement('td');
+            const value = record[col];
+            if (typeof value === 'object') {
+                cell.textContent = JSON.stringify(value);
+            } else {
+                cell.textContent = value !== null && value !== undefined ? value : '--';
+            }
+            row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+    });
+
+    if (count > 100) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="${columns.length}" class="text-center text-muted"><em>Showing first 100 of ${count} results</em></td>`;
+        tbody.appendChild(row);
+    }
+}
+
+function exportQueryResults() {
+    if (queryResults.length === 0) {
+        AdminUtils.showToast('No results to export', 'warning');
+        return;
+    }
+
+    const dataStr = JSON.stringify(queryResults, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `neo4j-query-results-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function clearQuery() {
+    document.getElementById('cypher-query').value = '';
+    document.getElementById('query-results-card').style.display = 'none';
+}
+
+// === Utility Functions ===
+function switchEnvironment(env) {
+    currentEnvironment = env;
+    currentPage = { nodes: 1, relationships: 1 };
+    loadStatistics();
+    loadNodes();
+}
+
+function refreshCurrentTab() {
+    const activeTab = document.querySelector('.nav-link.active').id;
+    if (activeTab === 'nodes-tab') loadNodes();
+    else if (activeTab === 'relationships-tab') loadRelationships();
+    else if (activeTab === 'visualization-tab') loadVisualization();
+}
+
+function showLoading(section) {
+    document.getElementById(`${section}-loading`).style.display = 'block';
+    document.getElementById(`${section}-empty`).style.display = 'none';
+    document.getElementById(`${section}-table-container`).style.display = 'none';
+}
+
+function hideLoading(section) {
+    document.getElementById(`${section}-loading`).style.display = 'none';
+}
+
+function showEmpty(section) {
+    document.getElementById(`${section}-loading`).style.display = 'none';
+    document.getElementById(`${section}-empty`).style.display = 'block';
+    document.getElementById(`${section}-table-container`).style.display = 'none';
+}
+</script>
+{% endblock %}
