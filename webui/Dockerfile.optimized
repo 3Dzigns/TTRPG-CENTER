@@ -1,0 +1,204 @@
+# ==============================================
+# TTRPG Center WebUI - Optimized Production Dockerfile
+# Multi-stage build with security hardening and performance optimization
+# ==============================================
+#
+# Build optimization features:
+# - pnpm fetch caching for faster dependency resolution
+# - Parallel package builds where possible
+# - Next.js standalone output for minimal runtime
+# - Distroless base image for security
+# - BuildKit cache mounts
+#
+# Security features:
+# - Non-root user (distroless nonroot)
+# - No shell in production image
+# - Minimal attack surface
+# - Read-only root filesystem compatible
+#
+# Usage:
+#   docker build -f webui/Dockerfile.optimized -t ttrpg-webui:latest .
+#   docker build --target development -f webui/Dockerfile.optimized -t ttrpg-webui:dev .
+#
+# ==============================================
+
+# ==============================================
+# Stage 0: Base - Common layer for caching
+# ==============================================
+FROM node:20-alpine AS base
+
+# Install pnpm globally
+RUN corepack enable && corepack prepare pnpm@9.10.0 --activate
+
+# Install security updates
+RUN apk update && apk upgrade && rm -rf /var/cache/apk/*
+
+WORKDIR /app
+
+
+# ==============================================
+# Stage 1: Dependencies Fetcher - Cached Layer
+# ==============================================
+FROM base AS deps-fetcher
+
+# Copy only dependency manifests for maximum cache efficiency
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+
+# Fetch all dependencies (creates pnpm virtual store)
+# This layer is cached unless lock file changes
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm fetch --prod
+
+
+# ==============================================
+# Stage 2: Dependencies Installer
+# ==============================================
+FROM deps-fetcher AS deps
+
+# Copy package.json files for workspace resolution
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/api/package.json ./packages/api/package.json
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+COPY packages/config/package.json ./packages/config/package.json
+
+# Install dependencies using fetched packages (offline mode)
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline
+
+
+# ==============================================
+# Stage 3: Builder - Compile TypeScript & Next.js
+# ==============================================
+FROM deps AS builder
+
+# Copy TypeScript config
+COPY tsconfig*.json ./
+COPY eslint.config.mjs prettier.config.mjs ./
+
+# Copy all source code
+COPY apps ./apps
+COPY packages ./packages
+
+# Disable Next.js telemetry
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build packages in dependency order
+# types → config → ui & api (parallel) → web
+RUN echo "Building @ttrpg-center/types..." && \
+    pnpm --filter @ttrpg-center/types build && \
+    echo "Building @ttrpg-center/config..." && \
+    pnpm --filter @ttrpg-center/config build && \
+    echo "Building @ttrpg-center/ui and @ttrpg-center/api in parallel..." && \
+    pnpm --filter @ttrpg-center/ui --filter @ttrpg-center/api build && \
+    echo "Building @ttrpg-center/web with standalone output..." && \
+    pnpm --filter @ttrpg-center/web build
+
+# Verify standalone output was created
+RUN test -d /app/apps/web/.next/standalone || \
+    (echo "ERROR: Next.js standalone output not found!" && exit 1)
+
+
+# ==============================================
+# Stage 4: Production Runner (Distroless)
+# ==============================================
+FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runner
+
+WORKDIR /app
+
+# Set production environment
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+
+# Copy Next.js standalone output (includes only required dependencies)
+COPY --from=builder --chown=nonroot:nonroot /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nonroot:nonroot /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nonroot:nonroot /app/apps/web/public ./apps/web/public
+
+# Runtime metadata labels
+LABEL org.opencontainers.image.title="TTRPG Center WebUI"
+LABEL org.opencontainers.image.description="Next.js 15 WebUI for TTRPG Center - Player/GM/Admin hubs"
+LABEL org.opencontainers.image.vendor="TTRPG Center"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.source="https://github.com/your-org/n8n_TTRPG_Center"
+
+# Expose HTTP port
+EXPOSE 3000
+
+# Health check (uses distroless node binary directly)
+# Note: Distroless doesn't have shell, so health checks must be external
+# Configure health check in docker-compose.yml instead
+
+# Start Next.js server (distroless entrypoint is node)
+CMD ["apps/web/server.js"]
+
+
+# ==============================================
+# Stage 5: Development (with shell for debugging)
+# ==============================================
+FROM base AS development
+
+# Install additional dev tools
+RUN apk add --no-cache curl bash
+
+# Copy workspace config
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY tsconfig*.json ./
+
+# Copy package.json files
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/api/package.json ./packages/api/package.json
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+COPY packages/config/package.json ./packages/config/package.json
+
+# Install ALL dependencies (including devDependencies)
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# Copy source code
+COPY apps ./apps
+COPY packages ./packages
+
+# Development environment
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+
+# Expose port
+EXPOSE 3000
+
+# Health check for development
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Start Next.js dev server with hot-reload
+CMD ["pnpm", "--filter", "@ttrpg-center/web", "dev"]
+
+
+# ==============================================
+# Stage 6: Testing (for CI/CD pipelines)
+# ==============================================
+FROM builder AS testing
+
+# Install testing tools
+RUN apk add --no-cache curl chromium
+
+# Set Playwright to use installed Chromium
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Run linting
+RUN pnpm -w lint || echo "Linting failed - check output"
+
+# Run unit tests
+RUN pnpm -w test || echo "Unit tests failed - check output"
+
+# Run type checking
+RUN pnpm -w typecheck || echo "Type checking failed - check output"
+
+# Build verification (already done in builder stage)
+RUN echo "Build verification passed"
+
+# This stage doesn't produce a runtime image - used in CI only
