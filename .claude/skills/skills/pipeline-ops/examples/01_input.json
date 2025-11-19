@@ -1,0 +1,10 @@
+{
+  "task_id": "ingestion_pipeline_operator-example",
+  "app_url": null,
+  "document_id": "doc_12345",
+  "system": "PF1E",
+  "pass": "E",
+  "db_task": null,
+  "persist": true,
+  "memory": true
+}

@@ -1,0 +1,10 @@
+{
+  "task_id": "debugging_root_cause-example",
+  "app_url": null,
+  "document_id": null,
+  "system": null,
+  "pass": null,
+  "db_task": null,
+  "persist": true,
+  "memory": true
+}

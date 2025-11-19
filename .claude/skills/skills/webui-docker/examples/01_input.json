@@ -1,0 +1,10 @@
+{
+  "task_id": "webui_operator-example",
+  "app_url": "http://localhost:3000",
+  "document_id": null,
+  "system": null,
+  "pass": null,
+  "db_task": null,
+  "persist": true,
+  "memory": true
+}
