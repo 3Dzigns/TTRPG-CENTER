@@ -1,0 +1,34 @@
+{
+  "name": "@ttrpg-center/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build needed - source only'",
+    "lint": "echo \"config package lint handled at root\"",
+    "test": "echo \"config package has no tests\""
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "default": "./index.ts"
+    },
+    "./theme": {
+      "types": "./theme.ts",
+      "default": "./theme.ts"
+    },
+    "./tailwind-preset": {
+      "types": "./tailwind.preset.ts",
+      "default": "./tailwind.preset.ts"
+    },
+    "./tailwind-types": {
+      "types": "./tailwind.types.ts",
+      "default": "./tailwind.types.ts"
+    },
+    "./tsconfig": "./tsconfig.base.json",
+    "./eslint": "./eslint.config.mjs"
+  }
+}

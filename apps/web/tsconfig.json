@@ -1,0 +1,46 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "types": [
+      "node",
+      "@playwright/test"
+    ],
+    "noEmit": true,
+    "incremental": true,
+    "jsx": "preserve",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ],
+  "references": [
+    {
+      "path": "../../packages/types"
+    },
+    {
+      "path": "../../packages/config"
+    },
+    {
+      "path": "../../packages/api"
+    },
+    {
+      "path": "../../packages/ui"
+    }
+  ]
+}

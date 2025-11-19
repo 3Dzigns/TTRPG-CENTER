@@ -1,0 +1,7 @@
+packages:
+  - apps/web
+  - packages/api
+  - packages/types
+  - packages/ui
+  - packages/config
+

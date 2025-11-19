@@ -1,0 +1,21 @@
+{
+  "name": "ttrpg-center",
+  "private": true,
+  "packageManager": "pnpm@9.10.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter apps/web dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "format": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^8.57.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "prettier": "^3.3.2",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^7.12.0"
+  }
+}

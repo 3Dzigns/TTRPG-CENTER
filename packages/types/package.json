@@ -1,0 +1,22 @@
+{
+  "name": "@ttrpg-center/types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "echo \"types package lint handled at root\"",
+    "test": "echo \"types package has no tests\""
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.2"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

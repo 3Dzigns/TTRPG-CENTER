@@ -1,0 +1,32 @@
+{
+  "name": "@ttrpg-center/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build needed - source only'",
+    "lint": "echo \"ui package lint handled at root\"",
+    "test": "echo \"ui package has no tests\""
+  },
+  "peerDependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "dependencies": {
+    "@ttrpg-center/api": "workspace:*",
+    "@ttrpg-center/types": "workspace:*",
+    "@tanstack/react-virtual": "^3.5.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "tailwindcss": "^3.4.17"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}
