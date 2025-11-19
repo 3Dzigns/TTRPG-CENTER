@@ -1,0 +1,28 @@
+﻿{
+  "name": "n8n-nodes-pdf-slice",
+  "version": "0.1.1",
+  "description": "Local PDF slicer node for n8n using pdf-lib (no external APIs).",
+  "author": "Local",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.4.0",
+    "n8n-workflow": "^1.60.0"
+  },
+  "n8n": {
+    "nodes": [
+      "dist/nodes/PdfSlice/PdfSlice.node.js"
+    ]
+  }
+}

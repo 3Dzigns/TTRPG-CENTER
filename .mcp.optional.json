@@ -1,0 +1,75 @@
+{
+  "mcpServers": {
+    "claude-flow@alpha": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "claude-flow@alpha",
+        "mcp",
+        "start"
+      ],
+      "type": "stdio",
+      "description": "Advanced coordination framework with reasoning agents",
+      "tokenCost": "~2000",
+      "usage": "Enable with: claude mcp add claude-flow@alpha --config .mcp.optional.json"
+    },
+    "ruv-swarm": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "ruv-swarm@latest",
+        "mcp",
+        "start"
+      ],
+      "type": "stdio",
+      "description": "Local swarm coordination with neural networks and DAA",
+      "tokenCost": "~15935",
+      "usage": "Enable when you need: swarm coordination, neural training, decentralized agents"
+    },
+    "flow-nexus": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "flow-nexus@latest",
+        "mcp",
+        "start"
+      ],
+      "type": "stdio",
+      "description": "Cloud-based features: sandboxes, templates, GitHub integration",
+      "tokenCost": "~59052",
+      "usage": "Enable when you need: cloud sandboxes, neural training, GitHub automation, templates"
+    },
+    "agentic-payments": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "agentic-payments@latest",
+        "mcp"
+      ],
+      "type": "stdio",
+      "description": "Payment processing and Active Mandate authorization",
+      "tokenCost": "~1000",
+      "usage": "Enable when you need: payment features, mandate authorization, Ed25519 signing"
+    }
+  },
+  "_readme": {
+    "title": "Optional MCP Servers - Heavy Features",
+    "description": "These servers are disabled by default to save ~65k tokens. Enable them when needed for specific tasks.",
+    "totalTokenCost": "~78000 tokens",
+    "enableInstructions": [
+      "Temporary enable: Set in .claude/settings.json enabledMcpjsonServers array",
+      "Permanent enable: Move server config to .mcp.json",
+      "Flag-based: Use custom flags like --with-ruv-swarm in commands"
+    ],
+    "whenToUse": {
+      "ruv-swarm": "Complex multi-agent coordination, neural network training, decentralized autonomous agents",
+      "flow-nexus": "Cloud execution, distributed neural training, GitHub automation, marketplace templates",
+      "claude-flow@alpha": "Advanced reasoning agents, ReasoningBank learning, goal-oriented planning",
+      "agentic-payments": "Payment processing, Active Mandate authorization, cryptocurrency integration"
+    }
+  }
+}

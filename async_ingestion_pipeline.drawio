@@ -1,0 +1,148 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="async-pipeline" name="Async Ingestion Pipeline">
+    <mxGraphModel dx="1480" dy="872" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="transfer_station" value="Shared Volume&#xa;/Transfer_Station" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="celery_beat" value="Celery Beat&#xa;(Scheduler)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="60" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="source_sentinel" value="Source Sentinel&#xa;(Celery Worker)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="260" y="60" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="postgres" value="Postgres&#xa;Job Registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="260" y="180" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbitmq" value="RabbitMQ&#xa;(Celery Broker)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="500" y="140" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="redis" value="Redis&#xa;(Result Backend)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="500" y="230" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingestion_engine" value="Ingestion Engine&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="260" y="320" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="unstructured_worker" value="Unstructured&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="500" y="320" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="haystack_worker" value="Haystack&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="720" y="320" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="llamaindex_worker" value="LlamaIndex&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="940" y="320" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="cassandra_upsert_worker" value="Cassandra Upsert&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="720" y="440" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph_upsert_worker" value="Graph Upsert&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="940" y="440" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="housekeeping_worker" value="Housekeeping&#xa;Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="440" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="cassandra_db" value="Cassandra&#xa;(Vectors/Table)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="720" y="560" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="neo4j_db" value="Neo4j Graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="940" y="560" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="openai_api" value="OpenAI API&#xa;(Embeddings)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="720" y="200" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="transfer_to_sentinel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="transfer_station" target="source_sentinel">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="beat_to_sentinel" value="schedule scan" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="celery_beat" target="source_sentinel">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sentinel_to_postgres" value="register job" style="edgeStyle=elbowEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="source_sentinel" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sentinel_to_rabbit" value="enqueue&#xa;(ingestion_engine queue)" style="edgeStyle=elbowEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;endArrow=block;" edge="1" parent="1" source="source_sentinel" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_ingestion" value="ingestion_engine queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="ingestion_engine">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingestion_to_postgres" value="stage updates" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="ingestion_engine" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingestion_to_rabbit" value="enqueue&#xa;(unstructured queue)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="ingestion_engine" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_unstructured" value="unstructured queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="unstructured_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="transfer_to_unstructured" value="read source" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="transfer_station" target="unstructured_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="unstructured_to_transfer" value="write artifacts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;endArrow=block;" edge="1" parent="1" source="unstructured_worker" target="transfer_station">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="unstructured_to_postgres" value="stage=STAGED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="unstructured_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="unstructured_to_rabbit" value="enqueue&#xa;(haystack queue)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;endArrow=block;" edge="1" parent="1" source="unstructured_worker" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_haystack" value="haystack queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="haystack_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="haystack_to_openai" value="request embeddings" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="haystack_worker" target="openai_api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="haystack_to_postgres" value="stage=UPSERTING" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="haystack_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="haystack_to_rabbit" value="enqueue&#xa;(cassandra_upsert queue)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="haystack_worker" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_cassandra_worker" value="cassandra_upsert queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="cassandra_upsert_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="cassandra_worker_to_db" value="write vectors" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cassandra_upsert_worker" target="cassandra_db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="cassandra_worker_to_postgres" value="stage=UPSERTING" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cassandra_upsert_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="cassandra_worker_to_rabbit" value="enqueue&#xa;(graph_upsert queue)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cassandra_upsert_worker" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_llamaindex" value="llamaindex queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="llamaindex_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="llamaindex_to_transfer" value="read artifacts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="llamaindex_worker" target="transfer_station">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="llamaindex_to_postgres" value="stage=VERIFYING" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="llamaindex_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_graph" value="graph_upsert queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="graph_upsert_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph_to_neo4j" value="merge nodes/edges" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="graph_upsert_worker" target="neo4j_db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph_to_postgres" value="stage=CLEANUP" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="graph_upsert_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph_to_rabbit" value="enqueue&#xa;(housekeeping queue)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="graph_upsert_worker" target="rabbitmq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rabbit_to_housekeeping" value="housekeeping queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="rabbitmq" target="housekeeping_worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="housekeeping_to_transfer" value="cleanup artifacts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="housekeeping_worker" target="transfer_station">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="housekeeping_to_postgres" value="stage=COMPLETED&#xa;/REMOVED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="housekeeping_worker" target="postgres">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

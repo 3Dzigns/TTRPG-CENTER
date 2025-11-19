@@ -1,0 +1,608 @@
+{
+  "name": "TTRPG Center \u2014 Ingestion Lane A (Gate0 + Pass A\u2013G)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ingest/laneA",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryData": false
+        }
+      },
+      "id": "Webhook_69f4add8",
+      "name": "Trigger: Ingest Lane A",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Validate minimal payload for Lane A ingestion.\n * Expected JSON:\n * {\n *   \"env\": \"dev|test|prod\",\n *   \"jobType\": \"selective|nightly|adhoc\",\n *   \"source\": {\n *     \"filePath\": \"/data/uploads/your.pdf\",\n *     \"filename\": \"your.pdf\",\n *     \"expectedSha256\": \"optional hex\",\n *     \"lane\": \"A\",\n *     \"system\": \"PF1E|PF2E|DND5E|...\",\n *     \"publisher\": \"optional\",\n *     \"title\": \"optional\"\n *   }\n * }\n */\nconst items = $input.all();\nreturn items.map(item => {\n  const j = item.json || {};\n  const src = j.source || {};\n  const env = (j.env || 'dev').toLowerCase();\n  if (!['dev','test','prod'].includes(env)) {\n    throw new Error('Invalid env. Use dev|test|prod');\n  }\n  if (!src.filePath) {\n    throw new Error('source.filePath is required and must be a mounted path inside n8n container.');\n  }\n  // Normalize job id\n  const jobId = j.jobId || (`${j.jobType || 'adhoc'}_${Date.now()}_${env}`);\n  return {\n    json: {\n      ...j,\n      env,\n      jobId,\n      source: {\n        lane: 'A',\n        ...src\n      }\n    }\n  };\n});"
+      },
+      "id": "Function_f57575d8",
+      "name": "Validate & Normalize Payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "UNSTRUCTURED_URL",
+              "value": "={{$env.UNSTRUCTURED_URL || ( $json.env === 'dev' ? 'http://unstructured-dev:8000' : ($json.env === 'test' ? 'http://unstructured-test:8000' : 'http://unstructured:8000') )}}"
+            },
+            {
+              "name": "CASSANDRA_API",
+              "value": "={{$env.CASSANDRA_API || ( $json.env === 'dev' ? 'http://stargate-dev:8082' : ($json.env === 'test' ? 'http://stargate-test:8082' : 'http://stargate:8082') )}}"
+            },
+            {
+              "name": "MONGO_API",
+              "value": "={{$env.MONGO_API || ( $json.env === 'dev' ? 'http://mongo-dev:8181' : ($json.env === 'test' ? 'http://mongo-test:8181' : 'http://mongo:8181') )}}"
+            },
+            {
+              "name": "NEO4J_API",
+              "value": "={{$env.NEO4J_API || ( $json.env === 'dev' ? 'http://stargate-dev:7474' : ($json.env === 'test' ? 'http://stargate-test:7474' : 'http://neo4j:7474') )}}"
+            },
+            {
+              "name": "HAYSTACK_API",
+              "value": "={{$env.HAYSTACK_API || ( $json.env === 'dev' ? 'http://haystack-dev:8001' : ($json.env === 'test' ? 'http://haystack-test:8001' : 'http://haystack:8001') )}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_66975e87",
+      "name": "Set Environment Endpoints",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -650,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "filePath": "={{$json.source.filePath}}",
+        "binaryPropertyName": "file",
+        "options": {}
+      },
+      "id": "ReadBinary_757ea27e",
+      "name": "Gate0: Read File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\nconst items = $input.all();\nreturn items.map(item => {\n  const bin = item.binary?.file;\n  if (!bin) {\n    throw new Error('Binary not loaded on property \"file\".');\n  }\n  const buffer = Buffer.from(bin.data, bin.encoding || 'base64');\n  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');\n  const expected = (item.json.source.expectedSha256 || '').toLowerCase().trim();\n  const verified = expected ? (sha256.toLowerCase() === expected) : null;\n  return {\n    json: {\n      ...item.json,\n      gate0: {\n        sha256,\n        expectedSha256: expected || null,\n        verified\n      }\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "id": "Function_f8c6f8b5",
+      "name": "Gate0: Compute SHA-256",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -150,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Placeholder for a pre-existing chunk registry.\n * For now, just attach 'chunkCountKnown': false.\n * You can later call your registry DB and compare counts.\n */\nconst items = $input.all();\nreturn items.map(item => ({\n  json: {\n    ...item.json,\n    gate0: {\n      ...item.json.gate0,\n      chunkCountKnown: false,\n      chunkCountMatches: null\n    }\n  },\n  binary: item.binary\n}));"
+      },
+      "id": "Function_3c2374c1",
+      "name": "Gate0: Chunk Registry Check (stub)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.UNSTRUCTURED_URL}}/process/pdf",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": true,
+        "binaryPropertyName": "file",
+        "optionsBinary": {},
+        "bodyParametersJson": "={\"strategy\":\"toc_pages\",\"max_pages\":8,\"return_format\":\"elements\"}",
+        "authentication": "none",
+        "method": "POST"
+      },
+      "id": "HTTPRequest_1f4b6dd6",
+      "name": "Pass A: Extract TOC (Unstructured)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        350,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Build logical chunks using TOC hints and page windowing (20-30 pages per chunk).\n * Input: Pass A elements\n * Output: array of chunk descriptors [{startPage, endPage, label}, ...]\n */\nfunction buildChunksFromTOC(elements) {\n  const MAX_PAGES = 30;\n  const MIN_PAGES = 20;\n  // Extract page breaks from elements that look like headings with page_number\n  const tocPages = [];\n  for (const el of (elements || [])) {\n    if (el && typeof el === 'object' && (el.type?.toLowerCase() || '').includes('title')) {\n      const p = el.metadata?.page_number;\n      if (Number.isInteger(p)) tocPages.push(p);\n    }\n  }\n  tocPages.sort((a,b)=>a-b);\n  // Fallback if no TOC\n  if (tocPages.length === 0) {\n    return [{ startPage: 1, endPage: MAX_PAGES, label: 'chunk-1' }];\n  }\n  const chunks = [];\n  let currentStart = tocPages[0];\n  for (let i=1; i<tocPages.length; i++) {\n    const next = tocPages[i];\n    if ((next - currentStart) >= MIN_PAGES) {\n      const end = Math.min(currentStart + MAX_PAGES - 1, next-1);\n      chunks.push({ startPage: currentStart, endPage: end, label: `chunk-${chunks.length+1}` });\n      currentStart = next;\n    }\n  }\n  // tail\n  chunks.push({ startPage: currentStart, endPage: currentStart + MAX_PAGES - 1, label: `chunk-${chunks.length+1}` });\n  return chunks;\n}\n\nconst items = $input.all();\nreturn items.map(item => {\n  const elements = item.json?.data;\n  // httpRequest stores JSON under item.json when response is JSON\n  // In n8n, it can be item.json for JSON responses.\n  const chunks = buildChunksFromTOC(elements);\n  return {\n    json: {\n      ...item.json,\n      passA: { tocExtracted: true, elementCount: Array.isArray(elements)? elements.length : 0 },\n      passB: { chunks }\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "id": "Function_b5c9c93c",
+      "name": "Pass B: Logical Split (TOC + page windows)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        650,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1
+      },
+      "id": "SplitBatches_fbcec692",
+      "name": "For Each Chunk",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Prepare body for Unstructured extraction for the current chunk window.\n */\nconst items = $input.all();\nreturn items.map(item => {\n  const chunks = item.json.passB.chunks;\n  const idx = item.json._chunkIndex || 0;\n  const chunk = chunks[idx];\n  if (!chunk) {\n    return item; // no-op\n  }\n  return {\n    json: {\n      ...item.json,\n      currentChunk: chunk,\n      _chunkIndex: idx\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "id": "Function_35e6f25d",
+      "name": "Prepare Chunk Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.UNSTRUCTURED_URL}}/process/pdf",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": true,
+        "binaryPropertyName": "file",
+        "bodyParametersJson": "={{ { strategy: 'hi_res', ocr_languages: 'eng', return_format: 'elements', page_start: $json.currentChunk.startPage, page_end: $json.currentChunk.endPage } }}",
+        "authentication": "none",
+        "method": "POST"
+      },
+      "id": "HTTPRequest_19c92f83",
+      "name": "Pass C: Extract (Unstructured)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.HAYSTACK_API}}/index",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "jsonParameters": true,
+        "optionsJson": {},
+        "bodyParametersJson": "={{ { jobId: $json.jobId, env: $json.env, lane: 'A', source: $json.source, chunk: $json.currentChunk, elements: $json } }}",
+        "authentication": "none",
+        "method": "POST"
+      },
+      "id": "HTTPRequest_58d6f920",
+      "name": "Pass D: Vectorize & Upsert (Haystack\u2192Cassandra)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.MONGO_API}}/dictionary/upsert",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { jobId: $json.jobId, env: $json.env, source: $json.source, chunk: $json.currentChunk, elements: $json } }}",
+        "authentication": "none",
+        "method": "POST"
+      },
+      "id": "HTTPRequest_57ac58b7",
+      "name": "Pass E: Dictionary Upsert (Mongo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Assemble a partial manifest result for this chunk.\n * In a full system, this would merge into a job-level manifest document.\n */\nconst items = $input.all();\nreturn items.map(item => {\n  const now = new Date().toISOString();\n  return {\n    json: {\n      ...item.json,\n      passF: {\n        manifest: {\n          jobId: item.json.jobId,\n          env: item.json.env,\n          chunkLabel: item.json.currentChunk?.label,\n          sha256: item.json.gate0?.sha256,\n          timestamp: now\n        }\n      }\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "id": "Function_e7600adc",
+      "name": "Pass F: Finalize (Manifest partial)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.NEO4J_API}}/graph/upsert",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { jobId: $json.jobId, env: $json.env, source: $json.source, chunk: $json.currentChunk, manifest: $json.passF?.manifest } }}",
+        "authentication": "none",
+        "method": "POST"
+      },
+      "id": "HTTPRequest_ac268c8c",
+      "name": "Pass G: Graph Upsert (Neo4j)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Increment chunk index and decide to continue or finish.\n */\nconst items = $input.all();\nreturn items.map(item => {\n  const chunks = item.json.passB?.chunks || [];\n  const idx = (item.json._chunkIndex || 0) + 1;\n  const hasMore = idx < chunks.length;\n  return {\n    json: { ...item.json, _chunkIndex: idx, _hasMore: hasMore },\n    binary: item.binary\n  };\n});"
+      },
+      "id": "Function_080146f3",
+      "name": "Next Chunk?",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json._hasMore}}"
+            }
+          ]
+        }
+      },
+      "id": "IF_dc7ac06e",
+      "name": "More Chunks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Aggregate job-level summary at the end of all chunks.\n * In a full system, you would maintain an array of chunk results in static data.\n */\nconst items = $input.all();\nreturn items.map(item => {\n  return {\n    json: {\n      jobId: item.json.jobId,\n      env: item.json.env,\n      source: item.json.source,\n      gate0: item.json.gate0,\n      passA: item.json.passA,\n      chunkCount: (item.json.passB?.chunks || []).length,\n      status: 'completed'\n    }\n  };\n});"
+      },
+      "id": "Function_7c961a21",
+      "name": "Aggregate Job Result",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "responseBody": "={{$json}}",
+        "responseCode": 200
+      },
+      "id": "Respond_bb32d46a",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3080,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ErrorTrigger_7d023354",
+      "name": "On Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "/**\n * Shape error for logging/observability.\n */\nconst items = $input.all();\nreturn items.map(item => {\n  const e = item.json;\n  return {\n    json: {\n      error: {\n        message: e.message,\n        stack: e.stack,\n        node: e.node?.name,\n        time: new Date().toISOString()\n      }\n    }\n  };\n});"
+      },
+      "id": "Function_cacfd0a5",
+      "name": "Format Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "responseBody": "={{$json}}",
+        "responseCode": 500
+      },
+      "id": "Respond_58263edb",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Trigger: Ingest Lane A": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "Set Environment Endpoints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Environment Endpoints": {
+      "main": [
+        [
+          {
+            "node": "Gate0: Read File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate0: Read File": {
+      "main": [
+        [
+          {
+            "node": "Gate0: Compute SHA-256",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate0: Compute SHA-256": {
+      "main": [
+        [
+          {
+            "node": "Gate0: Chunk Registry Check (stub)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate0: Chunk Registry Check (stub)": {
+      "main": [
+        [
+          {
+            "node": "Pass A: Extract TOC (Unstructured)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass A: Extract TOC (Unstructured)": {
+      "main": [
+        [
+          {
+            "node": "Pass B: Logical Split (TOC + page windows)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass B: Logical Split (TOC + page windows)": {
+      "main": [
+        [
+          {
+            "node": "For Each Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "For Each Chunk": {
+      "main": [
+        [
+          {
+            "node": "Prepare Chunk Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Job Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Chunk Context": {
+      "main": [
+        [
+          {
+            "node": "Pass C: Extract (Unstructured)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass C: Extract (Unstructured)": {
+      "main": [
+        [
+          {
+            "node": "Pass D: Vectorize & Upsert (Haystack\u2192Cassandra)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass D: Vectorize & Upsert (Haystack\u2192Cassandra)": {
+      "main": [
+        [
+          {
+            "node": "Pass E: Dictionary Upsert (Mongo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass E: Dictionary Upsert (Mongo)": {
+      "main": [
+        [
+          {
+            "node": "Pass F: Finalize (Manifest partial)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass F: Finalize (Manifest partial)": {
+      "main": [
+        [
+          {
+            "node": "Pass G: Graph Upsert (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass G: Graph Upsert (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Next Chunk?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Chunk?": {
+      "main": [
+        [
+          {
+            "node": "For Each Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Job Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Job Result": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Error": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true
+  },
+  "staticData": null,
+  "id": "ttrpg_center_ingestion_laneA"
+}
