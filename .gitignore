@@ -6,6 +6,9 @@
 
 # Node.js dependencies
 node_modules/
+.next/
+.nuxt/
+package-lock.json
 
 # Python
 __pycache__/
@@ -56,6 +59,10 @@ tmp/
 nul
 temp.txt
 temp_*.json
+*.backup
+*_backup.yml
+*_backup.yaml
+docker-stack*.yml
 
 # Docker volumes (if locally mounted)
 data/
