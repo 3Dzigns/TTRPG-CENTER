@@ -1,0 +1,287 @@
+{
+  "name": "TTRPG Vector Search with CassIO (Cassandra 5)",
+  "description": "Demo flow using CassIO to connect to Cassandra 5 native vector storage with ANN search and metadata filtering",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "cassandra_connection",
+      "type": "CassandraVectorStore",
+      "data": {
+        "label": "Cassandra Vector Store (CassIO)",
+        "name": "CassandraVectorStore",
+        "description": "Connect to Cassandra 5 with native vector<float, 1536> support",
+        "template": {
+          "contact_points": {
+            "value": ["n8n_TTRPG_cassandra"],
+            "description": "Cassandra contact points (hostnames or IPs)"
+          },
+          "port": {
+            "value": 9042,
+            "description": "Cassandra CQL port"
+          },
+          "keyspace": {
+            "value": "ttrpg_vectors",
+            "description": "Keyspace containing embeddings table"
+          },
+          "table_name": {
+            "value": "embeddings",
+            "description": "Table with vector<float, 1536> column"
+          },
+          "vector_dimension": {
+            "value": 1536,
+            "description": "OpenAI text-embedding-3-small dimension"
+          },
+          "embedding": {
+            "connected_node": "openai_embeddings",
+            "description": "Embedding model for query vectors"
+          }
+        }
+      },
+      "position": {
+        "x": 400,
+        "y": 200
+      }
+    },
+    {
+      "id": "openai_embeddings",
+      "type": "OpenAIEmbeddings",
+      "data": {
+        "label": "OpenAI Embeddings",
+        "name": "OpenAIEmbeddings",
+        "description": "Generate query embeddings using text-embedding-3-small",
+        "template": {
+          "model": {
+            "value": "text-embedding-3-small",
+            "description": "OpenAI embedding model (1536 dimensions)"
+          },
+          "dimensions": {
+            "value": 1536,
+            "description": "Output dimension (matches Cassandra vector type)"
+          },
+          "openai_api_key": {
+            "value": "${OPENAI_API_KEY}",
+            "description": "OpenAI API key from environment"
+          }
+        }
+      },
+      "position": {
+        "x": 200,
+        "y": 100
+      }
+    },
+    {
+      "id": "vector_search",
+      "type": "VectorStoreRetriever",
+      "data": {
+        "label": "ANN Vector Search",
+        "name": "VectorStoreRetriever",
+        "description": "Perform ANN search with cosine similarity",
+        "template": {
+          "vector_store": {
+            "connected_node": "cassandra_connection",
+            "description": "Cassandra vector store"
+          },
+          "search_type": {
+            "value": "similarity",
+            "options": ["similarity", "mmr"],
+            "description": "Search algorithm (use similarity for ANN)"
+          },
+          "k": {
+            "value": 5,
+            "description": "Number of results to return (top_k)"
+          },
+          "score_threshold": {
+            "value": 0.7,
+            "description": "Minimum cosine similarity score (0.0-1.0)"
+          }
+        }
+      },
+      "position": {
+        "x": 600,
+        "y": 200
+      }
+    },
+    {
+      "id": "metadata_filter",
+      "type": "MetadataFilter",
+      "data": {
+        "label": "Metadata Filters",
+        "name": "MetadataFilter",
+        "description": "Filter by game system, source, or tags",
+        "template": {
+          "filters": {
+            "value": {
+              "system": "D&D 5e",
+              "source": "Player's Handbook"
+            },
+            "description": "Metadata filters (system, source, section, tags)"
+          },
+          "filter_type": {
+            "value": "and",
+            "options": ["and", "or"],
+            "description": "Combine filters with AND or OR"
+          }
+        }
+      },
+      "position": {
+        "x": 400,
+        "y": 350
+      }
+    },
+    {
+      "id": "query_input",
+      "type": "TextInput",
+      "data": {
+        "label": "Search Query",
+        "name": "TextInput",
+        "description": "Enter your search query",
+        "template": {
+          "value": {
+            "value": "What spells deal fire damage?",
+            "description": "Natural language query for vector search"
+          }
+        }
+      },
+      "position": {
+        "x": 200,
+        "y": 300
+      }
+    },
+    {
+      "id": "output",
+      "type": "TextOutput",
+      "data": {
+        "label": "Search Results",
+        "name": "TextOutput",
+        "description": "Display retrieved documents with scores",
+        "template": {
+          "input": {
+            "connected_node": "vector_search",
+            "description": "Search results from ANN query"
+          }
+        }
+      },
+      "position": {
+        "x": 800,
+        "y": 200
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "openai_embeddings",
+      "target": "cassandra_connection",
+      "sourceHandle": "embedding",
+      "targetHandle": "embedding"
+    },
+    {
+      "source": "cassandra_connection",
+      "target": "vector_search",
+      "sourceHandle": "vector_store",
+      "targetHandle": "vector_store"
+    },
+    {
+      "source": "metadata_filter",
+      "target": "vector_search",
+      "sourceHandle": "filters",
+      "targetHandle": "filters"
+    },
+    {
+      "source": "query_input",
+      "target": "vector_search",
+      "sourceHandle": "text",
+      "targetHandle": "query"
+    },
+    {
+      "source": "vector_search",
+      "target": "output",
+      "sourceHandle": "results",
+      "targetHandle": "input"
+    }
+  ],
+  "metadata": {
+    "author": "n8n TTRPG Center",
+    "tags": ["cassandra", "vector-search", "ttrpg", "cassio", "ann"],
+    "cassandra_version": "5.0",
+    "vector_type": "vector<float, 1536>",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "usage_notes": {
+    "setup": [
+      "1. Ensure Cassandra 5 container is running with ttrpg_vectors keyspace",
+      "2. Run cql/01_vectors_schema.cql to create schema if not exists",
+      "3. Set OPENAI_API_KEY environment variable in LangFlow container",
+      "4. Ingest test data using pass_d_hayhooks.py or smoke test"
+    ],
+    "configuration": {
+      "cassandra_connection": {
+        "contact_points": "Update to match your Cassandra host",
+        "keyspace": "Must match ingestion keyspace (default: ttrpg_vectors)",
+        "table_name": "Must be 'embeddings' per schema"
+      },
+      "metadata_filter": {
+        "system": "Filter by game system (e.g., 'D&D 5e', 'Pathfinder 2e')",
+        "source": "Filter by source book (e.g., 'Player's Handbook')",
+        "section": "Filter by document section (e.g., 'Chapter 11: Spells')",
+        "tags": "Filter by tags (e.g., 'spell', 'monster', 'magic-item')"
+      }
+    },
+    "example_queries": [
+      {
+        "query": "What spells deal fire damage?",
+        "filters": {"system": "D&D 5e", "tags": "spell"},
+        "expected": "Fireball, Flame Strike, etc."
+      },
+      {
+        "query": "How do rogues use stealth?",
+        "filters": {"system": "D&D 5e", "section": "Classes"},
+        "expected": "Rogue class features and abilities"
+      },
+      {
+        "query": "Tell me about dragons",
+        "filters": {"source": "Monster Manual"},
+        "expected": "Dragon stat blocks and lore"
+      }
+    ],
+    "testing": {
+      "verify_connection": "Test connection to Cassandra before querying",
+      "check_embeddings": "Verify embeddings exist with: SELECT COUNT(*) FROM ttrpg_vectors.embeddings;",
+      "test_ann": "Run smoke_vector_ingest_and_search.py for end-to-end validation"
+    },
+    "performance": {
+      "ann_search": "SAI ANN index provides approximate results, fast for large datasets",
+      "cosine_similarity": "Scores range from -1.0 to 1.0, higher is more similar",
+      "top_k": "Increase k for more results, but slower queries",
+      "filters": "SAI indexes enable efficient metadata filtering without ALLOW FILTERING"
+    }
+  },
+  "cassio_configuration": {
+    "description": "CassIO is the Python library for Cassandra vector operations",
+    "installation": "pip install cassio ragstack-ai-cassio",
+    "connection_pattern": {
+      "code": "from cassio.config import check_resolve_session\nfrom cassio.table import MetadataVectorCassandraTable\n\n# Initialize CassIO session\nsession = check_resolve_session()\n\n# Create table reference\ntable = MetadataVectorCassandraTable(\n    session=session,\n    keyspace='ttrpg_vectors',\n    table='embeddings',\n    vector_dimension=1536,\n    primary_key_type=['TEXT', 'TEXT', 'INT']  # document_id, element_id, chunk_index\n)"
+    },
+    "search_pattern": {
+      "code": "# Perform ANN search with metadata filters\nresults = table.metric_ann_search(\n    vector=query_embedding,\n    n=5,\n    metric='cosine',\n    metadata={'system': 'D&D 5e', 'tags': 'spell'}\n)\n\nfor result in results:\n    print(f\"Score: {result['score']:.4f}\")\n    print(f\"Text: {result['text']}\")\n    print(f\"Metadata: {result['metadata']}\")"
+    }
+  },
+  "alternative_n8n_integration": {
+    "description": "Use FastAPI search service for n8n webhook integration",
+    "endpoint": "POST http://n8n_TTRPG_ingestion_engine:8000/search",
+    "request_body": {
+      "vector": "[0.123, -0.456, ...]  // 1536 floats",
+      "top_k": 5,
+      "system": "D&D 5e",
+      "source": "Player's Handbook",
+      "tag": "spell"
+    },
+    "n8n_http_node": {
+      "method": "POST",
+      "url": "http://n8n_TTRPG_ingestion_engine:8000/search",
+      "body": "{{ $json }}",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    }
+  }
+}
