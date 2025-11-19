@@ -44,10 +44,10 @@ FROM base AS deps-fetcher
 # Copy only dependency manifests for maximum cache efficiency
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 
-# Fetch all dependencies (creates pnpm virtual store)
+# Fetch all dependencies including devDependencies (creates pnpm virtual store)
 # This layer is cached unless lock file changes
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm fetch --prod
+    pnpm fetch
 
 
 # ==============================================
@@ -55,16 +55,23 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 # ==============================================
 FROM deps-fetcher AS deps
 
-# Copy package.json files for workspace resolution
+# Copy package.json files and source files for workspace linking
+# pnpm needs actual source files to create proper workspace symlinks
+COPY tsconfig*.json ./
 COPY apps/web/package.json ./apps/web/package.json
-COPY packages/api/package.json ./packages/api/package.json
-COPY packages/types/package.json ./packages/types/package.json
-COPY packages/ui/package.json ./packages/ui/package.json
-COPY packages/config/package.json ./packages/config/package.json
+COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
+COPY packages/api/src ./packages/api/src
+COPY packages/types/package.json packages/types/tsconfig.json ./packages/types/
+COPY packages/types/src ./packages/types/src
+COPY packages/ui/package.json packages/ui/tsconfig.json ./packages/ui/
+COPY packages/ui/src ./packages/ui/src
+COPY packages/config/package.json packages/config/tsconfig.json packages/config/tsconfig.base.json ./packages/config/
+COPY packages/config/*.ts ./packages/config/
 
 # Install dependencies using fetched packages (offline mode)
+# Note: Using --no-frozen-lockfile due to Windows absolute path in lockfile
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --prefer-offline
+    pnpm install --no-frozen-lockfile --prefer-offline
 
 
 # ==============================================
@@ -72,19 +79,19 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 # ==============================================
 FROM deps AS builder
 
-# Copy TypeScript config
-COPY tsconfig*.json ./
+# Copy TypeScript config and linter configs
 COPY eslint.config.mjs prettier.config.mjs ./
 
-# Copy all source code
-COPY apps ./apps
-COPY packages ./packages
+# Copy web app source code
+# .dockerignore excludes node_modules, so workspace symlinks from deps stage are preserved
+COPY apps/web ./apps/web
 
 # Disable Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build packages in dependency order
-# types → config → ui & api (parallel) → web
+# Packages types/config/ui/api are already available through workspace symlinks
+# Just build the web app
 RUN echo "Building @ttrpg-center/types..." && \
     pnpm --filter @ttrpg-center/types build && \
     echo "Building @ttrpg-center/config..." && \
