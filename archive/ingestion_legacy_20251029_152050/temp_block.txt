@@ -1,0 +1,41 @@
+                return False
+
+            # ═══════════════════════════════════════════════════
+            # STEP 5: Pass B Splitter (Manifest Creation)
+            # ═══════════════════════════════════════════════════
+            manifest_file = self._run_pass_b_splitter(file_path, metadata_file, state)
+            if not manifest_file:
+                return False
+
+            # ═══════════════════════════════════════════════════
+            # STEP 6: Pass B Chunker (Document Chunking)
+            # ═══════════════════════════════════════════════════
+            if not self._run_pass_b_chunker(file_path, manifest_file, state):
+                return False
+
+            # ═══════════════════════════════════════════════════
+            # STEP 7: Pass C Parsing (Unstructured on chunks)
+            # ═══════════════════════════════════════════════════
+            if not self._run_pass_c_parsing(manifest_file, state):
+                return False
+
+            # ═══════════════════════════════════════════════════
+            # STEP 8: MongoDB Upsert
+            # ═══════════════════════════════════════════════════
+            success = self._run_pass_a_mongo_upsert(elements_file, metadata_file, state)
+            if not success:
+                return False
+
+            # Mark as completed
+            state['status'] = 'completed'
+            state['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+            self._save_state(state)
+
+            self.logger.info(f"State saved: {self._get_state_file(state['document_id']).name}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error processing {file_path.name}: {e}", exc_info=True)
+            return False
+
+    # ═══════════════════════════════════════════════════════════════════════════

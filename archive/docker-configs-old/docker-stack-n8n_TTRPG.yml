@@ -1,0 +1,665 @@
+# docker-stack-n8n_TTRPG.yml
+# Docker Swarm Stack Configuration for n8n TTRPG Center
+#
+# Features:
+# - Docker Secrets integration for sensitive credentials
+# - PostgreSQL for user authentication
+# - Overlay network for encrypted multi-host communication
+# - Service placement constraints and resource limits
+# - Automated rollback and update configurations
+# - Health checks and restart policies
+#
+# Usage:
+#   1. Initialize Docker Swarm: docker swarm init
+#   2. Create secrets: cd secrets && ./create_secrets.sh
+#   3. Deploy stack: docker stack deploy -c docker-stack-n8n_TTRPG.yml ttrpg
+#   4. Monitor: docker service ls
+#   5. Scale: docker service scale ttrpg_ingestion_engine=3
+#   6. Remove: docker stack rm ttrpg
+
+version: '3.8'
+
+services:
+  # ============================================================
+  # Core Workflow Orchestration
+  # ============================================================
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "9000:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_HOST=localhost
+      - GENERIC_TIMEZONE=America/Chicago
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/n8n_inbound
+      - PROCESSING_DIR=/Transfer_Station/n8n_processing
+    volumes:
+      - n8n_TTRPG_n8n_data:/home/node/.n8n
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+
+  # ============================================================
+  # Web Application - Next.js Frontend
+  # ============================================================
+
+  webui:
+    image: ttrpg-webui:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - NEXT_TELEMETRY_DISABLED=1
+      - API_BASE_URL=http://n8n:5678
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:9000
+      - MONGODB_URI=mongodb://mongodb:27017/ttrpg
+      - NEO4J_URI=bolt://neo4j:7687
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+      - STARGATE_URL=http://stargate:8082
+      - LANGFLOW_URL=http://langflow:7860
+      - HAYHOOKS_URL=http://hayhooks:8000
+      - UNSTRUCTURED_URL=http://unstructured:8000
+      - TZ=America/Chicago
+    command:
+      - /bin/sh
+      - -lc
+      - |
+          if [ -f /run/secrets/openai_api_key ]; then
+            export OPENAI_API_KEY="$$(cat /run/secrets/openai_api_key)"
+          fi
+          if [ -f /run/secrets/neo4j_user ]; then
+            export NEO4J_USER="$$(cat /run/secrets/neo4j_user)"
+          fi
+          if [ -f /run/secrets/neo4j_password ]; then
+            export NEO4J_PASSWORD="$$(cat /run/secrets/neo4j_password)"
+          fi
+          exec node apps/web/server.js
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1);}).on('error', () => process.exit(1));"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    secrets:
+      - source: openai_api_key
+        target: openai_api_key
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: neo4j_user
+        target: neo4j_user
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+      - source: neo4j_password
+        target: neo4j_password
+        uid: "1001"
+        gid: "1001"
+        mode: 0400
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # ============================================================
+  # Document Storage - MongoDB
+  # ============================================================
+
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "9002:27017"
+    environment:
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/mongodb_inbound
+      - PROCESSING_DIR=/Transfer_Station/mongodb_processing
+    volumes:
+      - n8n_TTRPG_mongo_data:/data/db
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ============================================================
+  # Vector Database - Cassandra + Stargate
+  # ============================================================
+
+  cassandra:
+    image: cassandra:4.0
+    ports:
+      - "9001:9042"
+    environment:
+      - HEAP_NEWSIZE=256M
+      - MAX_HEAP_SIZE=1G
+      - CASSANDRA_CLUSTER_NAME=TTRPG_Cluster
+      - CASSANDRA_SEEDS=cassandra
+      - CASSANDRA_START_RPC=true
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/cassandra_inbound
+      - PROCESSING_DIR=/Transfer_Station/cassandra_processing
+    volumes:
+      - n8n_TTRPG_cassandra_data:/var/lib/cassandra
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nodetool status | grep -q 'UN'"]
+      interval: 40s
+      timeout: 15s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  stargate:
+    image: stargateio/stargate-4_0:v1.0.90
+    ports:
+      - "9004:8082"
+      - "9008:8081"
+      - "9011:8080"
+      - "9012:8084"
+    environment:
+      - CLUSTER_NAME=TTRPG_Cluster
+      - CLUSTER_VERSION=4.0
+      - SEED=cassandra
+      - SIMPLE_SNITCH=true
+      - ENABLE_AUTH=true
+      - JAVA_OPTS=-Xms512M -Xmx512M
+      - RING_DELAY=30000
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/stargate_inbound
+      - PROCESSING_DIR=/Transfer_Station/stargate_processing
+    volumes:
+      - n8n_TTRPG_stargate_data:/var/lib/stargate
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/checker/readiness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # Graph Database - Neo4j (with Docker Secrets)
+  # ============================================================
+
+  neo4j:
+    image: neo4j:5.24.2
+    ports:
+      - "9003:7474"
+      - "9005:7687"
+    environment:
+      - NEO4J_USER=neo4j
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1g
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/neo4j_inbound
+      - PROCESSING_DIR=/Transfer_Station/neo4j_processing
+    command:
+      - /bin/bash
+      - -lc
+      - |
+          NEO4J_USER_VALUE="$${NEO4J_USER:-$$(cat /run/secrets/neo4j_user 2>/dev/null || echo neo4j)}"
+          NEO4J_PASSWORD_VALUE="$$(cat /run/secrets/neo4j_password 2>/dev/null)"
+          if [ -z "$${NEO4J_PASSWORD_VALUE}" ]; then
+            echo "Neo4j password secret missing at /run/secrets/neo4j_password" >&2
+            exit 1
+          fi
+          export NEO4J_AUTH="$${NEO4J_USER_VALUE}/$${NEO4J_PASSWORD_VALUE}"
+          exec neo4j
+    volumes:
+      - n8n_TTRPG_neo4j_data:/data
+      - n8n_TTRPG_neo4j_logs:/logs
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    secrets:
+      - source: neo4j_user
+        target: neo4j_user
+        uid: "7474"
+        gid: "7474"
+        mode: 0400
+      - source: neo4j_password
+        target: neo4j_password
+        uid: "7474"
+        gid: "7474"
+        mode: 0400
+    healthcheck:
+      test: ["CMD", "bash", "-c", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ============================================================
+  # Authentication Database - PostgreSQL (with Docker Secrets)
+  # ============================================================
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER_FILE=/run/secrets/postgres_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB_FILE=/run/secrets/postgres_db
+      - TZ=America/Chicago
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - n8n_TTRPG_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - postgres_user
+      - postgres_password
+      - postgres_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # Document Processing Services
+  # ============================================================
+
+  unstructured:
+    image: n8n_ttrpg_unstructured:latest
+    ports:
+      - "9006:8000"
+    environment:
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/unstructured_inbound
+      - PROCESSING_DIR=/Transfer_Station/unstructured_processing
+      - UNSTRUCTURED_JOBS_DIR=/Transfer_Station/jobs/unstructured
+      - UNSTRUCTURED_LOG_DIR=/Transfer_Station/Logs/unstructured
+      - UNSTRUCTURED_USE_LOCAL_PIPELINE=1
+    volumes:
+      - n8n_TTRPG_unstructured_data:/app/data
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/unstructured-healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  hayhooks:
+    image: deepset/hayhooks:v0.4.0
+    ports:
+      - "9007:8000"
+    environment:
+      - TZ=America/Chicago
+      - HAYHOOKS_HOST=0.0.0.0
+      - HAYHOOKS_PORT=8000
+      - HAYHOOKS_PIPELINES_DIR=/pipelines
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/hayhooks_inbound
+      - PROCESSING_DIR=/Transfer_Station/hayhooks_processing
+    volumes:
+      - n8n_TTRPG_hayhooks_data:/data
+      - n8n_TTRPG_pipelines:/pipelines
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -sf http://localhost:8000/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  langflow:
+    image: langflowai/langflow:latest
+    ports:
+      - "9010:7860"
+    environment:
+      - TZ=America/Chicago
+      - LANGFLOW_PATH=/app/projects
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/langflow_inbound
+      - PROCESSING_DIR=/Transfer_Station/langflow_processing
+    volumes:
+      - n8n_TTRPG_langflow_projects:/app/projects
+      - n8n_TTRPG_langflow_uploads:/app/uploads
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -fsS http://localhost:7860/health_check || curl -fsS http://localhost:7860/v1/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ============================================================
+  # Ingestion Engine (with Docker Secrets)
+  # ============================================================
+
+  ingestion_engine:
+    image: python:3.11-slim
+    ports:
+      - "9009:8000"
+    environment:
+      - TZ=America/Chicago
+      - PYTHONUNBUFFERED=1
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/ingestion_inbound
+      - PROCESSING_DIR=/Transfer_Station/ingestion_processing
+    volumes:
+      - n8n_TTRPG_ingestion_data:/app/data
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+      - type: bind
+        source: ./ingestion
+        target: /app/scripts
+        read_only: true
+    secrets:
+      - openai_api_key
+      - neo4j_user
+      - neo4j_password
+    working_dir: /app
+    command:
+      - "bash"
+      - "-c"
+      - "pip install --no-cache-dir -r /app/scripts/requirements.txt &&
+         chmod +x /app/scripts/doc_splitter.py &&
+         ln -sf /app/scripts/doc_splitter.py /usr/local/bin/doc_splitter &&
+         tail -f /dev/null"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # HGRN Service (GPU-enabled, with Docker Secrets)
+  # ============================================================
+
+  hgrn:
+    image: pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
+    ports:
+      - "9013:8000"
+    environment:
+      - TZ=America/Chicago
+      - PYTHONUNBUFFERED=1
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/hgrn_inbound
+      - PROCESSING_DIR=/Transfer_Station/hgrn_processing
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - n8n_TTRPG_hgrn_models:/app/models
+      - n8n_TTRPG_hgrn_cache:/root/.cache
+      - type: bind
+        source: E:/n8n_TTRPG_Transfer_Station
+        target: /Transfer_Station
+      - type: bind
+        source: ./hgrn
+        target: /app/hgrn
+        read_only: true
+    secrets:
+      - openai_api_key
+    working_dir: /app/hgrn
+    command:
+      - "bash"
+      - "-c"
+      - "pip install --no-cache-dir -r requirements.txt &&
+         python3 hgrn_server.py"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ttrpg_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.gpu == true
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        reservations:
+          generic_resources:
+            - discrete_resource_spec:
+                kind: 'NVIDIA-GPU'
+                value: 1
+        limits:
+          memory: 8G
+
+# ============================================================
+# Docker Secrets Configuration
+# ============================================================
+
+secrets:
+  openai_api_key:
+    external: true
+  neo4j_user:
+    external: true
+  neo4j_password:
+    external: true
+  postgres_user:
+    external: true
+  postgres_password:
+    external: true
+  postgres_db:
+    external: true
+
+# ============================================================
+# Named Volumes
+# ============================================================
+
+volumes:
+  n8n_TTRPG_n8n_data:
+  n8n_TTRPG_mongo_data:
+  n8n_TTRPG_cassandra_data:
+  n8n_TTRPG_stargate_data:
+  n8n_TTRPG_neo4j_data:
+  n8n_TTRPG_neo4j_logs:
+  n8n_TTRPG_postgres_data:
+  n8n_TTRPG_unstructured_data:
+  n8n_TTRPG_hayhooks_data:
+  n8n_TTRPG_pipelines:
+  n8n_TTRPG_langflow_projects:
+  n8n_TTRPG_langflow_uploads:
+  n8n_TTRPG_ingestion_data:
+  n8n_TTRPG_hgrn_models:
+  n8n_TTRPG_hgrn_cache:
+
+# ============================================================
+# Overlay Network (Encrypted Multi-Host Communication)
+# ============================================================
+
+networks:
+  ttrpg_overlay:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24

@@ -1,0 +1,141 @@
+{
+  "version": "2.0.0",
+  "description": "Centralized routing configuration for async ingestion pipeline",
+  "default_pipeline": [
+    {
+      "stage": "gate_0_hash",
+      "description": "Generate document_id and SHA-256 hash",
+      "worker": "gate_0_hash_worker",
+      "container": "ingestion_engine",
+      "next": "gate_0_validate",
+      "timeout_seconds": 30
+    },
+    {
+      "stage": "gate_0_validate",
+      "description": "Compare Gate 0 checksum with Cassandra",
+      "worker": "gate_0_validate_worker",
+      "container": "ingestion_engine",
+      "next": null,
+      "routing_rules": [
+        {
+          "condition": {"validation_status": "valid"},
+          "next": "complete",
+          "skip_stages": [
+            "doc_splitter", "pass_a_unstructured", "pass_a_metadata",
+            "pass_b_splitter", "pass_b_chunker", "pass_c_parsing",
+            "pass_c_metadata", "pass_d_hayhooks", "pass_d_checksum",
+            "pass_e_graph_builder", "pass_e_neo4j_upsert",
+            "pass_a_mongo_upsert"
+          ]
+        },
+        {
+          "condition": {"validation_status": "mismatch"},
+          "next": "doc_splitter",
+          "action": "cleanup_existing_data"
+        },
+        {
+          "condition": {"validation_status": "unprocessed"},
+          "next": "doc_splitter"
+        },
+        {
+          "condition": {"validation_status": "failed"},
+          "next": "failed",
+          "terminal": true
+        }
+      ],
+      "timeout_seconds": 60
+    },
+    {
+      "stage": "doc_splitter",
+      "description": "Extract TOC from pages 1-10",
+      "worker": "doc_splitter_worker",
+      "container": "ingestion_engine",
+      "next": "pass_a_unstructured",
+      "optional": true,
+      "skip_condition": {"UNSTRUCTURED_USE_TOC_SPLIT": false},
+      "timeout_seconds": 120
+    },
+    {
+      "stage": "pass_a_unstructured",
+      "description": "Async Pass A/B/C via Unstructured API",
+      "worker": "unstructured_job_worker",
+      "container": "unstructured",
+      "next": "pass_a_metadata",
+      "timeout_seconds": null,
+      "notes": "No timeout - long-running PDF processing"
+    },
+    {
+      "stage": "pass_a_metadata",
+      "description": "Extract metadata from Pass A elements",
+      "worker": "pass_a_metadata_worker",
+      "container": "ingestion_engine",
+      "next": "pass_a_mongo_upsert",
+      "timeout_seconds": 60
+    },
+    {
+      "stage": "pass_a_mongo_upsert",
+      "description": "Persist dictionary artifacts into Postgres",
+      "worker": "pass_a_mongo_upsert_worker",
+      "container": "ingestion_engine",
+      "next": "pass_d_hayhooks",
+      "timeout_seconds": 120
+    },
+    {
+      "stage": "pass_d_hayhooks",
+      "description": "Generate embeddings via Hayhooks",
+      "worker": "pass_d_hayhooks_worker",
+      "container": "hayhooks",
+      "next": "pass_d_checksum",
+      "timeout_seconds": null,
+      "notes": "No timeout - embedding generation can be slow"
+    },
+    {
+      "stage": "pass_d_checksum",
+      "description": "Record embedded chunk count for Gate 0",
+      "worker": "pass_d_checksum_worker",
+      "container": "ingestion_engine",
+      "next": "pass_e_graph_builder",
+      "timeout_seconds": 30
+    },
+    {
+      "stage": "pass_e_graph_builder",
+      "description": "Build knowledge graph artifacts",
+      "worker": "pass_e_graph_builder_worker",
+      "container": "ingestion_engine",
+      "next": "pass_e_neo4j_upsert",
+      "timeout_seconds": 300
+    },
+    {
+      "stage": "pass_e_neo4j_upsert",
+      "description": "Upsert graph data into Neo4j",
+      "worker": "pass_e_neo4j_upsert_worker",
+      "container": "ingestion_engine",
+      "next": "complete",
+      "timeout_seconds": 180
+    },
+    {
+      "stage": "complete",
+      "description": "Terminal success state",
+      "terminal": true
+    },
+    {
+      "stage": "failed",
+      "description": "Terminal failure state",
+      "terminal": true
+    }
+  ],
+  "special_jobs": {
+    "cleanup": {
+      "description": "Remove all artifacts for missing source file",
+      "worker": "cleanup_worker",
+      "container": "ingestion_engine",
+      "timeout_seconds": 300
+    }
+  },
+  "worker_config": {
+    "poll_interval_seconds": 5,
+    "heartbeat_interval_seconds": 30,
+    "max_job_retries": 3,
+    "retry_delay_seconds": 60
+  }
+}

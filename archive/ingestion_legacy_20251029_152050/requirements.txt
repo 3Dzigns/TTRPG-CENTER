@@ -1,0 +1,40 @@
+# Ingestion Engine Dependencies
+# For ingestion_engine container
+
+# PDF manipulation
+pypdf==3.17.0
+
+# Microsoft Word .docx files
+python-docx==1.1.0
+
+# HTTP requests for API calls
+requests==2.31.0
+
+# MongoDB database operations
+pymongo==4.6.0
+
+# Cassandra database operations
+cassandra-driver==3.28.0
+
+# Numerical computing (similarity calculations)
+numpy==1.26.0
+
+# Neo4j graph database operations
+neo4j==5.14.0
+
+# PostgreSQL database operations
+psycopg2-binary==2.9.9
+
+# OpenAI API client (Pass D - embeddings)
+# Upgraded to 1.50+ for httpx 0.28+ compatibility (fixes TypeError: proxies parameter)
+openai>=1.50.0,<2.0.0
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# FastAPI for vector search service (search/fastapi_cql_search.py)
+fastapi==0.109.0
+uvicorn==0.27.0
+pydantic==2.5.3
+
+# Pass F validator relies on pymongo, cassandra-driver, and neo4j (already listed above)

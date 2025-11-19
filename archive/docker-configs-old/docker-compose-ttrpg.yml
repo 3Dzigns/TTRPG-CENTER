@@ -1,0 +1,650 @@
+# ============================================================
+# TTRPG Center - Docker Compose Configuration (Windows)
+# ============================================================
+#
+# Production Docker Compose configuration for Windows/Docker Desktop
+# Converted from Swarm stack to support bind mounts on Windows
+#
+# Features:
+# - Full bind mount support for Transfer Station
+# - Environment variables for credentials (from .env file)
+# - PostgreSQL for authentication (RBAC ready)
+# - Optimized WebUI with Dockerfile.optimized
+# - Cassandra 5.0 with vector support
+# - GPU support for HGRN service
+# - Health checks and auto-restart
+# - Resource limits
+#
+# Prerequisites:
+#   1. Ensure .env file exists with credentials
+#   2. GPU drivers installed (for HGRN service)
+#   3. Transfer Station directory: E:/n8n_TTRPG_Transfer_Station
+#
+# Usage:
+#   docker compose -f docker-compose-ttrpg.yml up -d
+#   docker compose -f docker-compose-ttrpg.yml down
+#   docker compose -f docker-compose-ttrpg.yml logs -f <service>
+#
+# ============================================================
+
+version: '3.8'
+
+services:
+
+  # ============================================================
+  # Core Workflow Orchestration - n8n
+  # ============================================================
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: ttrpg_n8n
+    ports:
+      - "9000:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_HOST=localhost
+      - GENERIC_TIMEZONE=America/Chicago
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/n8n_inbound
+      - PROCESSING_DIR=/Transfer_Station/n8n_processing
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Web Application - Next.js Frontend (Optimized)
+  # ============================================================
+
+  webui:
+    image: ttrpg-webui:latest
+    container_name: ttrpg_webui
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - NEXT_TELEMETRY_DISABLED=1
+
+      # Credentials from .env
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+
+      # API URLs
+      - API_BASE_URL=http://n8n:5678
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:9000
+
+      # Database URLs
+      - MONGODB_URI=mongodb://mongodb:27017/ttrpg
+      - NEO4J_URI=bolt://neo4j:7687
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+
+      # Service URLs
+      - STARGATE_URL=http://stargate:8082
+      - LANGFLOW_URL=http://langflow:7860
+      - HAYHOOKS_URL=http://hayhooks:8000
+      - UNSTRUCTURED_URL=http://ttrpg_unstructured:8000
+
+      - TZ=America/Chicago
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1);}).on('error', () => process.exit(1));"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 256m
+    networks:
+      - ttrpg_network
+    depends_on:
+      - neo4j
+      - mongodb
+      - cassandra
+
+  # ============================================================
+  # Authentication Database - PostgreSQL
+  # ============================================================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ttrpg_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - TZ=America/Chicago
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 512m
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Document Storage - MongoDB (with pass_a_mongo_upsert worker)
+  # ============================================================
+
+  mongodb:
+    build:
+      context: .
+      dockerfile: docker/mongodb_worker/Dockerfile
+    image: n8n_ttrpg_mongodb:latest
+    container_name: ttrpg_mongodb
+    ports:
+      - "9002:27017"
+    environment:
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - mongo_data:/data/db
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "mongosh --eval 'db.adminCommand(\"ping\")' && supervisorctl status pass_a_mongo_upsert | grep -q RUNNING"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Vector Database - Cassandra 5.0 (with pass_d_checksum worker)
+  # ============================================================
+
+  cassandra:
+    build:
+      context: .
+      dockerfile: docker/cassandra_worker/Dockerfile
+    image: n8n_ttrpg_cassandra:latest
+    container_name: ttrpg_cassandra
+    ports:
+      - "9001:9042"
+    environment:
+      - HEAP_NEWSIZE=256M
+      - MAX_HEAP_SIZE=1G
+      - CASSANDRA_CLUSTER_NAME=TTRPG_Cluster
+      - CASSANDRA_SEEDS=cassandra
+      - CASSANDRA_START_RPC=true
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cqlsh -e 'SELECT release_version FROM system.local' && supervisorctl status pass_d_checksum | grep -q RUNNING"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Stargate API Gateway for Cassandra
+  # ============================================================
+
+  stargate:
+    image: stargateio/stargate-4_0:v1.0.90
+    container_name: ttrpg_stargate
+    ports:
+      - "9004:8082"  # REST API
+      - "9008:8081"  # GraphQL
+      - "9011:8080"  # Bridge
+      - "9012:8084"  # Health
+    environment:
+      - CLUSTER_NAME=TTRPG_Cluster
+      - CLUSTER_VERSION=4.0
+      - SEED=cassandra
+      - SIMPLE_SNITCH=true
+      - ENABLE_AUTH=true
+      - JAVA_OPTS=-Xms512M -Xmx512M
+      - RING_DELAY=30000
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/stargate_inbound
+      - PROCESSING_DIR=/Transfer_Station/stargate_processing
+    volumes:
+      - stargate_data:/var/lib/stargate
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/checker/readiness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 512m
+    networks:
+      - ttrpg_network
+    depends_on:
+      - cassandra
+
+  # ============================================================
+  # Graph Database - Neo4j
+  # ============================================================
+
+  neo4j:
+    image: neo4j:5.24.2
+    container_name: ttrpg_neo4j
+    ports:
+      - "9003:7474"  # HTTP
+      - "9005:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1g
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/neo4j_inbound
+      - PROCESSING_DIR=/Transfer_Station/neo4j_processing
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Document Processing - Unstructured
+  # ============================================================
+
+  ttrpg_unstructured:
+    build:
+      context: .
+      dockerfile: docker/unstructured/Dockerfile.cli
+    image: n8n_ttrpg_unstructured:latest
+    container_name: ttrpg_unstructured
+    environment:
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    restart: "no"
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Haystack Pipelines - Hayhooks (with pass_d_hayhooks worker)
+  # ============================================================
+
+  hayhooks:
+    build:
+      context: .
+      dockerfile: docker/hayhooks_worker/Dockerfile
+    image: n8n_ttrpg_hayhooks:latest
+    container_name: ttrpg_hayhooks
+    ports:
+      - "9007:1416"
+    environment:
+      - TZ=America/Chicago
+      - TRANSFER_STATION=/Transfer_Station
+      - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - hayhooks_data:/data
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -f http://localhost:1416/status && supervisorctl status pass_d_hayhooks | grep -q RUNNING"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # LangFlow - Visual Pipeline Builder
+  # ============================================================
+
+  langflow:
+    image: langflowai/langflow:latest
+    container_name: ttrpg_langflow
+    ports:
+      - "9010:7860"
+    environment:
+      - TZ=America/Chicago
+      - LANGFLOW_PATH=/app/projects
+      - TRANSFER_STATION=/Transfer_Station
+      - INBOUND_DIR=/Transfer_Station/langflow_inbound
+      - PROCESSING_DIR=/Transfer_Station/langflow_processing
+    volumes:
+      - langflow_projects:/app/projects
+      - langflow_uploads:/app/uploads
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -fsS http://localhost:7860/health_check || curl -fsS http://localhost:7860/v1/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    networks:
+      - ttrpg_network
+
+  # ============================================================
+  # Ingestion Engine - Python Processing (8 workers with supervisor)
+  # ============================================================
+
+  ingestion_engine:
+    build:
+      context: .
+      dockerfile: docker/ingestion_engine/Dockerfile
+    image: n8n_ttrpg_ingestion_engine:latest
+    container_name: ttrpg_ingestion_engine
+    ports:
+      - "9009:8000"
+    environment:
+      - TZ=America/Chicago
+      - PYTHONUNBUFFERED=1
+      - TRANSFER_STATION=/Transfer_Station
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "supervisorctl status | grep -E '(gate_0_hash|gate_0_validate|doc_splitter|pass_a_metadata|gate_1_log_analyzer|gate_1_pipeline_optimizer|gate_1_cleanup):RUNNING' | wc -l | grep -q '7'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 512m
+    networks:
+      - ttrpg_network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  # ============================================================
+  # LlamaIndex - Graph Building & Knowledge Processing (2 workers with supervisor)
+  # ============================================================
+
+  llamaindex:
+    build:
+      context: .
+      dockerfile: docker/llamaindex/Dockerfile
+    image: n8n_ttrpg_llamaindex:latest
+    container_name: ttrpg_llamaindex
+    ports:
+      - "9014:8000"
+    environment:
+      - TZ=America/Chicago
+      - PYTHONUNBUFFERED=1
+      - TRANSFER_STATION=/Transfer_Station
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - MONGODB_URI=mongodb://mongodb:27017/ttrpg
+      - NEO4J_URI=bolt://neo4j:7687
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    healthcheck:
+      test: ["CMD", "bash", "-c", "supervisorctl status | grep -E '(pass_e_graph_builder|pass_e_neo4j_upsert):RUNNING' | wc -l | grep -q '2'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 4g
+    mem_reservation: 2g
+    networks:
+      - ttrpg_network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  # ============================================================
+  # HGRN Service - GPU-Accelerated Processing (2 workers with supervisor)
+  # ============================================================
+
+  # ============================================================
+  # MONITORING INFRASTRUCTURE
+  # ============================================================
+
+  # Prometheus - Time-series metrics database
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ttrpg_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    networks:
+      - ttrpg_network
+    mem_limit: 1g
+    mem_reservation: 512m
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ttrpg_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - ttrpg_network
+    mem_limit: 512m
+    mem_reservation: 256m
+
+  # Loki - Log aggregation system
+  loki:
+    image: grafana/loki:latest
+    container_name: ttrpg_loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - ttrpg_network
+    mem_limit: 1g
+    mem_reservation: 512m
+
+  # Promtail - Log shipper for Loki
+  promtail:
+    image: grafana/promtail:latest
+    container_name: ttrpg_promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/monitoring/loki/promtail-config.yml:/etc/promtail/config.yml:ro
+      - E:/n8n_TTRPG_Transfer_Station/Logs:/Transfer_Station/Logs:ro
+    depends_on:
+      - loki
+    networks:
+      - ttrpg_network
+    mem_limit: 256m
+    mem_reservation: 128m
+
+  # Worker Exporter - Prometheus exporter for worker metrics
+  worker-exporter:
+    build:
+      context: E:/n8n_TTRPG_Transfer_Station/monitoring/exporters
+      dockerfile: Dockerfile.worker-exporter
+    container_name: ttrpg_worker_exporter
+    restart: unless-stopped
+    ports:
+      - "9016:9016"
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/Logs:/Transfer_Station/Logs:ro
+    command: ["--port", "9016", "--interval", "15"]
+    networks:
+      - ttrpg_network
+    mem_limit: 256m
+    mem_reservation: 128m
+
+  # Job Queue Exporter - Prometheus exporter for job queue metrics
+  queue-exporter:
+    build:
+      context: E:/n8n_TTRPG_Transfer_Station/monitoring/exporters
+      dockerfile: Dockerfile.queue-exporter
+    container_name: ttrpg_queue_exporter
+    restart: unless-stopped
+    ports:
+      - "9017:9017"
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/jobs:/Transfer_Station/jobs:ro
+    command: ["--port", "9017", "--interval", "10"]
+    networks:
+      - ttrpg_network
+    mem_limit: 256m
+    mem_reservation: 128m
+
+  # Status API - REST API for pipeline monitoring
+  status-api:
+    build:
+      context: E:/n8n_TTRPG_Transfer_Station/monitoring/api
+      dockerfile: Dockerfile
+    container_name: ttrpg_status_api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - E:/n8n_TTRPG_Transfer_Station/Logs:/Transfer_Station/Logs:ro
+      - E:/n8n_TTRPG_Transfer_Station/jobs:/Transfer_Station/jobs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - ttrpg_network
+    mem_limit: 512m
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Database Exporter - Prometheus exporter for database metrics
+  database-exporter:
+    build:
+      context: E:/n8n_TTRPG_Transfer_Station/monitoring/exporters
+      dockerfile: Dockerfile.database-exporter
+    container_name: ttrpg_database_exporter
+    restart: unless-stopped
+    ports:
+      - "9018:9018"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--port", "9018", "--interval", "30"]
+    networks:
+      - ttrpg_network
+    mem_limit: 256m
+    mem_reservation: 128m
+
+
+# ============================================================
+# Named Volumes
+# ============================================================
+
+volumes:
+  n8n_data:
+  postgres_data:
+  mongo_data:
+  cassandra_data:
+  stargate_data:
+  neo4j_data:
+  neo4j_logs:
+  unstructured_data:
+  hayhooks_data:
+  langflow_projects:
+  langflow_uploads:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+# ============================================================
+# Bridge Network (Local Communication)
+# ============================================================
+
+networks:
+  ttrpg_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24
