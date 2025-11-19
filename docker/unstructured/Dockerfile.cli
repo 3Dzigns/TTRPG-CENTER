@@ -1,0 +1,13 @@
+FROM downloads.unstructured.io/unstructured-io/unstructured-api:latest
+
+WORKDIR /opt/unstructured-cli
+
+# Ensure CLI entrypoints and local inference dependencies are available
+RUN pip install --no-cache-dir \
+    "unstructured[local-inference]" \
+    "unstructured-ingest"
+
+# Copy the lightweight wrapper script into the image
+COPY scripts/unstructured_cli_runner.py /opt/unstructured-cli/unstructured_cli_runner.py
+
+ENTRYPOINT ["python3", "/opt/unstructured-cli/unstructured_cli_runner.py"]

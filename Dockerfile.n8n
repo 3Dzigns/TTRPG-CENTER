@@ -1,0 +1,23 @@
+# Dockerfile.n8n
+# Custom n8n build with community nodes baked in
+FROM n8nio/n8n:latest
+
+# Switch to root to install packages
+USER root
+WORKDIR /home/node/.n8n
+ENV NODE_ENV=production
+
+# You can change or override these during build
+ARG COMMUNITY_PACKAGES="@n8n/n8n-nodes-langchain n8n-nodes-text-manipulation"
+
+# Initialize a minimal package.json and install desired packages
+# Note: npm init fails in a dot-prefixed folder because it uses the folder name as the package name.
+# We override the name immediately after init.
+RUN npm init -y \
+ && npm pkg set name="n8n-community" \
+ && npm pkg set private=true \
+ && npm install --omit=dev --no-fund --no-audit $COMMUNITY_PACKAGES \
+ && chown -R node:node /home/node/.n8n
+
+# Return to node user
+USER node

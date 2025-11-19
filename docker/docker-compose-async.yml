@@ -1,0 +1,264 @@
+version: '3.8'
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ttrpg_rabbitmq
+    ports:
+    - 5672:5672
+    - 15672:15672
+    volumes:
+    - rabbitmq_data:/var/lib/rabbitmq
+    - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+  redis:
+    image: redis:7-alpine
+    container_name: ttrpg_redis
+    ports:
+    - 6379:6379
+    volumes:
+    - redis_data:/data
+  postgres:
+    image: postgres:15-alpine
+    container_name: ttrpg_postgres
+    environment:
+      POSTGRES_USER: ttrpg
+      POSTGRES_PASSWORD: ttrpg
+      POSTGRES_DB: ttrpg_ingestion
+    ports:
+    - 5432:5432
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./postgres-init:/docker-entrypoint-initdb.d
+  cassandra:
+    image: cassandra:5.0
+    container_name: ttrpg_cassandra
+    ports:
+    - 9042:9042
+    environment:
+      CASSANDRA_CLUSTER_NAME: ttrpg_cluster
+    volumes:
+    - cassandra_data:/var/lib/cassandra
+  neo4j:
+    image: neo4j:5-enterprise
+    container_name: ttrpg_neo4j
+    environment:
+      NEO4J_AUTH: neo4j/changeme
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+    ports:
+    - 7474:7474
+    - 7687:7687
+    volumes:
+    - neo4j_data:/data
+    - neo4j_logs:/logs
+  source_sentinel:
+    build:
+      context: ..
+      dockerfile: docker/workers/source_sentinel/Dockerfile
+    environment:
+      CELERY_QUEUE: source_sentinel
+      WORKER_HEALTH_PORT: '9100'
+    restart: unless-stopped
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    - postgres
+    ports:
+    - 9100:9100
+  unstructured_worker:
+    build:
+      context: ..
+      dockerfile: docker/workers/unstructured/Dockerfile
+    environment:
+      CELERY_QUEUE: unstructured
+      WORKER_HEALTH_PORT: '9101'
+      # Extended timeouts for hi_res OCR processing of large documents (600+ pages can take 12-24 hours)
+      TASK_SOFT_TIME_LIMIT: '82800'  # 23 hours - allows large documents to complete
+      TASK_HARD_TIME_LIMIT: '86400'  # 24 hours - absolute limit
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    ports:
+    - 9101:9101
+  ingestion_engine:
+    build:
+      context: ..
+      dockerfile: docker/workers/ingestion_engine/Dockerfile
+    environment:
+      CELERY_QUEUE: ingestion_engine
+      WORKER_HEALTH_PORT: '9102'
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    ports:
+    - 9102:9102
+  haystack:
+    build:
+      context: ..
+      dockerfile: docker/workers/haystack/Dockerfile
+    environment:
+      CELERY_QUEUE: haystack
+      WORKER_HEALTH_PORT: '9103'
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    ports:
+    - 9103:9103
+  cassandra_upsert:
+    build:
+      context: ..
+      dockerfile: docker/workers/cassandra_upsert/Dockerfile
+    environment:
+      CELERY_QUEUE: cassandra_upsert
+      WORKER_HEALTH_PORT: '9104'
+      CASSANDRA_USERNAME: cassandra
+      CASSANDRA_PASSWORD: cassandra
+      CELERY_OPTS: --pool=solo
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    - cassandra
+    ports:
+    - 9104:9104
+  llamaindex:
+    build:
+      context: ..
+      dockerfile: docker/workers/llamaindex/Dockerfile
+    environment:
+      CELERY_QUEUE: llamaindex,graph_upsert
+      WORKER_HEALTH_PORT: '9105'
+      CASSANDRA_USERNAME: cassandra
+      CASSANDRA_PASSWORD: cassandra
+      CELERY_OPTS: --pool=solo
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: changeme
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    - cassandra
+    ports:
+    - 9105:9105
+  housekeeping:
+    build:
+      context: ..
+      dockerfile: docker/workers/housekeeping/Dockerfile
+    environment:
+      CELERY_QUEUE: housekeeping,dlq
+      WORKER_HEALTH_PORT: '9106'
+      CASSANDRA_USERNAME: cassandra
+      CASSANDRA_PASSWORD: cassandra
+      CELERY_OPTS: --pool=solo
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    - postgres
+    ports:
+    - 9106:9106
+  celery_beat:
+    build:
+      context: ..
+      dockerfile: docker/workers/source_sentinel/Dockerfile
+    command:
+    - celery
+    - -A
+    - ingestion.celery_app
+    - beat
+    - -s
+    - /tmp/celerybeat-schedule
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    restart: unless-stopped
+    depends_on:
+    - rabbitmq
+    - redis
+    - postgres
+  health_verifier:
+    build:
+      context: ..
+      dockerfile: docker/workers/health_verifier/Dockerfile
+    environment:
+      CELERY_QUEUE: health_verifier
+      WORKER_HEALTH_PORT: '9107'
+      CASSANDRA_USERNAME: cassandra
+      CASSANDRA_PASSWORD: cassandra
+      CELERY_OPTS: --pool=solo
+    volumes:
+    - ../:/app
+    - E:/n8n_TTRPG_Transfer_Station:/Transfer_Station
+    depends_on:
+    - rabbitmq
+    - redis
+    - postgres
+    - cassandra
+    ports:
+    - 9107:9107
+  webui:
+    build:
+      context: ..
+      dockerfile: webui/Dockerfile
+      args:
+        AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:-postgres://ttrpg:ttrpg@postgres:5432/ttrpg_auth}
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api/v1}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+    container_name: ttrpg_webui
+    restart: unless-stopped
+    ports:
+    - 3000:3000
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      NEXT_TELEMETRY_DISABLED: '1'
+      HOSTNAME: 0.0.0.0
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000/api/v1}
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3000/api/v1}
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api/v1}
+      NEXT_PUBLIC_QUERY_EVENTS_PATH: ${NEXT_PUBLIC_QUERY_EVENTS_PATH:-/api/mock/events}
+      NEXT_PUBLIC_ADMIN_EVENTS_PATH: ${NEXT_PUBLIC_ADMIN_EVENTS_PATH:-/api/mock/events}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-tc_session}
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:-postgres://ttrpg:ttrpg@postgres:5432/ttrpg_auth}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TZ: ${TZ:-America/Chicago}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+    depends_on:
+    - rabbitmq
+    - redis
+    - postgres
+    - cassandra
+    - neo4j
+volumes:
+  rabbitmq_data: null
+  redis_data: null
+  postgres_data: null
+  cassandra_data: null
+  neo4j_data: null
+  neo4j_logs: null
